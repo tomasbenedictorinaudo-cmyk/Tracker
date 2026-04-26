@@ -1,0 +1,14 @@
+# macOS
+.DS_Store
+
+# Local Claude Code preview/launch config
+.claude/
+
+# Editor / OS
+*.swp
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*

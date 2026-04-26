@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Cockpit — Project Tracker</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app" class="app">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark"></div>
+        <div class="brand-name">Cockpit</div>
+      </div>
+
+      <nav class="nav">
+        <div class="nav-section">Workspace</div>
+        <button class="nav-item" data-view="portfolio">
+          <span class="nav-icon">▦</span><span>Portfolio</span>
+        </button>
+        <button class="nav-item" data-view="people">
+          <span class="nav-icon">◔</span><span>People</span>
+        </button>
+
+        <div class="nav-section">Project</div>
+        <button class="nav-item" data-view="board">
+          <span class="nav-icon">▤</span><span>Board</span>
+        </button>
+        <button class="nav-item" data-view="register">
+          <span class="nav-icon">≣</span><span>Register</span>
+        </button>
+        <button class="nav-item" data-view="timeline">
+          <span class="nav-icon">▬</span><span>Timeline</span>
+        </button>
+        <button class="nav-item" data-view="dashboard">
+          <span class="nav-icon">◰</span><span>Dashboard</span>
+        </button>
+        <button class="nav-item" data-view="charts">
+          <span class="nav-icon">◵</span><span>Charts</span>
+        </button>
+        <button class="nav-item" data-view="review">
+          <span class="nav-icon">▶</span><span>Review</span>
+        </button>
+
+        <div class="nav-section">Engineering</div>
+        <button class="nav-item" data-view="components">
+          <span class="nav-icon">▣</span><span>Components</span>
+        </button>
+        <button class="nav-item" data-view="deliverables">
+          <span class="nav-icon">◆</span><span>Deliverables</span>
+        </button>
+        <button class="nav-item" data-view="milestones">
+          <span class="nav-icon">◇</span><span>Milestones</span>
+        </button>
+        <button class="nav-item" data-view="risks">
+          <span class="nav-icon">△</span><span>Risks</span>
+        </button>
+        <button class="nav-item" data-view="decisions">
+          <span class="nav-icon">⬡</span><span>Decisions</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-foot">
+        <button class="ghost" id="btnImport" title="Import JSON">Import</button>
+        <button class="ghost" id="btnExport" title="Export JSON">Export</button>
+        <button class="icon-btn" id="btnReset" title="Reset to sample data">↺</button>
+        <button class="icon-btn" id="btnTheme" title="Toggle light / dark">◐</button>
+      </div>
+    </aside>
+
+    <header class="topbar">
+      <button class="icon-btn" id="btnSidebarToggle" title="Toggle sidebar">≡</button>
+
+      <div class="project-picker">
+        <select id="projectSelect" aria-label="Project"></select>
+        <button class="icon-btn" id="btnNewProject" title="New project">+</button>
+      </div>
+
+      <div class="search">
+        <input id="search" type="search" placeholder="Search actions, owners, tags…" />
+      </div>
+
+      <div class="filters" id="filters">
+        <select id="filterOwner"><option value="">All owners</option></select>
+        <select id="filterComponent"><option value="">All components</option></select>
+        <select id="filterStatus">
+          <option value="">All status</option>
+          <option value="todo">Not started</option>
+          <option value="doing">In progress</option>
+          <option value="blocked">Blocked</option>
+          <option value="done">Done</option>
+        </select>
+        <select id="filterDue">
+          <option value="">All dates</option>
+          <option value="late">Late</option>
+          <option value="week">This week</option>
+          <option value="month">This month</option>
+        </select>
+      </div>
+
+      <div class="topbar-actions">
+        <button class="icon-btn" id="btnUndo" title="Undo (Cmd/Ctrl+Z)">↶</button>
+        <button class="icon-btn" id="btnRedo" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
+        <button class="primary" id="btnQuickAdd" title="Quick add (Cmd/Ctrl+K)">+ Quick add</button>
+      </div>
+    </header>
+
+    <main class="main" id="main">
+      <!-- views are injected dynamically -->
+    </main>
+
+    <div class="toast" id="toast" hidden></div>
+  </div>
+
+  <!-- Quick add overlay -->
+  <div class="overlay" id="quickAdd" hidden>
+    <div class="qa-panel">
+      <div class="qa-tabs">
+        <button class="qa-tab active" data-qa="action">Action</button>
+        <button class="qa-tab" data-qa="deliverable">Deliverable</button>
+        <button class="qa-tab" data-qa="milestone">Milestone</button>
+        <button class="qa-tab" data-qa="risk">Risk</button>
+        <button class="qa-tab" data-qa="decision">Decision</button>
+        <button class="qa-tab" data-qa="component">Component</button>
+        <button class="qa-tab" data-qa="person">Person</button>
+        <button class="qa-tab" data-qa="project">Project</button>
+      </div>
+      <div class="qa-body" id="qaBody"></div>
+      <div class="qa-foot">
+        <span class="hint">Tip: <kbd>Tab</kbd> to move • <kbd>Enter</kbd> to save • <kbd>Esc</kbd> to close</span>
+        <div>
+          <button class="ghost" id="qaCancel">Cancel</button>
+          <button class="primary" id="qaSave">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Detail drawer -->
+  <div class="overlay drawer-overlay" id="drawer" hidden>
+    <div class="drawer">
+      <div class="drawer-head">
+        <div class="drawer-title" id="drawerTitle">Details</div>
+        <button class="icon-btn" id="drawerClose">×</button>
+      </div>
+      <div class="drawer-body" id="drawerBody"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
