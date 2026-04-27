@@ -84,6 +84,16 @@
   const componentColor = (id) => COMPONENT_COLORS.find((c) => c.id === id) || COMPONENT_COLORS[0];
   const findComponent = (proj, componentId) => (proj.components || []).find((p) => p.id === componentId);
 
+  // Change-request lifecycle states + their colors
+  const CR_STATUSES = [
+    { id: 'proposed',     label: 'Proposed',     rgb: '148,163,184' }, // slate
+    { id: 'under_review', label: 'Under review', rgb: '96,165,250'  }, // blue
+    { id: 'approved',     label: 'Approved',     rgb: '74,222,128'  }, // green
+    { id: 'rejected',     label: 'Rejected',     rgb: '248,113,133' }, // rose
+    { id: 'implemented',  label: 'Implemented',  rgb: '167,139,250' }, // violet
+  ];
+  const crStatus = (id) => CR_STATUSES.find((s) => s.id === id) || CR_STATUSES[0];
+
   // Open-point criticality palette + labels (4 levels, low → critical)
   const CRITICALITY_RGB = {
     low:      '148,163,184', // slate
@@ -711,6 +721,7 @@
       milestones: renderMilestones,
       risks: renderRisks,
       decisions: renderDecisions,
+      changes: renderChangeRequests,
       links: renderLinks,
     };
     (fns[view] || renderBoard)(main);
@@ -4508,6 +4519,450 @@
     });
   }
 
+  // Reusable contenteditable rich-text editor with an icon-style toolbar:
+  // bold, italic, underline, strikethrough, font colour, bullet / numbered list,
+  // link, and clear formatting. The element with `id` is the editable region;
+  // the toolbar is wired up via `wireRichEditor(overlay, id)`.
+  function richEditorHTML(id, valueHtml, placeholder) {
+    return `
+      <div class="op-context-wrap rich-wrap" data-rich-for="${id}">
+        <div class="rich-toolbar">
+          <button type="button" class="rt-btn rt-bold"   data-cmd="bold"          title="Bold (Cmd/Ctrl+B)">B</button>
+          <button type="button" class="rt-btn rt-ital"   data-cmd="italic"        title="Italic (Cmd/Ctrl+I)">I</button>
+          <button type="button" class="rt-btn rt-und"    data-cmd="underline"     title="Underline (Cmd/Ctrl+U)">U</button>
+          <button type="button" class="rt-btn rt-strike" data-cmd="strikeThrough" title="Strikethrough">S</button>
+          <span class="rt-sep"></span>
+          <label class="rt-btn rt-color" title="Text colour">
+            <span class="rt-color-glyph">A</span>
+            <span class="rt-color-bar"></span>
+            <input type="color" data-cmd="foreColor" value="#6ea8ff" />
+          </label>
+          <span class="rt-sep"></span>
+          <button type="button" class="rt-btn rt-ul" data-cmd="insertUnorderedList" title="Bullet list">
+            <svg viewBox="0 0 16 16" width="14" height="14"><circle cx="2" cy="3.5" r="1.2" fill="currentColor"/><circle cx="2" cy="8" r="1.2" fill="currentColor"/><circle cx="2" cy="12.5" r="1.2" fill="currentColor"/><line x1="6" y1="3.5" x2="14" y2="3.5" stroke="currentColor" stroke-width="1.4"/><line x1="6" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.4"/><line x1="6" y1="12.5" x2="14" y2="12.5" stroke="currentColor" stroke-width="1.4"/></svg>
+          </button>
+          <button type="button" class="rt-btn rt-ol" data-cmd="insertOrderedList" title="Numbered list">
+            <svg viewBox="0 0 16 16" width="14" height="14"><text x="0" y="5" font-size="4.5" font-weight="700" fill="currentColor">1.</text><text x="0" y="10" font-size="4.5" font-weight="700" fill="currentColor">2.</text><text x="0" y="15" font-size="4.5" font-weight="700" fill="currentColor">3.</text><line x1="6" y1="3.5" x2="14" y2="3.5" stroke="currentColor" stroke-width="1.4"/><line x1="6" y1="8" x2="14" y2="8" stroke="currentColor" stroke-width="1.4"/><line x1="6" y1="12.5" x2="14" y2="12.5" stroke="currentColor" stroke-width="1.4"/></svg>
+          </button>
+          <span class="rt-sep"></span>
+          <button type="button" class="rt-btn rt-link" data-cmd="createLink" title="Insert link">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M6.5 9.5l3-3"/><path d="M9 4.5a2.5 2.5 0 0 1 3.5 3.5l-2 2"/><path d="M7 11.5a2.5 2.5 0 0 1-3.5-3.5l2-2"/></svg>
+          </button>
+          <button type="button" class="rt-btn rt-clear" data-cmd="removeFormat" title="Clear formatting">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3 13l3-9h4l-3 9z"/><line x1="2" y1="13" x2="14" y2="13"/><line x1="11" y1="3" x2="14" y2="6"/><line x1="14" y1="3" x2="11" y2="6"/></svg>
+          </button>
+        </div>
+        <div class="op-context rich-body" id="${id}" contenteditable="true" data-placeholder="${escapeHTML(placeholder || '')}">${valueHtml || ''}</div>
+      </div>`;
+  }
+  function wireRichEditor(overlay, id) {
+    const wrap = overlay.querySelector(`[data-rich-for="${id}"]`);
+    if (!wrap) return;
+    const body = overlay.querySelector(`#${id}`);
+    wrap.querySelectorAll('.rt-btn[data-cmd]').forEach((btn) => {
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const cmd = btn.dataset.cmd;
+        body.focus();
+        if (cmd === 'createLink') {
+          const url = prompt('Link URL (https://…):');
+          if (url) document.execCommand('createLink', false, url);
+        } else if (cmd === 'foreColor') {
+          // handled via colour input change below
+        } else {
+          document.execCommand(cmd, false, null);
+        }
+      });
+    });
+    const color = wrap.querySelector('input[type="color"]');
+    const colorBar = wrap.querySelector('.rt-color-bar');
+    if (color) {
+      color.addEventListener('input', (e) => {
+        body.focus();
+        document.execCommand('foreColor', false, e.target.value);
+        if (colorBar) colorBar.style.background = e.target.value;
+      });
+      if (colorBar) colorBar.style.background = color.value;
+    }
+  }
+
+  // Change requests — track scope/schedule/cost change proposals through their lifecycle.
+  const crFilterState = { status: 'all' };
+  function renderChangeRequests(root) {
+    const proj = curProject();
+    proj.changes = proj.changes || [];
+    const view = document.createElement('div');
+    view.className = 'view';
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Change requests</div>
+          <div class="page-sub">Track proposed changes through proposed → reviewed → approved / rejected → implemented. Each CR captures impact (schedule, cost, scope, risk) and an optional online or local link.</div>
+        </div>
+        <div class="page-actions">
+          <div class="seg" role="tablist" aria-label="Status filter">
+            <button class="seg-btn ${crFilterState.status === 'all' ? 'active' : ''}" data-cr-filter="all">All</button>
+            ${CR_STATUSES.map((s) => `<button class="seg-btn ${crFilterState.status === s.id ? 'active' : ''}" data-cr-filter="${s.id}">${s.label}</button>`).join('')}
+          </div>
+          <button class="ghost" id="btnAddCR">+ Change request</button>
+        </div>
+      </div>
+      <div class="cr-kpis" id="crKpis"></div>
+      <div class="cr-list" id="crList"></div>`;
+    root.appendChild(view);
+
+    function drawKpis() {
+      const all = proj.changes || [];
+      const kpis = $('#crKpis');
+      if (!kpis) return;
+      if (!all.length) { kpis.innerHTML = ''; return; }
+      // Status mix
+      const counts = {};
+      CR_STATUSES.forEach((s) => { counts[s.id] = 0; });
+      all.forEach((c) => { counts[c.status] = (counts[c.status] || 0) + 1; });
+      const total = all.length;
+      const open = (counts.proposed || 0) + (counts.under_review || 0);
+      const decided = (counts.approved || 0) + (counts.rejected || 0) + (counts.implemented || 0);
+      const approvedLike = (counts.approved || 0) + (counts.implemented || 0);
+      const approvalRate = decided > 0 ? Math.round((approvedLike / decided) * 100) : 0;
+      // Sum schedule + cost impact for approved + implemented (those that "land")
+      let schedSum = 0, costSum = 0;
+      all.forEach((c) => {
+        if (c.status === 'approved' || c.status === 'implemented') {
+          schedSum += (c.impact?.schedule || 0);
+          costSum  += (c.impact?.cost || 0);
+        }
+      });
+      // Donut SVG — cumulative arcs by status
+      const R = 32, CX = 36, CY = 36, IR = 22;
+      const C = 2 * Math.PI * R;
+      let cum = 0;
+      const arcs = CR_STATUSES.map((s) => {
+        const n = counts[s.id] || 0;
+        if (n === 0) return '';
+        const frac = n / total;
+        const dash = frac * C;
+        const gap = C - dash;
+        const off = -cum * C + C / 4; // start at 12 o'clock
+        cum += frac;
+        return `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="rgb(${s.rgb})" stroke-width="${R - IR}" stroke-dasharray="${dash.toFixed(2)} ${gap.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 ${CX} ${CY})"><title>${s.label}: ${n}</title></circle>`;
+      }).join('');
+      const fmtSchedKpi = (n) => n === 0 ? '0 d' : `${n > 0 ? '+' : ''}${n} d`;
+      const fmtCostKpi  = (n) => {
+        if (n === 0) return '0 €';
+        const sign = n > 0 ? '+' : '−';
+        const abs = Math.abs(n);
+        if (abs >= 1000) return `${sign}${(abs/1000).toFixed(1)}k €`;
+        return `${sign}${abs} €`;
+      };
+      kpis.innerHTML = `
+        <div class="cr-kpi cr-kpi-total">
+          <div class="cr-kpi-label">Change requests</div>
+          <div class="cr-kpi-num">${total}</div>
+          <div class="cr-kpi-sub"><span class="cr-kpi-pip" style="background:rgb(${crStatus('proposed').rgb})"></span>${open} open · ${decided} decided</div>
+        </div>
+        <div class="cr-kpi cr-kpi-mix">
+          <div class="cr-kpi-donut">
+            <svg viewBox="0 0 72 72" width="72" height="72" aria-hidden="true">
+              <circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="var(--bg-3)" stroke-width="${R - IR}" />
+              ${arcs}
+              <text x="${CX}" y="${CY + 4}" text-anchor="middle" font-size="14" font-weight="700" fill="var(--text)">${total}</text>
+            </svg>
+          </div>
+          <div class="cr-kpi-mix-list">
+            ${CR_STATUSES.map((s) => `
+              <div class="cr-kpi-mix-row">
+                <span class="cr-kpi-pip" style="background:rgb(${s.rgb})"></span>
+                <span class="cr-kpi-mix-lbl">${s.label}</span>
+                <span class="cr-kpi-mix-n">${counts[s.id] || 0}</span>
+              </div>`).join('')}
+          </div>
+        </div>
+        <div class="cr-kpi">
+          <div class="cr-kpi-label">Schedule impact</div>
+          <div class="cr-kpi-num ${schedSum > 0 ? 'bad' : schedSum < 0 ? 'ok' : ''}">${fmtSchedKpi(schedSum)}</div>
+          <div class="cr-kpi-sub">cumulative · approved + implemented</div>
+        </div>
+        <div class="cr-kpi">
+          <div class="cr-kpi-label">Cost impact</div>
+          <div class="cr-kpi-num ${costSum > 0 ? 'bad' : costSum < 0 ? 'ok' : ''}">${fmtCostKpi(costSum)}</div>
+          <div class="cr-kpi-sub">cumulative · approved + implemented</div>
+        </div>
+        <div class="cr-kpi">
+          <div class="cr-kpi-label">Approval rate</div>
+          <div class="cr-kpi-num ${approvalRate >= 60 ? 'ok' : approvalRate < 30 ? 'bad' : ''}">${decided ? approvalRate + '%' : '—'}</div>
+          <div class="cr-kpi-sub">${approvedLike} of ${decided || 0} decided</div>
+          <div class="cr-kpi-bar"><div class="cr-kpi-bar-fill ${approvalRate >= 60 ? 'ok' : approvalRate < 30 ? 'bad' : 'warn'}" style="width:${decided ? approvalRate : 0}%"></div></div>
+        </div>`;
+    }
+
+    function draw() {
+      drawKpis();
+      const list = $('#crList');
+      const items = (proj.changes || []).filter((c) =>
+        crFilterState.status === 'all' || c.status === crFilterState.status);
+      if (!items.length) {
+        list.innerHTML = `<div class="empty">${
+          crFilterState.status === 'all'
+            ? 'No change requests yet — capture one with + Change request.'
+            : 'No change requests in this status.'}</div>`;
+        return;
+      }
+      // Sort by originated date desc (most recent first)
+      const sorted = items.slice().sort((a, b) => (b.originatedDate || '').localeCompare(a.originatedDate || ''));
+      list.innerHTML = sorted.map((c) => {
+        const s = crStatus(c.status);
+        const cmp = c.component ? findComponent(proj, c.component) : null;
+        const cc = cmp ? componentColor(cmp.color) : null;
+        const sched = (c.impact?.schedule ?? 0);
+        const cost  = (c.impact?.cost ?? 0);
+        const schedTxt = sched ? `${sched > 0 ? '+' : ''}${sched} d` : '—';
+        const costTxt  = cost  ? `${cost > 0 ? '+' : ''}${cost} €` : '—';
+        const linkUrl = c.linkUrl || '';
+        const linkLbl = linkUrl ? (() => { try { return new URL(linkUrl).hostname.replace(/^www\./, ''); } catch (e) { return 'link'; } })() : '';
+        const decisionInfo = (c.status === 'approved' || c.status === 'rejected' || c.status === 'implemented')
+          ? `<span class="cr-decision">${c.status === 'rejected' ? '✗' : '✓'} ${escapeHTML(personName(c.decisionBy))}${c.decisionDate ? ' · ' + fmtDate(c.decisionDate) : ''}</span>` : '';
+        // Rationale supports rich HTML; legacy plain entries render as text
+        const rationaleHtml = c.rationale && /<\w+/.test(c.rationale) ? c.rationale : escapeHTML(c.rationale || '');
+        const analysisHtml  = c.analysis  && /<\w+/.test(c.analysis)  ? c.analysis  : escapeHTML(c.analysis  || '');
+        return `
+          <div class="cr-card" data-cr-id="${c.id}">
+            <div class="cr-row1">
+              <span class="cr-status" style="background:rgba(${s.rgb},.18);color:rgb(${s.rgb});border:1px solid rgb(${s.rgb})">${s.label}</span>
+              <span class="cr-title">${escapeHTML(c.title)}</span>
+              ${cmp ? `<span class="component-chip" style="background:rgba(${cc.rgb},.2);color:rgb(${cc.rgb})">${escapeHTML(cmp.name)}</span>` : ''}
+            </div>
+            ${c.rationale ? `<div class="cr-rationale"><span class="cr-section-lbl">Rationale</span><div class="cr-rich">${rationaleHtml}</div></div>` : ''}
+            ${c.analysis  ? `<div class="cr-analysis"><span class="cr-section-lbl">Analysis</span><div class="cr-rich">${analysisHtml}</div></div>` : ''}
+            <div class="cr-meta">
+              <span class="cr-meta-item" title="Originator">⚐ ${escapeHTML(personName(c.originator))}</span>
+              <span class="cr-meta-item" title="Originated">▦ ${c.originatedDate ? fmtFull(c.originatedDate) : '—'}</span>
+              <span class="cr-meta-item ${sched ? (sched > 0 ? 'bad' : 'ok') : ''}" title="Schedule impact">⏱ ${schedTxt}</span>
+              <span class="cr-meta-item ${cost ? (cost > 0 ? 'bad' : 'ok') : ''}" title="Cost impact">€ ${costTxt}</span>
+              ${decisionInfo}
+              ${linkUrl ? `<a class="cr-link" href="${escapeHTML(linkUrl)}" target="_blank" rel="noopener noreferrer" title="${escapeHTML(linkUrl)}">↗ ${escapeHTML(linkLbl || 'link')}</a>` : ''}
+            </div>
+          </div>`;
+      }).join('');
+      $$('.cr-card[data-cr-id]', list).forEach((card) => {
+        card.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const id = card.dataset.crId;
+          const c = (proj.changes || []).find((x) => x.id === id);
+          if (!c) return;
+          const items = [
+            { icon: '✎', label: 'Edit…', onClick: () => openChangeRequestEditor(id) },
+          ];
+          // Status quick-set submenu items
+          CR_STATUSES.forEach((s) => {
+            if (s.id !== c.status) {
+              items.push({
+                icon: '◐',
+                label: `Mark ${s.label.toLowerCase()}`,
+                onClick: () => {
+                  const cr = (proj.changes || []).find((x) => x.id === id);
+                  if (!cr) return;
+                  cr.status = s.id;
+                  if (s.id === 'approved' || s.id === 'rejected' || s.id === 'implemented') {
+                    cr.decisionDate = todayISO();
+                  }
+                  commit('cr-status');
+                  toast(`Marked ${s.label.toLowerCase()}`);
+                },
+              });
+            }
+          });
+          if (c.linkUrl) {
+            items.push({ icon: '⧉', label: 'Copy link', onClick: () => {
+              navigator.clipboard?.writeText(c.linkUrl).then(() => toast('Copied')).catch(() => toast('Copy failed'));
+            }});
+          }
+          items.push({ divider: true });
+          items.push({ icon: '×', label: 'Delete change request', danger: true, onClick: () => {
+            if (!confirm(`Delete change request "${c.title}"?`)) return;
+            proj.changes = (proj.changes || []).filter((x) => x.id !== id);
+            commit('cr-delete');
+            toast('Deleted');
+          }});
+          showContextMenu(e.clientX, e.clientY, items);
+        });
+        card.addEventListener('dblclick', (e) => {
+          if (e.target.closest('a')) return;
+          openChangeRequestEditor(card.dataset.crId);
+        });
+      });
+    }
+
+    $$('.seg-btn[data-cr-filter]', view).forEach((b) => {
+      b.addEventListener('click', () => {
+        crFilterState.status = b.dataset.crFilter;
+        $$('.seg-btn[data-cr-filter]', view).forEach((x) =>
+          x.classList.toggle('active', x.dataset.crFilter === crFilterState.status));
+        draw();
+      });
+    });
+    $('#btnAddCR').addEventListener('click', () => {
+      if (curProjectIsMerged()) { toast('Pick a single project to add items.'); return; }
+      openChangeRequestEditor(newChangeRequestDraft());
+    });
+    draw();
+  }
+
+  function newChangeRequestDraft() {
+    return {
+      id: uid('cr'),
+      title: '',
+      rationale: '',
+      analysis: '',
+      description: '',
+      status: 'proposed',
+      originator: null,
+      originatedDate: todayISO(),
+      decisionBy: null,
+      decisionDate: null,
+      impact: { schedule: 0, cost: 0, scope: '', risk: '' },
+      component: null,
+      linkUrl: null,
+    };
+  }
+
+  function openChangeRequestEditor(crIdOrDraft) {
+    const proj = curProject();
+    const isDraft = crIdOrDraft && typeof crIdOrDraft === 'object';
+    const c = isDraft
+      ? crIdOrDraft
+      : (proj.changes || []).find((x) => x.id === crIdOrDraft);
+    if (!c) return;
+    c.impact = c.impact || { schedule: 0, cost: 0, scope: '', risk: '' };
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width:640px;">
+        <div class="desc-head">
+          <div class="desc-title">${isDraft ? 'New change request' : 'Change request — ' + escapeHTML(c.title)}</div>
+          <button class="icon-btn" id="crClose" title="Close">×</button>
+        </div>
+        <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px; max-height:72vh; overflow-y:auto;">
+          <div class="field"><label>Title</label><input id="crTitle" value="${escapeHTML(c.title)}" /></div>
+          <div class="qa-row">
+            <div class="field"><label>Status</label>
+              <select id="crStatus">
+                ${CR_STATUSES.map((s) => `<option value="${s.id}" ${s.id === c.status ? 'selected' : ''}>${s.label}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Originator</label>
+              <select id="crOriginator">
+                <option value="">—</option>
+                ${state.people.map((p) => `<option value="${p.id}" ${p.id === c.originator ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Originated</label><input id="crOrigDate" type="date" value="${c.originatedDate || ''}" /></div>
+          </div>
+          <div class="field"><label>Rationale (rich)</label>
+            ${richEditorHTML('crRationale', c.rationale || '', 'Why this change is needed — bold, lists, links, colour…')}
+          </div>
+          <div class="field"><label>Analysis (rich)</label>
+            ${richEditorHTML('crAnalysis', c.analysis || '', 'Trade-off analysis, options considered, recommendation…')}
+          </div>
+          <div class="field"><label>Description (rich)</label>
+            ${richEditorHTML('crDesc', c.description || '', 'Detailed description…')}
+          </div>
+          <div class="qa-row">
+            <div class="field"><label>Schedule impact (days)</label><input id="crSched" type="number" value="${c.impact.schedule || 0}" /></div>
+            <div class="field"><label>Cost impact (€)</label><input id="crCost" type="number" value="${c.impact.cost || 0}" /></div>
+          </div>
+          <div class="field"><label>Scope impact</label><textarea id="crScope" placeholder="What scope changes (added/removed/modified)" style="min-height:50px;">${escapeHTML(c.impact.scope || '')}</textarea></div>
+          <div class="field"><label>Risk impact</label><textarea id="crRisk" placeholder="New risks introduced or mitigated" style="min-height:50px;">${escapeHTML(c.impact.risk || '')}</textarea></div>
+          <div class="field"><label>Link (URL or path)</label><input id="crLinkUrl" value="${escapeHTML(c.linkUrl || '')}" placeholder="https://… or file:///…" /></div>
+          <div class="qa-row">
+            <div class="field"><label>Component (optional)</label>
+              <select id="crComp">
+                <option value="">—</option>
+                ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === c.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Decision by</label>
+              <select id="crDecisionBy">
+                <option value="">—</option>
+                ${state.people.map((p) => `<option value="${p.id}" ${p.id === c.decisionBy ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Decision date</label><input id="crDecisionDate" type="date" value="${c.decisionDate || ''}" /></div>
+          </div>
+        </div>
+        <div class="desc-foot">
+          <button class="ghost" id="crCancel">Cancel</button>
+          ${isDraft ? '' : '<button class="ghost" id="crDelete" style="margin-left:auto; color:var(--bad);">Delete</button>'}
+          <button class="primary" id="crSave">${isDraft ? 'Create' : 'Save'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('crTitle').focus(), 30);
+    // Wire each rich-text editor's toolbar
+    wireRichEditor(overlay, 'crRationale');
+    wireRichEditor(overlay, 'crAnalysis');
+    wireRichEditor(overlay, 'crDesc');
+    const close = () => overlay.remove();
+    overlay.querySelector('#crClose').addEventListener('click', close);
+    overlay.querySelector('#crCancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+    overlay.querySelector('#crSave').addEventListener('click', () => {
+      const title = document.getElementById('crTitle').value.trim();
+      if (!title) return toast('Title required');
+      c.title = title;
+      const newStatus = document.getElementById('crStatus').value;
+      const decisional = (s) => s === 'approved' || s === 'rejected' || s === 'implemented';
+      const wasDecisional = decisional(c.status);
+      c.status = newStatus;
+      c.originator = document.getElementById('crOriginator').value || null;
+      c.originatedDate = document.getElementById('crOrigDate').value || c.originatedDate || todayISO();
+      c.rationale = document.getElementById('crRationale').innerHTML;
+      c.analysis  = document.getElementById('crAnalysis').innerHTML;
+      c.description = document.getElementById('crDesc').innerHTML;
+      c.impact = {
+        schedule: parseFloat(document.getElementById('crSched').value) || 0,
+        cost:     parseFloat(document.getElementById('crCost').value)  || 0,
+        scope:    document.getElementById('crScope').value,
+        risk:     document.getElementById('crRisk').value,
+      };
+      c.linkUrl   = document.getElementById('crLinkUrl').value.trim() || null;
+      c.component = document.getElementById('crComp').value || null;
+      c.decisionBy = document.getElementById('crDecisionBy').value || null;
+      const dDate = document.getElementById('crDecisionDate').value;
+      // Auto-set decision date when entering a decisional status without an explicit date
+      if (decisional(newStatus) && !wasDecisional && !dDate) {
+        c.decisionDate = todayISO();
+      } else {
+        c.decisionDate = dDate || c.decisionDate || null;
+      }
+      if (isDraft) {
+        // Hide list filter from masking the new item if needed
+        if (crFilterState.status !== 'all' && crFilterState.status !== c.status) crFilterState.status = 'all';
+        proj.changes = proj.changes || [];
+        proj.changes.push(c);
+        commit('cr-create');
+        close();
+        toast('Created');
+      } else {
+        commit('cr-edit');
+        close();
+        toast('Saved');
+      }
+    });
+    if (!isDraft) {
+      overlay.querySelector('#crDelete').addEventListener('click', () => {
+        if (!confirm(`Delete change request "${c.title}"?`)) return;
+        proj.changes = (proj.changes || []).filter((x) => x.id !== c.id);
+        commit('cr-delete');
+        close();
+        toast('Deleted');
+      });
+    }
+  }
+
   function renderLinks(root) {
     const proj = curProject();
     proj.links = proj.links || [];
@@ -4681,14 +5136,10 @@
           if (!pt) return;
           let v = sel.value;
           if (v === '__new__') {
-            const code = prompt('New cost-centre code (alphanumeric, dashes/underscores allowed):');
+            const code = prompt('New cost-centre name:');
             if (!code) { sel.value = pt.costCenter || ''; return; }
             const trimmed = code.trim();
-            if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) {
-              toast('Cost centre: alphanumeric only');
-              sel.value = pt.costCenter || '';
-              return;
-            }
+            if (!trimmed) { sel.value = pt.costCenter || ''; return; }
             state.budgets = state.budgets || {};
             state.budgets[trimmed] = state.budgets[trimmed] || {};
             v = trimmed;
@@ -5013,10 +5464,10 @@
     });
     $('#btnNewCC').addEventListener('click', () => {
       if (curProjectIsMerged()) { toast('Pick a single project first'); return; }
-      const code = prompt('New cost-centre code (alphanumeric, dashes/underscores allowed):');
+      const code = prompt('New cost-centre name:');
       if (!code) return;
       const trimmed = code.trim();
-      if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) { toast('Cost centre: alphanumeric only'); return; }
+      if (!trimmed) return;
       if (ccs.includes(trimmed)) { toast('Already exists in this project'); return; }
       state.budgets[trimmed] = state.budgets[trimmed] || {};
       const proj = curProject();
@@ -5046,7 +5497,7 @@
       list.innerHTML = ccs.map((cc) => {
         const safe = cc.replace(/[^A-Za-z0-9_-]/g, '_');
         return `
-          <div class="budget-card" data-cc="${cc}">
+          <div class="budget-card" data-cc="${escapeHTML(cc)}">
             <div class="budget-head">
               <h3>${escapeHTML(cc)}</h3>
               <div class="budget-legend" id="legend-${safe}"></div>
@@ -5162,7 +5613,7 @@
         `${i === 0 ? 'M' : 'L'} ${xMid(i).toFixed(1)} ${yFor(v).toFixed(1)}`).join(' ');
 
       const points = evm.budgets.map((v, i) =>
-        `<circle class="b-point" data-cc="${cc}" data-idx="${i}" data-iso="${weeks[i].isoStart}" cx="${xMid(i).toFixed(1)}" cy="${yFor(v).toFixed(1)}" r="4">
+        `<circle class="b-point" data-cc="${escapeHTML(cc)}" data-idx="${i}" data-iso="${weeks[i].isoStart}" cx="${xMid(i).toFixed(1)}" cy="${yFor(v).toFixed(1)}" r="4">
           <title>Week of ${weeks[i].isoStart} — drag to set budget (${fmtV(v)})</title>
         </circle>`).join('');
 
@@ -5293,7 +5744,10 @@
             const r = svg.getBoundingClientRect();
             const localY = (em.clientY - r.top) * (H / r.height);
             let v = ((padT + innerH) - localY) / innerH * maxY;
-            v = Math.max(0, Math.min(maxData * 2, v));
+            // Clamp to the chart's visible Y range so the dot and the line never
+            // disappear above the chart top during drag. Higher values can still
+            // be set via the floating editor input — drawChart on blur rescales.
+            v = Math.max(0, Math.min(maxY, v));
             applyDisplayedValue(v);
             placeEditor(em.clientX, em.clientY);
           }
@@ -5631,6 +6085,13 @@
   let qaInit = {};
   let qaSaveCallback = null;
   function openQuickAdd(type = 'action', init = {}, onSave = null) {
+    // Change requests use the full editor instead of the simplified Quick Add
+    // form, so the create flow has the same fields as the edit flow.
+    if (type === 'change') {
+      if (curProjectIsMerged()) { toast('Pick a single project to add items.'); return; }
+      openChangeRequestEditor(newChangeRequestDraft());
+      return;
+    }
     qaType = type;
     qaInit = init || {};
     qaSaveCallback = onSave || null;
@@ -5852,12 +6313,11 @@
       const color = (document.querySelector('input[name="qComponentColor"]:checked')?.value) || COMPONENT_COLORS[0].id;
       let ccRaw = $('#qCC')?.value || '';
       if (ccRaw === '__new__') {
-        const code = prompt('New cost-centre code (alphanumeric, dashes/underscores allowed):');
-        if (!code) ccRaw = '';
-        else if (!/^[A-Za-z0-9_-]+$/.test(code.trim())) {
-          return toast('Cost centre: alphanumeric only');
-        } else {
-          ccRaw = code.trim();
+        const code = prompt('New cost-centre name:');
+        const trimmed = (code || '').trim();
+        if (!trimmed) ccRaw = '';
+        else {
+          ccRaw = trimmed;
           state.budgets = state.budgets || {};
           state.budgets[ccRaw] = state.budgets[ccRaw] || {};
         }
@@ -6205,9 +6665,181 @@
 
   /* --------------------------- Import/Export ------------------------- */
 
+  // Current export schema version. Bump on a breaking schema change.
+  const EXPORT_SCHEMA_VERSION = 2;
+
+  // Walk every collection and backfill defaults so that any state — produced by
+  // an older app version, hand-edited JSON, or imported from elsewhere — has all
+  // fields the rest of the app expects. Idempotent.
+  function normalizeState(s) {
+    if (!s || typeof s !== 'object') throw new Error('Invalid state');
+    s.people = Array.isArray(s.people) ? s.people : [];
+    s.projects = Array.isArray(s.projects) ? s.projects : [];
+    s.settings = s.settings || {};
+    s.settings.theme = s.settings.theme || 'dark';
+    s.settings.holidayCountries = s.settings.holidayCountries || [];
+    if (s.settings.budgetView !== 'hours' && s.settings.budgetView !== 'cost') s.settings.budgetView = 'cost';
+    if (s.settings.budgetGroupBy !== 'component' && s.settings.budgetGroupBy !== 'person') s.settings.budgetGroupBy = 'component';
+    s.budgets = s.budgets || {};
+    s.notes = s.notes || {};
+    s.notesOpen = !!s.notesOpen;
+    s.currentView = s.currentView || 'board';
+    if (s.currentView === 'teams') s.currentView = 'people';
+    if (!s.currentProjectId || (s.currentProjectId !== '__all__' && !s.projects.some((p) => p.id === s.currentProjectId))) {
+      s.currentProjectId = s.projects[0]?.id || null;
+    }
+
+    // People — capacity is % of FTE; old data using small numbers is migrated.
+    s.people.forEach((p) => {
+      if (!p.id) p.id = uid('p');
+      if (typeof p.capacity !== 'number') p.capacity = 100;
+      if (p.capacity < 30) p.capacity = Math.round(p.capacity * 20); // legacy unit
+      if (typeof p.hourlyRate !== 'number') p.hourlyRate = 100;
+      p.role = p.role || '';
+    });
+
+    s.projects.forEach((p) => {
+      p.id = p.id || uid('pr');
+      p.name = p.name || 'Untitled project';
+      p.description = p.description || '';
+      // Per-collection arrays (presence is enough for renderers to short-circuit)
+      p.actions      = Array.isArray(p.actions) ? p.actions : [];
+      p.deliverables = Array.isArray(p.deliverables) ? p.deliverables : [];
+      p.milestones   = Array.isArray(p.milestones) ? p.milestones : [];
+      p.risks        = Array.isArray(p.risks) ? p.risks : [];
+      p.decisions    = Array.isArray(p.decisions) ? p.decisions : [];
+      p.changes      = Array.isArray(p.changes) ? p.changes : [];
+      p.components   = Array.isArray(p.components) ? p.components : [];
+      p.meetings     = Array.isArray(p.meetings) ? p.meetings : [];
+      p.openPoints   = Array.isArray(p.openPoints) ? p.openPoints : [];
+      p.links        = Array.isArray(p.links) ? p.links : [];
+      p.costCenters  = Array.isArray(p.costCenters) ? p.costCenters : [];
+      p.archive      = Array.isArray(p.archive) ? p.archive : [];
+
+      p.actions.forEach((a) => {
+        a.id = a.id || uid('a');
+        a.title = a.title || '';
+        a.status = a.status || 'todo';
+        a.priority = (typeof a.priority === 'number') ? a.priority : 0;
+        a.commitment = (typeof a.commitment === 'number') ? a.commitment : 100;
+        a.owner = a.owner || null;
+        a.originator = a.originator || null;
+        a.due = a.due || null;
+        a.startDate = a.startDate || null;
+        a.component = a.component || null;
+        a.deliverable = a.deliverable || null;
+        a.milestone = a.milestone || null;
+        a.description = a.description || null;
+        a.notes = a.notes || '';
+        a.createdAt = a.createdAt || todayISO();
+        a.updatedAt = a.updatedAt || a.createdAt || todayISO();
+        a.history = Array.isArray(a.history) ? a.history : [];
+        // a.deletedAt is null for live, ISO string for archived — preserve as-is
+      });
+
+      p.deliverables.forEach((d) => {
+        d.id = d.id || uid('d');
+        d.name = d.name || '';
+        d.dueDate = d.dueDate || null;
+        d.status = d.status || 'todo';
+      });
+
+      p.milestones.forEach((m) => {
+        m.id = m.id || uid('m');
+        m.name = m.name || '';
+        m.date = m.date || null;
+        m.status = m.status || 'todo';
+      });
+
+      p.risks.forEach((r) => {
+        r.id = r.id || uid('r');
+        r.kind = r.kind || 'risk';
+        r.title = r.title || '';
+        r.owner = r.owner || null;
+        r.mitigation = r.mitigation || '';
+        r.actionId = r.actionId || null;
+        // ensureRiskShape backfills inherent/residual from legacy probability/impact
+        if (!r.inherent) r.inherent = { probability: r.probability || 3, impact: r.impact || 3 };
+        if (!r.residual) r.residual = { ...r.inherent };
+      });
+
+      p.decisions.forEach((d) => {
+        d.id = d.id || uid('dec');
+        d.title = d.title || '';
+        d.rationale = d.rationale || '';
+        d.owner = d.owner || null;
+        d.date = d.date || todayISO();
+      });
+
+      p.changes.forEach((c) => {
+        c.id = c.id || uid('cr');
+        c.title = c.title || '';
+        c.rationale = c.rationale || '';
+        c.analysis = c.analysis || '';
+        c.description = c.description || '';
+        c.status = c.status || 'proposed';
+        c.originator = c.originator || null;
+        c.originatedDate = c.originatedDate || todayISO();
+        c.decisionBy = c.decisionBy || null;
+        c.decisionDate = c.decisionDate || null;
+        c.impact = c.impact || {};
+        c.impact.schedule = (typeof c.impact.schedule === 'number') ? c.impact.schedule : 0;
+        c.impact.cost     = (typeof c.impact.cost     === 'number') ? c.impact.cost     : 0;
+        c.impact.scope    = c.impact.scope || '';
+        c.impact.risk     = c.impact.risk  || '';
+        c.component = c.component || null;
+        c.linkUrl = c.linkUrl || null;
+        delete c.linkTitle; // dropped from schema
+      });
+
+      p.components.forEach((cmp) => {
+        cmp.id = cmp.id || uid('cm');
+        cmp.name = cmp.name || '';
+        cmp.color = cmp.color || (COMPONENT_COLORS[0] && COMPONENT_COLORS[0].id) || 'sky';
+        cmp.costCenter = cmp.costCenter || null;
+      });
+
+      p.meetings.forEach((m) => {
+        m.id = m.id || uid('mtg');
+        m.kind = m.kind || 'oneoff';
+        m.title = m.title || '';
+        m.time = m.time || null;
+        if (m.kind === 'oneoff') m.date = m.date || todayISO();
+        else { m.dayOfWeek = (typeof m.dayOfWeek === 'number') ? m.dayOfWeek : 1; m.startDate = m.startDate || todayISO(); }
+      });
+
+      p.openPoints.forEach((op) => {
+        op.id = op.id || uid('op');
+        op.title = op.title || '';
+        op.notes = op.notes || '';
+        op.component = op.component || null;
+        op.criticality = op.criticality || 'med';
+        op.createdAt = op.createdAt || todayISO();
+      });
+
+      p.links.forEach((l) => {
+        l.id = l.id || uid('lk');
+        l.title = l.title || '';
+        l.url = l.url || '';
+        l.description = l.description || '';
+        l.component = l.component || null;
+      });
+    });
+    return s;
+  }
+
   function exportJSON() {
     flushPendingSaves();
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+    // Wrap in a metadata envelope so consumers can detect the version. The
+    // actual state is preserved at the top level too for backward compat —
+    // older importers that just `JSON.parse(file).projects` still work.
+    const payload = {
+      __schemaVersion: EXPORT_SCHEMA_VERSION,
+      __exportedAt: new Date().toISOString(),
+      __app: 'cockpit',
+      ...state,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `cockpit-${todayISO()}.json`;
@@ -6236,36 +6868,16 @@
       reader.onload = () => {
         try {
           const obj = JSON.parse(reader.result);
-          if (!obj.projects || !obj.people) throw new Error('Invalid file');
-          // Tolerate missing fields
-          obj.projects.forEach((p) => {
-            p.actions = p.actions || [];
-            p.deliverables = p.deliverables || [];
-            p.milestones = p.milestones || [];
-            p.risks = p.risks || [];
-            p.decisions = p.decisions || [];
-            p.changes = p.changes || [];
-            p.components = p.components || [];
-            p.meetings = p.meetings || [];
-            p.openPoints = p.openPoints || [];
-            p.links = p.links || [];
-            p.costCenters = p.costCenters || [];
-            p.archive = p.archive || [];
-            p.actions.forEach((a) => {
-              a.history = a.history || [];
-              a.createdAt = a.createdAt || todayISO();
-              a.updatedAt = a.updatedAt || todayISO();
-              a.priority = a.priority || 0;
-            });
-          });
+          if (!obj || typeof obj !== 'object') throw new Error('Invalid JSON');
+          if (!obj.projects || !obj.people) throw new Error('Missing projects/people');
+          // Strip metadata fields if present (envelope) — they're not state
+          delete obj.__schemaVersion;
+          delete obj.__exportedAt;
+          delete obj.__app;
           undoStack.push(JSON.stringify(state));
-          state = obj;
-          if (!state.currentProjectId) state.currentProjectId = state.projects[0]?.id;
-          state.currentView = state.currentView || 'board';
-          state.budgets = state.budgets || {};
-          state.settings = state.settings || {};
-          state.notes = state.notes || {};
-          saveState(); render();
+          state = normalizeState(obj);
+          saveState();
+          render();
           toast('Imported');
         } catch (e) { toast('Import failed: ' + e.message); }
       };
@@ -6278,18 +6890,11 @@
 
   function init() {
     state = loadState();
-    if (state.currentView === 'teams') state.currentView = 'people';
-    state.settings = state.settings || {};
-    // Migrate person.capacity from "max parallel actions" (small numbers) to
-    // "% of FTE". Heuristic: capacity < 30 is the legacy unit; multiply by 20.
-    let migrated = false;
-    (state.people || []).forEach((p) => {
-      if (typeof p.capacity === 'number' && p.capacity < 30) {
-        p.capacity = Math.round(p.capacity * 20);
-        migrated = true;
-      }
-    });
-    if (migrated) saveState();
+    // Run a single comprehensive backfill so every renderer gets the fields it
+    // expects, regardless of whether the saved state predates the latest schema
+    // additions (criticality, costCenters, links, changes/analysis, etc).
+    try { normalizeState(state); } catch (e) { state = seedState(); }
+    saveState();
     applyTheme(state.settings.theme || 'dark');
 
     $('#btnSidebarToggle').addEventListener('click', () => {
