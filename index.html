@@ -30,6 +30,9 @@
         <button class="nav-item" data-view="register">
           <span class="nav-icon">≣</span><span>Register</span>
         </button>
+        <button class="nav-item" data-view="openpoints">
+          <span class="nav-icon">⚐</span><span>Open points</span>
+        </button>
         <button class="nav-item" data-view="timeline">
           <span class="nav-icon">▬</span><span>Timeline</span>
         </button>
@@ -42,10 +45,16 @@
         <button class="nav-item" data-view="review">
           <span class="nav-icon">▶</span><span>Review</span>
         </button>
+        <button class="nav-item" data-view="archive">
+          <span class="nav-icon">⌫</span><span>Archive</span>
+        </button>
 
         <div class="nav-section">Engineering</div>
         <button class="nav-item" data-view="components">
           <span class="nav-icon">▣</span><span>Components</span>
+        </button>
+        <button class="nav-item" data-view="budgets">
+          <span class="nav-icon">€</span><span>Budgets</span>
         </button>
         <button class="nav-item" data-view="deliverables">
           <span class="nav-icon">◆</span><span>Deliverables</span>
@@ -54,7 +63,7 @@
           <span class="nav-icon">◇</span><span>Milestones</span>
         </button>
         <button class="nav-item" data-view="risks">
-          <span class="nav-icon">△</span><span>Risks</span>
+          <span class="nav-icon">△</span><span>Risks &amp; Opps</span>
         </button>
         <button class="nav-item" data-view="decisions">
           <span class="nav-icon">⬡</span><span>Decisions</span>
@@ -102,6 +111,7 @@
       <div class="topbar-actions">
         <button class="icon-btn" id="btnUndo" title="Undo (Cmd/Ctrl+Z)">↶</button>
         <button class="icon-btn" id="btnRedo" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
+        <button class="icon-btn" id="btnNotesToggle" title="Toggle meeting notes (Cmd/Ctrl+\\)">✎</button>
         <button class="primary" id="btnQuickAdd" title="Quick add (Cmd/Ctrl+K)">+ Quick add</button>
       </div>
     </header>
@@ -109,6 +119,31 @@
     <main class="main" id="main">
       <!-- views are injected dynamically -->
     </main>
+
+    <aside class="notes-panel" id="notesPanel" hidden>
+      <div class="notes-head">
+        <div class="notes-title">Meeting notes</div>
+        <div class="notes-meta" id="notesMeta"></div>
+        <button class="icon-btn" id="btnNotesClose" title="Close">×</button>
+      </div>
+      <div class="notes-toolbar">
+        <button data-cmd="bold" title="Bold (Cmd/Ctrl+B)"><b>B</b></button>
+        <button data-cmd="italic" title="Italic (Cmd/Ctrl+I)"><i>I</i></button>
+        <button data-cmd="underline" title="Underline (Cmd/Ctrl+U)"><u>U</u></button>
+        <span class="sep"></span>
+        <button data-cmd="formatBlock" data-arg="<h3>" title="Heading">H</button>
+        <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph">¶</button>
+        <button data-cmd="insertUnorderedList" title="Bullet list">• list</button>
+        <button data-cmd="insertOrderedList" title="Numbered list">1.</button>
+        <span class="sep"></span>
+        <button id="btnNotesAction" class="notes-action-btn" title="Insert action (Cmd/Ctrl+Shift+A)">+ action</button>
+      </div>
+      <div class="notes-body" id="notesBody" contenteditable="true" spellcheck="true"></div>
+      <div class="notes-foot">
+        <span id="notesSaved">Saved</span>
+        <span class="hint"><kbd>@</kbd> mention a person · <kbd>Cmd/Ctrl+Shift+A</kbd> insert action</span>
+      </div>
+    </aside>
 
     <div class="toast" id="toast" hidden></div>
   </div>
@@ -122,6 +157,7 @@
         <button class="qa-tab" data-qa="milestone">Milestone</button>
         <button class="qa-tab" data-qa="risk">Risk</button>
         <button class="qa-tab" data-qa="decision">Decision</button>
+        <button class="qa-tab" data-qa="meeting">Meeting</button>
         <button class="qa-tab" data-qa="component">Component</button>
         <button class="qa-tab" data-qa="person">Person</button>
         <button class="qa-tab" data-qa="project">Project</button>

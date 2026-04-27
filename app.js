@@ -141,17 +141,18 @@
     };
     const chance = (p) => rnd() < p;
 
+    // capacity is in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year)
     const people = [
-      { id: 'p_sofia', name: 'Sofia Reyes',     role: 'Project Manager',     capacity: 6 },
-      { id: 'p_marie', name: 'Marie Laurent',   role: 'Systems Engineer',    capacity: 5 },
-      { id: 'p_arjun', name: 'Arjun Patel',     role: 'Avionics Lead',       capacity: 5 },
-      { id: 'p_jonas', name: 'Jonas Becker',    role: 'Mechanical',          capacity: 4 },
-      { id: 'p_kira',  name: 'Kira Nakamura',   role: 'Software Architect',  capacity: 5 },
-      { id: 'p_omar',  name: 'Omar El-Sayed',   role: 'Power Systems',       capacity: 4 },
-      { id: 'p_lena',  name: 'Lena Holmberg',   role: 'Thermal Engineer',    capacity: 4 },
-      { id: 'p_diego', name: 'Diego Ferreira',  role: 'AOCS',                capacity: 5 },
-      { id: 'p_yuki',  name: 'Yuki Tanaka',     role: 'Software Developer',  capacity: 5 },
-      { id: 'p_nadia', name: 'Nadia Rahman',    role: 'Test Engineer',       capacity: 5 },
+      { id: 'p_sofia', name: 'Sofia Reyes',     role: 'Project Manager',     capacity: 100, hourlyRate: 140 },
+      { id: 'p_marie', name: 'Marie Laurent',   role: 'Systems Engineer',    capacity: 100, hourlyRate: 130 },
+      { id: 'p_arjun', name: 'Arjun Patel',     role: 'Avionics Lead',       capacity: 100, hourlyRate: 145 },
+      { id: 'p_jonas', name: 'Jonas Becker',    role: 'Mechanical',          capacity:  80, hourlyRate: 120 },
+      { id: 'p_kira',  name: 'Kira Nakamura',   role: 'Software Architect',  capacity: 100, hourlyRate: 150 },
+      { id: 'p_omar',  name: 'Omar El-Sayed',   role: 'Power Systems',       capacity:  80, hourlyRate: 125 },
+      { id: 'p_lena',  name: 'Lena Holmberg',   role: 'Thermal Engineer',    capacity:  80, hourlyRate: 125 },
+      { id: 'p_diego', name: 'Diego Ferreira',  role: 'AOCS',                capacity: 100, hourlyRate: 135 },
+      { id: 'p_yuki',  name: 'Yuki Tanaka',     role: 'Software Developer',  capacity: 100, hourlyRate: 110 },
+      { id: 'p_nadia', name: 'Nadia Rahman',    role: 'Test Engineer',       capacity: 100, hourlyRate: 115 },
     ];
 
     // Title pools per component
@@ -397,12 +398,15 @@
         { id: 'm_trr', name: 'Test Readiness Review',      date: d(170),  status: 'todo' },
       ],
       risks: [
-        { id: 'r_supply', title: 'Reaction wheel lead time slip',  probability: 3, impact: 4, mitigation: 'Dual-source supplier engaged.', owner: 'p_arjun' },
-        { id: 'r_mass',   title: 'Mass margin trending under 5%',  probability: 4, impact: 3, mitigation: 'Lightweighting study + panel optimisation.', owner: 'p_jonas' },
-        { id: 'r_power',  title: 'EOL power margin tight',         probability: 3, impact: 4, mitigation: 'Trade study on cell vendor.', owner: 'p_omar' },
-        { id: 'r_thermal',title: 'Hot-case radiator under-sized',  probability: 2, impact: 4, mitigation: 'Adding louvres to baseline.', owner: 'p_lena' },
-        { id: 'r_sw',     title: 'FSW timeline at risk',           probability: 3, impact: 3, mitigation: 'Early integration build, MIL-STD scrum.', owner: 'p_kira' },
-        { id: 'r_test',   title: 'TVAC chamber availability',      probability: 4, impact: 3, mitigation: 'Booked alternate facility on standby.', owner: 'p_nadia' },
+        { id: 'r_supply', kind: 'risk', title: 'Reaction wheel lead time slip',  inherent: { probability: 4, impact: 4 }, residual: { probability: 2, impact: 3 }, mitigation: 'Dual-source supplier engaged.', owner: 'p_arjun' },
+        { id: 'r_mass',   kind: 'risk', title: 'Mass margin trending under 5%',  inherent: { probability: 4, impact: 3 }, residual: { probability: 2, impact: 3 }, mitigation: 'Lightweighting study + panel optimisation.', owner: 'p_jonas' },
+        { id: 'r_power',  kind: 'risk', title: 'EOL power margin tight',         inherent: { probability: 3, impact: 4 }, residual: { probability: 2, impact: 3 }, mitigation: 'Trade study on cell vendor + duty-cycle review.', owner: 'p_omar' },
+        { id: 'r_thermal',kind: 'risk', title: 'Hot-case radiator under-sized',  inherent: { probability: 3, impact: 4 }, residual: { probability: 1, impact: 3 }, mitigation: 'Adding louvres to baseline; thermal balance test scheduled.', owner: 'p_lena' },
+        { id: 'r_sw',     kind: 'risk', title: 'FSW timeline at risk',           inherent: { probability: 4, impact: 3 }, residual: { probability: 3, impact: 2 }, mitigation: 'Early integration build, weekly scrum, heritage reuse.', owner: 'p_kira' },
+        { id: 'r_test',   kind: 'risk', title: 'TVAC chamber availability',      inherent: { probability: 4, impact: 3 }, residual: { probability: 2, impact: 2 }, mitigation: 'Booked alternate facility on standby.', owner: 'p_nadia' },
+        { id: 'o_heritage', kind: 'opportunity', title: 'Reuse Mosaic-3 attitude FSW heritage', inherent: { probability: 3, impact: 3 }, residual: { probability: 4, impact: 4 }, mitigation: 'Negotiate IP transfer with sister mission, save ~6 weeks of FSW work.', owner: 'p_kira' },
+        { id: 'o_batch',    kind: 'opportunity', title: 'Volume discount on Li-ion cells',     inherent: { probability: 2, impact: 2 }, residual: { probability: 4, impact: 3 }, mitigation: 'Combine PO with sister mission for 12% unit-price reduction.', owner: 'p_omar' },
+        { id: 'o_chamber',  kind: 'opportunity', title: 'Earlier TVAC slot at partner facility', inherent: { probability: 2, impact: 3 }, residual: { probability: 3, impact: 4 }, mitigation: 'Partner facility offered Aug slot — could pull in TVAC by 4 weeks.', owner: 'p_nadia' },
       ],
       decisions: [
         { id: 'dec_bus',    title: 'Down-select to BusFrame v3',   rationale: 'Best mass and thermal envelope after trade study.',    date: d(-220), owner: 'p_sofia' },
@@ -412,6 +416,13 @@
         { id: 'dec_pdr',    title: 'PDR slipped 2 weeks',           rationale: 'Customer requested additional FDIR work; risk register updated.', date: d(-12), owner: 'p_sofia' },
       ],
       changes: [],
+      meetings: [
+        { id: 'mtg_standup', kind: 'weekly', title: 'Eng standup',     dayOfWeek: 1, startDate: d(-365), time: '09:30' },
+        { id: 'mtg_pmrev',   kind: 'weekly', title: 'PM weekly review', dayOfWeek: 5, startDate: d(-365), time: '15:00' },
+        { id: 'mtg_pdrkick', kind: 'oneoff', title: 'PDR pre-meet w/ customer', date: d(14), time: '10:00' },
+        { id: 'mtg_pdr',     kind: 'oneoff', title: 'PDR data-pack walkthrough', date: d(28), time: '14:00' },
+        { id: 'mtg_riskrev', kind: 'oneoff', title: 'Risk register review',     date: d(7),  time: '11:00' },
+      ],
       actions: orbitActions,
     };
 
@@ -426,8 +437,9 @@
         { id: 'm_ga',    name: 'v1.0 GA',             date: d(80),  status: 'todo' },
       ],
       risks: [
-        { id: 'r_h_perf', title: 'Telemetry decoder throughput',  probability: 3, impact: 3, mitigation: 'Profile hot path, add backpressure.', owner: 'p_kira' },
-        { id: 'r_h_ux',   title: 'Procedure editor UX scope',     probability: 3, impact: 2, mitigation: 'Two design rounds with ops users.',     owner: 'p_yuki' },
+        { id: 'r_h_perf', kind: 'risk', title: 'Telemetry decoder throughput',  probability: 3, impact: 3, mitigation: 'Profile hot path, add backpressure.', owner: 'p_kira' },
+        { id: 'r_h_ux',   kind: 'risk', title: 'Procedure editor UX scope',     probability: 3, impact: 2, mitigation: 'Two design rounds with ops users.',     owner: 'p_yuki' },
+        { id: 'o_h_oss',  kind: 'opportunity', title: 'Open-source the telemetry decoder', probability: 3, impact: 3, mitigation: 'Adoption could drive contributions and hire pipeline.', owner: 'p_sofia' },
       ],
       decisions: [
         { id: 'dec_h_db',  title: 'Postgres for time-series store', rationale: 'Operational simplicity vs InfluxDB; volume tractable.', date: d(-130), owner: 'p_kira' },
@@ -448,8 +460,9 @@
         { id: 'm_f1', name: 'Field test campaign 1', date: d(110), status: 'todo' },
       ],
       risks: [
-        { id: 'r_f_battery', title: 'Battery thermal runaway during fast charge', probability: 2, impact: 5, mitigation: 'Cell-level temperature monitoring; conservative charge profile.', owner: 'p_omar' },
-        { id: 'r_f_field',   title: 'Outdoor test weather window',                probability: 3, impact: 2, mitigation: 'Two backup test windows scheduled.', owner: 'p_nadia' },
+        { id: 'r_f_battery', kind: 'risk', title: 'Battery thermal runaway during fast charge', probability: 2, impact: 5, mitigation: 'Cell-level temperature monitoring; conservative charge profile.', owner: 'p_omar' },
+        { id: 'r_f_field',   kind: 'risk', title: 'Outdoor test weather window',                probability: 3, impact: 2, mitigation: 'Two backup test windows scheduled.', owner: 'p_nadia' },
+        { id: 'o_f_grant',   kind: 'opportunity', title: 'R&D grant for autonomous swarm tests', probability: 2, impact: 4, mitigation: 'Eligibility confirmed; submission window opens in 6 weeks.', owner: 'p_sofia' },
       ],
       decisions: [
         { id: 'dec_f_motor', title: 'Brushless motor: T-Motor MN5008', rationale: 'Best thrust/weight at target battery voltage.',  date: d(-70), owner: 'p_jonas' },
@@ -469,8 +482,36 @@
 
   /* ----------------------- selectors / helpers ----------------------- */
 
+  // Returns the active project. If state.currentProjectId === '__all__',
+  // returns a synthetic project that aggregates references (not copies) from
+  // every project — mutations to actions/risks/etc. propagate to the real
+  // source projects. Adding/deleting collection members in this mode is
+  // disallowed (curProjectIsMerged() returns true).
   function curProject() {
+    if (state.currentProjectId === '__all__') return mergedProject();
     return state.projects.find((p) => p.id === state.currentProjectId) || state.projects[0];
+  }
+  function curProjectIsMerged() {
+    return state.currentProjectId === '__all__';
+  }
+  function mergedProject() {
+    const flat = (key) => state.projects.flatMap((p) => p[key] || []);
+    return {
+      id: '__all__',
+      name: 'All projects',
+      description: 'Cross-project view (read-only for adds/deletes).',
+      actions: flat('actions'),
+      deliverables: flat('deliverables'),
+      milestones: flat('milestones'),
+      risks: flat('risks'),
+      decisions: flat('decisions'),
+      components: flat('components'),
+      meetings: flat('meetings'),
+    };
+  }
+  // Find the source project for an action by id (works in merged mode too)
+  function projectOfAction(actionId) {
+    return state.projects.find((p) => (p.actions || []).some((a) => a.id === actionId));
   }
   function personName(id) {
     return state.people.find((p) => p.id === id)?.name || '—';
@@ -483,7 +524,34 @@
     if (diff <= 3) return 'soon';
     return 'ok';
   }
+  // Apply a set of topbar filters and optionally navigate to a different view.
+  // Pass undefined to leave a filter unchanged; pass '' to clear it.
+  function applyTopbarFilter({ status, due, component, owner, search, clearAll, view } = {}) {
+    if (clearAll) {
+      $('#search').value = '';
+      $('#filterStatus').value = '';
+      $('#filterDue').value = '';
+      $('#filterComponent').value = '';
+      $('#filterOwner').value = '';
+    } else {
+      if (status !== undefined) $('#filterStatus').value = status;
+      if (due !== undefined) $('#filterDue').value = due;
+      if (component !== undefined) $('#filterComponent').value = component;
+      if (owner !== undefined) $('#filterOwner').value = owner;
+      if (search !== undefined) $('#search').value = search;
+    }
+    if (view) {
+      state.currentView = view;
+      saveState();
+      render();
+    } else {
+      // re-render the current view
+      render();
+    }
+  }
+
   function actionMatchesFilters(a) {
+    if (a.deletedAt) return false; // archived items are hidden by default
     const fOwner = $('#filterOwner').value;
     const fComp = $('#filterComponent').value;
     const fStatus = $('#filterStatus').value;
@@ -513,7 +581,7 @@
 
   function kpis() {
     const proj = curProject();
-    const acts = proj.actions || [];
+    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
     const today = todayISO();
     const total = acts.length;
     const done = acts.filter((a) => a.status === 'done').length;
@@ -543,13 +611,17 @@
     renderTopbar();
     renderSidebar();
     renderView();
+    refreshNoteChips();
   }
 
   function renderTopbar() {
     const sel = $('#projectSelect');
-    sel.innerHTML = state.projects
-      .map((p) => `<option value="${p.id}" ${p.id === state.currentProjectId ? 'selected' : ''}>${escapeHTML(p.name)}</option>`)
-      .join('');
+    sel.innerHTML =
+      `<option value="__all__" ${state.currentProjectId === '__all__' ? 'selected' : ''}>📚 All projects</option>` +
+      `<option disabled>──────────</option>` +
+      state.projects
+        .map((p) => `<option value="${p.id}" ${p.id === state.currentProjectId ? 'selected' : ''}>${escapeHTML(p.name)}</option>`)
+        .join('');
 
     const fOwner = $('#filterOwner');
     const cur = fOwner.value;
@@ -579,11 +651,14 @@
       people: renderPeople,
       board: renderBoard,
       register: renderRegister,
+      openpoints: renderOpenPoints,
       timeline: renderTimeline,
       dashboard: renderDashboard,
       charts: renderCharts,
       review: renderReview,
+      archive: renderArchive,
       components: renderComponents,
+      budgets: renderBudgets,
       deliverables: renderDeliverables,
       milestones: renderMilestones,
       risks: renderRisks,
@@ -597,19 +672,28 @@
   function renderBoard(root) {
     const proj = curProject();
     const view = document.createElement('div');
-    view.className = 'view';
+    view.className = 'view board-view';
 
     const head = document.createElement('div');
     head.className = 'page-head';
+    const liveActions = (proj.actions || []).filter((a) => !a.deletedAt);
     head.innerHTML = `
       <div>
         <div class="page-title">${escapeHTML(proj.name)}</div>
-        <div class="page-sub">${(proj.actions || []).length} actions • ${proj.deliverables?.length || 0} deliverables • ${proj.milestones?.length || 0} milestones</div>
+        <div class="page-sub">${liveActions.length} actions • ${proj.deliverables?.length || 0} deliverables • ${proj.milestones?.length || 0} milestones</div>
       </div>
       <div class="page-actions">
         <button class="ghost" id="btnAddAction">+ Action</button>
       </div>`;
     view.appendChild(head);
+
+    // Drop zones for quick mark-done / archive — visible only while a card is dragging
+    const zones = document.createElement('div');
+    zones.className = 'board-quick-actions';
+    zones.innerHTML = `
+      <div class="bqa-zone bqa-done"   data-bqa="done"><span class="bqa-icon">✓</span><span>Drop here to mark done</span></div>
+      <div class="bqa-zone bqa-delete" data-bqa="delete"><span class="bqa-icon">🗑</span><span>Drop here to archive</span></div>`;
+    view.appendChild(zones);
 
     const board = document.createElement('div');
     board.className = 'board';
@@ -620,11 +704,15 @@
       const col = document.createElement('div');
       col.className = 'column';
       col.dataset.status = s.id;
+      const clearBtn = (s.id === 'done' && items.length > 0)
+        ? `<button class="col-clear" title="Archive all ${items.length} done action${items.length === 1 ? '' : 's'}">⌫ Clear</button>`
+        : '';
       col.innerHTML = `
         <div class="col-head">
           <span class="col-dot ${s.dot}"></span>
           <span class="col-name">${s.name}</span>
           <span class="col-count">${items.length}</span>
+          ${clearBtn}
         </div>
         <div class="col-body" data-status="${s.id}"></div>`;
       const body = $('.col-body', col);
@@ -635,13 +723,39 @@
         empty.textContent = 'Drop actions here';
         body.appendChild(empty);
       }
-      attachColumnDND(body);
       board.appendChild(col);
     });
     view.appendChild(board);
     root.appendChild(view);
 
     $('#btnAddAction').addEventListener('click', () => openQuickAdd('action'));
+
+    // Clear-Done bulk action — archives only the done cards CURRENTLY DISPLAYED
+    // (passing the topbar filters / search). Filtered-out done items are kept.
+    const clearBtn = view.querySelector('.col-clear');
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        const targets = curProjectIsMerged()
+          ? state.projects.flatMap((p) => p.actions || [])
+          : (proj.actions || []);
+        const toArchive = targets.filter((a) => a.status === 'done' && actionMatchesFilters(a));
+        if (!toArchive.length) return;
+        const filtersActive = !!($('#search').value || $('#filterOwner').value || $('#filterComponent').value || $('#filterStatus').value || $('#filterDue').value);
+        const scope = filtersActive ? ' (matching current filters)' : '';
+        if (!confirm(`Archive ${toArchive.length} done action${toArchive.length === 1 ? '' : 's'}${scope}? They can be restored from the Archive view.`)) return;
+        const today = todayISO();
+        toArchive.forEach((a) => {
+          a.deletedAt = today;
+          a.history.push({ at: today, what: 'Archived (bulk-clear from Done)' });
+          a.updatedAt = today;
+        });
+        commit('clear-done');
+        toast(`${toArchive.length} archived`);
+      });
+    }
+
+    // Card drag is handled via custom mouse events in startCardDrag(),
+    // including drops onto the .bqa-zone pills and column bodies.
   }
 
   function makeCard(a) {
@@ -649,7 +763,6 @@
     const dueClass = statusOfDue(due, a.status);
     const card = document.createElement('div');
     card.className = `card ${a.status === 'doing' ? 'doing' : ''} ${dueClass}`;
-    card.draggable = true;
     card.dataset.id = a.id;
     const owner = state.people.find((p) => p.id === a.owner);
     const component = findComponent(curProject(), a.component);
@@ -669,17 +782,436 @@
         <span class="avatar" title="${escapeHTML(owner?.name || 'Unassigned')}">${initials(owner?.name)}</span>
         <span class="due ${dueClass}">${due ? fmtDate(due) : 'no date'}</span>
         ${a.notes ? '<span class="tag">note</span>' : ''}
+        ${a.description ? '<span class="tag has-desc" title="Has a description — hover to read">≡</span>' : ''}
       </div>`;
     card.addEventListener('click', (e) => {
-      if (e.detail === 1 && !card.classList.contains('dragging')) openDrawer(a.id);
+      if (card._suppressClick) { card._suppressClick = false; return; }
+      openDrawer(a.id);
     });
-    card.addEventListener('dragstart', (e) => {
-      card.classList.add('dragging');
-      e.dataTransfer.setData('text/cockpit-action', a.id);
-      e.dataTransfer.effectAllowed = 'move';
+    card.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return; // left mouse only
+      startCardDrag(e, card, a);
     });
-    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+    card.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      showContextMenu(e.clientX, e.clientY, actionContextItems(a));
+    });
     return card;
+  }
+
+  // Custom mouse-event drag for Kanban cards. The ghost is created
+  // immediately on mousedown so there's no perceived "two-step" feel
+  // between clicking and dragging — the card visually lifts at once.
+  function startCardDrag(eDown, card, action) {
+    const view = card.closest('.board-view');
+    const startX = eDown.clientX, startY = eDown.clientY;
+    const rect = card.getBoundingClientRect();
+    let movedEnough = false;
+    let ghost = null;
+    let placeholder = null;      // live preview of where the card will land
+    let dropTarget = null;
+    let lastEvt = null;
+    let rafPending = false;
+    let prevHighlight = null;
+    const CLICK_THRESHOLD = 3;
+
+    eDown.preventDefault?.();
+
+    // Create the ghost immediately so the card "lifts" on mousedown
+    ghost = card.cloneNode(true);
+    ghost.classList.add('drag-ghost');
+    Object.assign(ghost.style, {
+      position: 'fixed',
+      left: rect.left + 'px',
+      top: rect.top + 'px',
+      width: rect.width + 'px',
+      margin: '0',
+      zIndex: '9999',
+      willChange: 'transform',
+      transform: 'translate3d(0,0,0)',
+      opacity: '0.92',
+      boxShadow: '0 12px 30px rgba(0,0,0,.45)',
+      transition: 'none',
+    });
+    document.body.appendChild(ghost);
+    card.classList.add('dragging');
+    // Remove the original card from layout while dragging — the placeholder
+    // takes its conceptual place. This lets same-column reorder work and
+    // makes layout calculations stable.
+    const prevDisplay = card.style.display;
+    card.style.display = 'none';
+    if (view) view.classList.add('dragging-active');
+    document.body.classList.add('is-card-dragging');
+
+    function ensurePlaceholder() {
+      if (placeholder) return placeholder;
+      placeholder = card.cloneNode(true);
+      placeholder.classList.add('drop-placeholder');
+      placeholder.classList.remove('dragging');
+      placeholder.style.display = '';
+      placeholder.style.background = '';
+      placeholder.style.borderColor = '';
+      delete placeholder.dataset.id; // distinguishable from cards by absence of id
+      return placeholder;
+    }
+    function detachPlaceholder() {
+      if (placeholder?.parentElement) placeholder.parentElement.removeChild(placeholder);
+    }
+
+    function applyFrame() {
+      rafPending = false;
+      if (!ghost || !lastEvt) return;
+      const em = lastEvt;
+      const dx = em.clientX - startX;
+      const dy = em.clientY - startY;
+      ghost.style.transform = `translate3d(${dx}px, ${dy}px, 0) rotate(2deg)`;
+      // Hit-test under the cursor (ghost has pointer-events: none via CSS)
+      const under = document.elementFromPoint(em.clientX, em.clientY);
+      const zone = under?.closest('.bqa-zone');
+      const col  = under?.closest('.col-body');
+      const newTarget = zone || col || null;
+      if (newTarget !== prevHighlight) {
+        if (prevHighlight) prevHighlight.classList.remove('drop-target', 'over');
+        prevHighlight = newTarget;
+        if (zone) zone.classList.add('over');
+        else if (col) col.classList.add('drop-target');
+      }
+      if (zone) {
+        detachPlaceholder();
+        dropTarget = { type: 'zone', el: zone, action: zone.dataset.bqa };
+      } else if (col) {
+        const ph = ensurePlaceholder();
+        // Detach placeholder first so its own height doesn't bias the layout
+        detachPlaceholder();
+        // Visible cards in this column (the original is display:none, so naturally absent)
+        const cards = [...col.children].filter((el) => el.classList?.contains('card'));
+        const after = cards.find((el) => {
+          const r = el.getBoundingClientRect();
+          return em.clientY < r.top + r.height / 2;
+        });
+        if (after) col.insertBefore(ph, after);
+        else col.appendChild(ph);
+        dropTarget = { type: 'column', el: col, status: col.dataset.status };
+      } else {
+        detachPlaceholder();
+        dropTarget = null;
+      }
+    }
+
+    function onMove(em) {
+      lastEvt = em;
+      if (!movedEnough && Math.hypot(em.clientX - startX, em.clientY - startY) >= CLICK_THRESHOLD) {
+        movedEnough = true;
+      }
+      if (!rafPending) {
+        rafPending = true;
+        requestAnimationFrame(applyFrame);
+      }
+    }
+
+    function onUp() {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      if (rafPending && lastEvt) applyFrame();
+      if (movedEnough && !dropTarget && lastEvt) {
+        const u = document.elementFromPoint(lastEvt.clientX, lastEvt.clientY);
+        const z = u?.closest('.bqa-zone');
+        const c = u?.closest('.col-body');
+        if (z) dropTarget = { type: 'zone', el: z, action: z.dataset.bqa };
+        else if (c) dropTarget = { type: 'column', el: c, status: c.dataset.status };
+      }
+      // Snapshot placeholder ordinal BEFORE we tear down DOM. The placeholder
+      // sits exactly where the user wants the card; everything else is in
+      // visible order. (Original card is display:none so naturally excluded.)
+      let placeholderOrder = null;
+      if (dropTarget?.type === 'column' && placeholder?.parentElement === dropTarget.el) {
+        const live = [...dropTarget.el.children].filter((el) => el.classList?.contains('card'));
+        placeholderOrder = live.map((el) => el === placeholder ? action.id : el.dataset.id);
+      }
+      document.querySelectorAll('.col-body.drop-target, .bqa-zone.over').forEach((el) => {
+        el.classList.remove('drop-target', 'over');
+      });
+      detachPlaceholder();
+      document.body.classList.remove('is-card-dragging');
+      if (view) view.classList.remove('dragging-active');
+      card.classList.remove('dragging');
+      card.style.display = prevDisplay; // restore (render() will rebuild anyway on commit)
+      if (ghost) { ghost.remove(); ghost = null; }
+      if (!movedEnough) return;
+      card._suppressClick = true;
+      if (!dropTarget) return;
+      // Hand the precomputed order to the column-drop branch
+      dropTarget.order = placeholderOrder;
+      const sourceProj = projectOfAction(action.id);
+      const a = sourceProj?.actions.find((x) => x.id === action.id);
+      if (!a) return;
+      if (dropTarget.type === 'zone') {
+        if (dropTarget.action === 'done') {
+          if (a.status !== 'done') {
+            // Not done yet → mark done (stays on the board)
+            a.history.push({ at: todayISO(), what: `Status: ${a.status} → done` });
+            a.status = 'done';
+            a.updatedAt = todayISO();
+            commit('done');
+            toast('Marked done');
+          } else {
+            // Already done → archive it (leaves the board, recoverable from Archive)
+            a.deletedAt = todayISO();
+            a.history.push({ at: todayISO(), what: 'Archived from Done' });
+            a.updatedAt = todayISO();
+            commit('archive-done');
+            toast('Archived — restore from Archive view');
+          }
+        } else {
+          a.deletedAt = todayISO();
+          a.history.push({ at: todayISO(), what: 'Moved to Archive' });
+          a.updatedAt = todayISO();
+          commit('archive');
+          toast('Moved to Archive — restore from Archive view');
+        }
+        return;
+      }
+      // type === 'column'
+      const oldStatus = a.status;
+      const newStatus = dropTarget.status;
+      a.status = newStatus;
+      a.updatedAt = todayISO();
+      if (oldStatus !== newStatus) {
+        a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${newStatus}` });
+      }
+      // Use the order captured from the placeholder position; fall back to
+      // the cursor-based insertion if the placeholder was never placed.
+      let filtered;
+      if (dropTarget.order && dropTarget.order.length) {
+        filtered = dropTarget.order;
+      } else {
+        const cards = [...dropTarget.el.querySelectorAll('.card:not(.dragging)')];
+        const dropY = lastEvt?.clientY ?? -Infinity;
+        const after = cards.find((el) => {
+          const r = el.getBoundingClientRect();
+          return dropY < r.top + r.height / 2;
+        });
+        const ids = cards.map((c) => c.dataset.id);
+        filtered = ids.filter((id) => id !== a.id);
+        const insertIdx = after ? filtered.indexOf(after.dataset.id) : filtered.length;
+        filtered.splice(insertIdx === -1 ? filtered.length : insertIdx, 0, a.id);
+      }
+      filtered.forEach((id, i) => {
+        const aa = sourceProj.actions.find((x) => x.id === id);
+        if (aa) aa.priority = i;
+      });
+      commit('move');
+      toast(oldStatus === newStatus ? 'Reordered' : `Moved to ${newStatus}`);
+    }
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  }
+
+  // Shared right-click menu for an action — usable on board cards and gantt bars
+  function actionContextItems(a) {
+    const setStatus = (st) => () => {
+      if (a.status === st) return;
+      a.history.push({ at: todayISO(), what: `Status: ${a.status} → ${st}` });
+      a.status = st;
+      a.updatedAt = todayISO();
+      commit('status');
+    };
+    return [
+      { icon: '✎', label: 'Edit details…', onClick: () => openDrawer(a.id) },
+      { icon: '✎', label: a.notes ? 'Edit note…' : 'Add note…',
+        onClick: () => openNoteEditor(a.id) },
+      { icon: '✎', label: a.description ? 'Edit description…' : 'Add description…',
+        onClick: () => openDescriptionEditor(a.id) },
+      { divider: true },
+      { icon: '○', label: 'Mark not started', onClick: setStatus('todo') },
+      { icon: '◐', label: 'Mark in progress', onClick: setStatus('doing') },
+      { icon: '⨯', label: 'Mark blocked',     onClick: setStatus('blocked') },
+      { icon: '✓', label: 'Mark done',        onClick: setStatus('done') },
+      { divider: true },
+      { icon: '×', label: 'Move to Archive', danger: true, onClick: () => {
+        if (!confirm(`Move "${a.title}" to Archive?`)) return;
+        a.deletedAt = todayISO();
+        a.history.push({ at: todayISO(), what: 'Moved to Archive' });
+        a.updatedAt = todayISO();
+        commit('delete');
+        toast('Moved to Archive');
+      }},
+    ];
+  }
+
+  // Quick plain-text note editor — opens a tiny modal, stores in a.notes
+  function openNoteEditor(actionId) {
+    const a = state.projects.flatMap((p) => p.actions || []).find((x) => x.id === actionId);
+    if (!a) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width:520px;">
+        <div class="desc-head">
+          <div class="desc-title">${escapeHTML(a.title)} — note</div>
+          <button class="icon-btn" id="noteClose" title="Close">×</button>
+        </div>
+        <div style="padding:14px 16px;">
+          <textarea id="noteText" placeholder="Plain-text note (use the description for rich text)" style="width:100%; min-height:140px; resize:vertical; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px; color:var(--text); font: inherit; line-height:1.5; outline:none;">${escapeHTML(a.notes || '')}</textarea>
+        </div>
+        <div class="desc-foot">
+          <button class="ghost" id="noteCancel">Cancel</button>
+          <button class="primary" id="noteSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('noteText').focus(), 30);
+    const close = () => overlay.remove();
+    overlay.querySelector('#noteClose').addEventListener('click', close);
+    overlay.querySelector('#noteCancel').addEventListener('click', close);
+    overlay.querySelector('#noteSave').addEventListener('click', () => {
+      a.notes = document.getElementById('noteText').value.trim();
+      a.updatedAt = todayISO();
+      commit('note');
+      close();
+      toast('Note saved');
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+  }
+
+  // Rich-text description editor — opens a small modal, stores HTML in a.description
+  function openDescriptionEditor(actionId) {
+    const a = state.projects.flatMap((p) => p.actions || []).find((x) => x.id === actionId);
+    if (!a) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal">
+        <div class="desc-head">
+          <div class="desc-title">${escapeHTML(a.title)} — description</div>
+          <button class="icon-btn" id="descClose" title="Close">×</button>
+        </div>
+        <div class="notes-toolbar desc-toolbar">
+          <button data-cmd="bold" title="Bold"><b>B</b></button>
+          <button data-cmd="italic" title="Italic"><i>I</i></button>
+          <button data-cmd="underline" title="Underline"><u>U</u></button>
+          <span class="sep"></span>
+          <button data-cmd="formatBlock" data-arg="<h3>" title="Heading">H</button>
+          <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph">¶</button>
+          <button data-cmd="insertUnorderedList" title="Bullet list">• list</button>
+          <button data-cmd="insertOrderedList" title="Numbered list">1.</button>
+        </div>
+        <div class="desc-body" contenteditable="true" spellcheck="true">${a.description || '<p></p>'}</div>
+        <div class="desc-foot">
+          <button class="ghost" id="descCancel">Cancel</button>
+          <button class="primary" id="descSave">Save</button>
+          ${a.description ? '<button class="ghost desc-clear" id="descClear">Remove description</button>' : ''}
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const body = overlay.querySelector('.desc-body');
+    setTimeout(() => body.focus(), 30);
+    overlay.querySelectorAll('.desc-toolbar [data-cmd]').forEach((btn) => {
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        document.execCommand(btn.dataset.cmd, false, btn.dataset.arg || null);
+        body.focus();
+      });
+    });
+    const close = () => overlay.remove();
+    overlay.querySelector('#descClose').addEventListener('click', close);
+    overlay.querySelector('#descCancel').addEventListener('click', close);
+    overlay.querySelector('#descSave').addEventListener('click', () => {
+      const html = body.innerHTML.trim();
+      const isEmpty = !html || html === '<p></p>' || html === '<br>';
+      a.description = isEmpty ? null : html;
+      a.updatedAt = todayISO();
+      commit('description');
+      close();
+      toast(isEmpty ? 'Description cleared' : 'Description saved');
+    });
+    overlay.querySelector('#descClear')?.addEventListener('click', () => {
+      a.description = null;
+      a.updatedAt = todayISO();
+      commit('description-clear');
+      close();
+      toast('Description removed');
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+  }
+
+  // Hover tooltip showing rich description
+  let hoverDescEl = null;
+  let hoverDescTimer = null;
+  let hoverDescAnchor = null;
+  function ensureHoverDescEl() {
+    if (hoverDescEl) return hoverDescEl;
+    hoverDescEl = document.createElement('div');
+    hoverDescEl.className = 'action-desc-tooltip';
+    document.body.appendChild(hoverDescEl);
+    return hoverDescEl;
+  }
+  function showHoverDesc(a, clientX, clientY) {
+    const el = ensureHoverDescEl();
+    const parts = [];
+    if (a.description) parts.push(`<div class="hover-desc">${a.description}</div>`);
+    if (a.notes) {
+      const safeNote = escapeHTML(a.notes).replace(/\n/g, '<br>');
+      parts.push(`<div class="hover-note"><span class="hover-note-lbl">Note</span>${safeNote}</div>`);
+    }
+    if (!parts.length) return;
+    el.innerHTML = parts.join('');
+    el.style.display = 'block';
+    el.style.left = '0px';
+    el.style.top  = '0px';
+    const r = el.getBoundingClientRect();
+    let x = clientX + 14;
+    let y = clientY + 14;
+    if (x + r.width  > innerWidth - 8)  x = innerWidth - r.width - 8;
+    if (y + r.height > innerHeight - 8) y = clientY - r.height - 14;
+    el.style.left = Math.max(8, x) + 'px';
+    el.style.top  = Math.max(8, y) + 'px';
+  }
+  function hideHoverDesc() {
+    if (hoverDescEl) hoverDescEl.style.display = 'none';
+    clearTimeout(hoverDescTimer);
+    hoverDescTimer = null;
+    // anchor is managed by mouseover/mouseout callers — don't clobber it here
+  }
+  function wireHoverDescOnce() {
+    if (document._descWired) return;
+    document._descWired = true;
+    document.addEventListener('mouseover', (e) => {
+      const el = e.target.closest('.card[data-id], .reg-row[data-id], .tl-bar[data-id]');
+      if (el === hoverDescAnchor) return;
+      // Anchor changed (incl. to null) — kill any pending/visible tooltip first
+      hideHoverDesc();
+      hoverDescAnchor = el;
+      if (!el) return;
+      const id = el.dataset.id;
+      const a = state.projects.flatMap((p) => p.actions || []).find((x) => x.id === id);
+      if (!a || (!a.description && !a.notes)) return;
+      hoverDescTimer = setTimeout(() => showHoverDesc(a, e.clientX, e.clientY), 350);
+    });
+    document.addEventListener('mouseout', (e) => {
+      if (!hoverDescAnchor) return;
+      const next = e.relatedTarget;
+      if (next && hoverDescAnchor.contains(next)) return;
+      hideHoverDesc();
+      hoverDescAnchor = null;
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!hoverDescEl || hoverDescEl.style.display === 'none') return;
+      const r = hoverDescEl.getBoundingClientRect();
+      let x = e.clientX + 14;
+      let y = e.clientY + 14;
+      if (x + r.width  > innerWidth - 8)  x = innerWidth - r.width - 8;
+      if (y + r.height > innerHeight - 8) y = e.clientY - r.height - 14;
+      hoverDescEl.style.left = Math.max(8, x) + 'px';
+      hoverDescEl.style.top  = Math.max(8, y) + 'px';
+    });
   }
 
   function attachColumnDND(body) {
@@ -934,10 +1466,273 @@
     return matches.length ? matches : null;
   }
 
+  /* ---------------------------- Archive ------------------------------ */
+
+  function renderArchive(root) {
+    const view = document.createElement('div');
+    view.className = 'view';
+    // Always cross-project — show every soft-deleted action
+    const items = state.projects.flatMap((p) => (p.actions || [])
+      .filter((a) => a.deletedAt)
+      .map((a) => ({ a, proj: p })));
+    items.sort((x, y) => (y.a.deletedAt || '').localeCompare(x.a.deletedAt || ''));
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Archive</div>
+          <div class="page-sub">${items.length} archived action${items.length === 1 ? '' : 's'} — restore or permanently delete.</div>
+        </div>
+      </div>
+      ${items.length ? `
+        <div class="register archive-table">
+          <div class="reg-head archive-row">
+            <button class="reg-col">Title</button>
+            <button class="reg-col">Project</button>
+            <button class="reg-col">Owner</button>
+            <button class="reg-col">Was</button>
+            <button class="reg-col">Archived</button>
+            <span class="reg-col-spacer"></span>
+            <span class="reg-col-spacer"></span>
+          </div>
+          <div class="reg-body">
+            ${items.map(({ a, proj: pr }) => `
+              <div class="reg-row archive-row" data-id="${a.id}" data-pid="${pr.id}">
+                <div class="reg-cell title-cell">${escapeHTML(a.title)}</div>
+                <div class="reg-cell muted">${escapeHTML(pr.name)}</div>
+                <div class="reg-cell"><span class="avatar">${initials(personName(a.owner))}</span> ${escapeHTML(personName(a.owner))}</div>
+                <div class="reg-cell muted">${escapeHTML(a.status)}</div>
+                <div class="reg-cell muted">${fmtDate(a.deletedAt)}</div>
+                <div class="reg-cell">
+                  <button class="ghost archive-restore" title="Restore">↺ Restore</button>
+                </div>
+                <div class="reg-cell">
+                  <button class="row-del archive-purge" title="Delete permanently">×</button>
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>` : '<div class="empty">No archived items. Move actions to Archive from the board (drag to bin) or the Register × button.</div>'}`;
+    root.appendChild(view);
+
+    view.querySelectorAll('.archive-restore').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.reg-row');
+        const pid = row.dataset.pid;
+        const id = row.dataset.id;
+        const proj = state.projects.find((p) => p.id === pid);
+        const a = (proj?.actions || []).find((x) => x.id === id);
+        if (!a) return;
+        a.deletedAt = null;
+        a.history.push({ at: todayISO(), what: 'Restored from Archive' });
+        a.updatedAt = todayISO();
+        commit('restore');
+        toast('Restored');
+      });
+    });
+    view.querySelectorAll('.archive-purge').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const row = btn.closest('.reg-row');
+        const pid = row.dataset.pid;
+        const id = row.dataset.id;
+        if (!confirm('Permanently delete this action? This cannot be undone (except via undo while still in this session).')) return;
+        const proj = state.projects.find((p) => p.id === pid);
+        if (proj) proj.actions = proj.actions.filter((x) => x.id !== id);
+        commit('purge');
+        toast('Permanently deleted');
+      });
+    });
+  }
+
+  /* --------------------------- Open Points --------------------------- */
+
+  function renderOpenPoints(root) {
+    const proj = curProject();
+    proj.openPoints = proj.openPoints || [];
+    const view = document.createElement('div');
+    view.className = 'view';
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Open points</div>
+          <div class="page-sub">Quick capture for ideas, follow-ups, and questions. Convert any item to an action when ready.</div>
+        </div>
+      </div>
+      <div class="op-quick">
+        <input id="opInput" type="text" placeholder="Type and press Enter — anything to remember (e.g. ‘ask vendor about cell datasheet’)" />
+        <select id="opQuickComp" title="Optional: link to a component on capture">
+          <option value="">— component</option>
+          ${(proj.components || []).map((pt) => `<option value="${pt.id}">${escapeHTML(pt.name)}</option>`).join('')}
+        </select>
+        <button class="ghost" id="opAdd">Add</button>
+      </div>
+      <div class="op-list" id="opList"></div>`;
+    root.appendChild(view);
+
+    function draw() {
+      const list = $('#opList');
+      const items = proj.openPoints || [];
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">No open points yet — capture something above.</div>';
+        return;
+      }
+      list.innerHTML = items.map((op) => {
+        const cmp = findComponent(proj, op.component);
+        const c = cmp ? componentColor(cmp.color) : null;
+        const tint = c ? `style="border-left-color: rgb(${c.rgb})"` : '';
+        // op.notes holds rich HTML; legacy plain-string entries render as text
+        const contextHtml = op.notes && /<\w+/.test(op.notes) ? op.notes : escapeHTML(op.notes || '');
+        return `
+        <div class="op-item" data-id="${op.id}" ${tint}>
+          <div class="op-content">
+            <div class="op-title" contenteditable="true" data-field="title">${escapeHTML(op.title)}</div>
+            <div class="op-context-wrap">
+              <div class="op-toolbar">
+                <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
+                <button type="button" data-cmd="italic" title="Italic"><i>I</i></button>
+                <button type="button" data-cmd="underline" title="Underline"><u>U</u></button>
+                <span class="sep"></span>
+                <button type="button" data-cmd="insertUnorderedList" title="Bullet list">•</button>
+                <button type="button" data-cmd="insertOrderedList" title="Numbered list">1.</button>
+                <span class="sep"></span>
+                <button type="button" data-cmd="createLink" title="Insert link">🔗</button>
+                <label class="op-color" title="Text colour"><input type="color" data-cmd="foreColor" /></label>
+                <button type="button" data-cmd="removeFormat" title="Clear formatting">✕</button>
+              </div>
+              <div class="op-context" contenteditable="true" data-placeholder="Add rich context — bold, lists, links, colour…">${contextHtml}</div>
+            </div>
+            <div class="op-meta">
+              added ${fmtFull(op.createdAt)}
+              ${cmp ? `<span class="component-chip" style="background:rgba(${c.rgb},.2);color:rgb(${c.rgb})">${escapeHTML(cmp.name)}</span>` : ''}
+            </div>
+          </div>
+          <div class="op-actions">
+            <select class="op-component" title="Link to a component">
+              <option value="">— component</option>
+              ${(proj.components || []).map((pt) => `<option value="${pt.id}" ${pt.id === op.component ? 'selected' : ''}>${escapeHTML(pt.name)}</option>`).join('')}
+            </select>
+            <button class="primary op-promote">→ Action</button>
+            <button class="ghost op-discard" title="Discard">×</button>
+          </div>
+        </div>`;
+      }).join('');
+      $$('.op-item', list).forEach((el) => {
+        const id = el.dataset.id;
+        // Title — plain text, save on blur
+        const titleEl = el.querySelector('.op-title');
+        if (titleEl) {
+          titleEl.addEventListener('blur', () => {
+            const op = proj.openPoints.find((x) => x.id === id);
+            if (!op) return;
+            const v = titleEl.textContent.trim();
+            if (op.title !== v) { op.title = v; commit('op-title'); }
+          });
+          titleEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); titleEl.blur(); }
+          });
+        }
+        // Context — rich HTML, save on blur
+        const ctxEl = el.querySelector('.op-context');
+        if (ctxEl) {
+          ctxEl.addEventListener('blur', () => {
+            const op = proj.openPoints.find((x) => x.id === id);
+            if (!op) return;
+            let html = ctxEl.innerHTML.trim();
+            if (html === '<br>' || html === '<p></p>') html = '';
+            if ((op.notes || '') !== html) { op.notes = html; commit('op-context'); }
+          });
+        }
+        // Toolbar — execCommand on click; mousedown preventDefault preserves selection
+        el.querySelectorAll('.op-toolbar [data-cmd]').forEach((btn) => {
+          btn.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const cmd = btn.dataset.cmd;
+            ctxEl?.focus();
+            if (cmd === 'createLink') {
+              const url = prompt('Link URL (https://…):');
+              if (url) document.execCommand('createLink', false, url);
+            } else if (cmd === 'foreColor') {
+              // Triggered by color input change instead
+            } else {
+              document.execCommand(cmd, false, null);
+            }
+          });
+        });
+        const colorInput = el.querySelector('.op-toolbar input[type="color"]');
+        if (colorInput) {
+          colorInput.addEventListener('input', (e) => {
+            ctxEl?.focus();
+            document.execCommand('foreColor', false, e.target.value);
+          });
+        }
+        const compSel = el.querySelector('.op-component');
+        if (compSel) {
+          compSel.addEventListener('change', () => {
+            const op = proj.openPoints.find((x) => x.id === id);
+            if (!op) return;
+            op.component = compSel.value || null;
+            commit('op-component');
+          });
+        }
+        el.querySelector('.op-promote').addEventListener('click', () => {
+          const op = proj.openPoints.find((x) => x.id === id);
+          if (!op) return;
+          // Send rich-HTML context to the action's `description` field, leaving
+          // the plain `notes` empty (unless the legacy notes were plain text).
+          const isHtml = op.notes && /<\w+/.test(op.notes);
+          openQuickAdd('action', {
+            title: op.title,
+            notes: isHtml ? '' : (op.notes || ''),
+            description: isHtml ? op.notes : '',
+            component: op.component,
+          }, () => {
+            proj.openPoints = proj.openPoints.filter((x) => x.id !== id);
+            commit('op-promote');
+            toast('Converted to action');
+          });
+        });
+        el.querySelector('.op-discard').addEventListener('click', () => {
+          if (!confirm('Discard this open point?')) return;
+          proj.openPoints = proj.openPoints.filter((x) => x.id !== id);
+          commit('op-discard');
+        });
+      });
+    }
+
+    const addPoint = () => {
+      const v = $('#opInput').value.trim();
+      if (!v) return;
+      const comp = $('#opQuickComp')?.value || null;
+      proj.openPoints.unshift({ id: uid('op'), title: v, notes: '', component: comp, createdAt: todayISO() });
+      $('#opInput').value = '';
+      if ($('#opQuickComp')) $('#opQuickComp').value = '';
+      commit('op-add');
+      toast('Captured');
+    };
+    $('#opAdd').addEventListener('click', addPoint);
+    $('#opInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addPoint(); }
+    });
+    draw();
+  }
+
   /* ---------------------------- Register ----------------------------- */
 
   // Persistent sort state (so it survives navigation away and back)
   const regState = { sortBy: 'due', sortDir: 'asc' };
+
+  // Predicted completion = explicit override or the due date.
+  function predictedCompletion(a) {
+    return a.predictedCompletion || a.due || '';
+  }
+  // Actual completion = explicit override, otherwise mined from history
+  // (latest "Status: ... → done"), otherwise updatedAt for already-done.
+  function actualCompletion(a) {
+    if (a.actualCompletion) return a.actualCompletion;
+    if (a.status === 'done') {
+      const entry = (a.history || []).filter((h) => /Status:.*→\s*done/.test(h.what)).pop();
+      return entry?.at || a.updatedAt || '';
+    }
+    return '';
+  }
 
   function regSortValue(a, col, proj) {
     switch (col) {
@@ -946,6 +1741,9 @@
       case 'owner':     return personName(a.owner).toLowerCase();
       case 'status':    return ['todo','doing','blocked','done'].indexOf(a.status);
       case 'due':       return a.due || '9999-99-99';
+      case 'predicted': return predictedCompletion(a) || '9999-99-99';
+      case 'actual':    return actualCompletion(a) || '9999-99-99';
+      case 'commitment':return typeof a.commitment === 'number' ? a.commitment : 100;
       case 'updatedAt': return a.updatedAt || '0000-00-00';
     }
     return 0;
@@ -959,10 +1757,11 @@
       <div class="page-head">
         <div>
           <div class="page-title">${escapeHTML(proj.name)} — Register</div>
-          <div class="page-sub">Flat view of all actions. Click a column to sort, click a row to open details.</div>
+          <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters.</div>
         </div>
         <div class="page-actions"><button class="ghost" id="btnAddAction">+ Action</button></div>
       </div>
+      <div class="reg-kpis" id="regKpis"></div>
       <div class="register">
         <div class="reg-head">
           <button class="reg-col" data-col="title">Title</button>
@@ -970,13 +1769,266 @@
           <button class="reg-col" data-col="owner">Owner</button>
           <button class="reg-col" data-col="status">Status</button>
           <button class="reg-col" data-col="due">Due</button>
+          <button class="reg-col" data-col="predicted" title="Predicted completion (defaults to due)">Predicted</button>
+          <button class="reg-col" data-col="actual" title="Actual completion (defaults to when marked done)">Actual</button>
+          <button class="reg-col" data-col="commitment">Commit</button>
           <button class="reg-col" data-col="updatedAt">Updated</button>
+          <span class="reg-col-spacer" aria-hidden="true"></span>
         </div>
         <div class="reg-body" id="regBody"></div>
       </div>`;
     root.appendChild(view);
 
-    function draw() {
+    function drawKpis() {
+      const filtered = (proj.actions || []).filter(actionMatchesFilters);
+      const total = filtered.length;
+      const today = todayISO();
+      const cnt = { todo: 0, doing: 0, blocked: 0, done: 0 };
+      let overdue = 0, soon = 0, openCmtSum = 0, openCount = 0;
+      const byComp = new Map();
+      filtered.forEach((a) => {
+        cnt[a.status] = (cnt[a.status] || 0) + 1;
+        if (a.status !== 'done') {
+          if (a.due) {
+            const dd = dayDiff(a.due, today);
+            if (dd < 0) overdue++;
+            else if (dd <= 7) soon++;
+          }
+          openCmtSum += (typeof a.commitment === 'number') ? a.commitment : 100;
+          openCount++;
+        }
+        const k = a.component || '__none';
+        byComp.set(k, (byComp.get(k) || 0) + 1);
+      });
+      const donePct = total ? Math.round((cnt.done / total) * 100) : 0;
+      const avgOpenCmt = openCount ? Math.round(openCmtSum / openCount) : 0;
+      // Per-person work-equivalent: total open commitment ÷ number of people
+      const personLoad = state.people.length ? Math.round(openCmtSum / state.people.length) : 0;
+
+      // Donut
+      const r = 26, cx = 32, cy = 32;
+      const circ = 2 * Math.PI * r;
+      let off = 0;
+      const slices = [
+        { v: cnt.done,    color: 'var(--ok)',     name: 'Done' },
+        { v: cnt.doing,   color: 'var(--accent)', name: 'In progress' },
+        { v: cnt.blocked, color: 'var(--bad)',    name: 'Blocked' },
+        { v: cnt.todo,    color: 'var(--neutral)',name: 'Not started' },
+      ];
+      const statusKeys = ['done', 'doing', 'blocked', 'todo'];
+      const donutSegs = slices.map((s, i) => {
+        const len = total ? (s.v / total) * circ : 0;
+        const seg = `<circle class="donut-slice" data-set-status="${statusKeys[i]}" cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${s.color}" stroke-width="9" stroke-dasharray="${len.toFixed(2)} ${(circ - len).toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 ${cx} ${cy})"><title>${s.name}: ${s.v} (click to filter)</title></circle>`;
+        off += len;
+        return seg;
+      }).join('');
+
+      // Throughput sparkline (last 8 weeks)
+      const today2 = new Date(); today2.setHours(0, 0, 0, 0);
+      let weekStart = new Date(today2);
+      while (weekStart.getDay() !== 1) weekStart = new Date(weekStart.getTime() - dayMs);
+      const startW = new Date(weekStart.getTime() - 7 * 7 * dayMs);
+      const buckets = new Array(8).fill(0);
+      const re = /Status:.*→\s*done/;
+      filtered.forEach((a) => {
+        const e = (a.history || []).filter((h) => re.test(h.what)).pop();
+        const w = e ? e.at : (a.status === 'done' ? a.updatedAt : null);
+        if (!w) return;
+        const idx = Math.floor((parseDate(w) - startW) / dayMs / 7);
+        if (idx >= 0 && idx < 8) buckets[idx]++;
+      });
+      const maxB = Math.max(1, ...buckets);
+      const sparkBars = buckets.map((v, i) => {
+        const x = i * 11 + 1;
+        const h = (v / maxB) * 28;
+        const y = 32 - h;
+        return `<rect x="${x}" y="${y}" width="9" height="${h.toFixed(1)}" rx="1" fill="var(--ok)" opacity="0.85"><title>${v} done</title></rect>`;
+      }).join('');
+
+      // Opened vs Completed — daily line chart over the past 30 days
+      const days30 = 30;
+      const startDay = new Date(today2.getTime() - (days30 - 1) * dayMs);
+      const opened = new Array(days30).fill(0);
+      const closed = new Array(days30).fill(0);
+      filtered.forEach((a) => {
+        if (a.createdAt) {
+          const idx = Math.floor((parseDate(a.createdAt) - startDay) / dayMs);
+          if (idx >= 0 && idx < days30) opened[idx]++;
+        }
+        const ent = (a.history || []).filter((h) => re.test(h.what)).pop();
+        const when = ent?.at || (a.status === 'done' ? a.updatedAt : null);
+        if (when) {
+          const idx = Math.floor((parseDate(when) - startDay) / dayMs);
+          if (idx >= 0 && idx < days30) closed[idx]++;
+        }
+      });
+      const totalOpened = opened.reduce((s, v) => s + v, 0);
+      const totalClosed = closed.reduce((s, v) => s + v, 0);
+      // Compute total-open count over time by walking back from "today"
+      const todayOpenCount = filtered.filter((x) => x.status !== 'done').length;
+      const openSeries = new Array(days30).fill(0);
+      let runningOpen = todayOpenCount;
+      for (let i = days30 - 1; i >= 0; i--) {
+        openSeries[i] = runningOpen;
+        runningOpen = runningOpen - opened[i] + closed[i];
+      }
+      const lcW = 220, lcH = 70, lcPadL = 4, lcPadR = 4, lcPadT = 4, lcPadB = 4;
+      const lcInnerW = lcW - lcPadL - lcPadR, lcInnerH = lcH - lcPadT - lcPadB;
+      const lcMax = Math.max(1, ...opened, ...closed, ...openSeries);
+      const lcX = (i) => lcPadL + (i / (days30 - 1)) * lcInnerW;
+      const lcY = (v) => lcPadT + lcInnerH - (v / lcMax) * lcInnerH;
+      const linePath = (arr) => arr.map((v, i) =>
+        `${i === 0 ? 'M' : 'L'} ${lcX(i).toFixed(1)} ${lcY(v).toFixed(1)}`).join(' ');
+      const openAreaPath = `M ${lcX(0).toFixed(1)} ${lcY(openSeries[0]).toFixed(1)} ` +
+        openSeries.slice(1).map((v, i) => `L ${lcX(i + 1).toFixed(1)} ${lcY(v).toFixed(1)}`).join(' ') +
+        ` L ${lcX(days30 - 1).toFixed(1)} ${lcY(0).toFixed(1)} L ${lcX(0).toFixed(1)} ${lcY(0).toFixed(1)} Z`;
+      const openedPath = linePath(opened);
+      const closedPath = linePath(closed);
+      const lcTodayX = lcX(days30 - 1).toFixed(1);
+      const lineChartSVG = `
+        <svg class="kpi-linechart" viewBox="0 0 ${lcW} ${lcH}" preserveAspectRatio="none">
+          <line class="lc-baseline" x1="${lcPadL}" x2="${lcW - lcPadR}" y1="${lcY(0).toFixed(1)}" y2="${lcY(0).toFixed(1)}" />
+          <path class="lc-open-area" d="${openAreaPath}" />
+          <path class="lc-opened" d="${openedPath}" />
+          <path class="lc-closed" d="${closedPath}" />
+          <line class="lc-today" x1="${lcTodayX}" x2="${lcTodayX}" y1="${lcPadT}" y2="${lcH - lcPadB}" />
+        </svg>`;
+
+      // Component distribution stacked bar
+      const compEntries = [...byComp.entries()].sort((a, b) => b[1] - a[1]);
+      const compBars = compEntries.map(([cid, n]) => {
+        const cmp = cid === '__none' ? null : findComponent(proj, cid);
+        const c = cmp ? componentColor(cmp.color) : null;
+        const w = total ? (n / total) * 100 : 0;
+        const color = c ? `rgba(${c.rgb},.85)` : 'var(--neutral)';
+        const name = cmp ? cmp.name : 'Unassigned';
+        const filter = cid === '__none' ? '__none__' : cid;
+        return `<div class="seg clickable" data-set-component="${filter}" style="width:${w}%; background:${color};" title="${escapeHTML(name)}: ${n} (click to filter)"></div>`;
+      }).join('');
+      const compLegend = compEntries.slice(0, 6).map(([cid, n]) => {
+        const cmp = cid === '__none' ? null : findComponent(proj, cid);
+        const c = cmp ? componentColor(cmp.color) : null;
+        const color = c ? `rgba(${c.rgb},.95)` : 'var(--neutral)';
+        const filter = cid === '__none' ? '__none__' : cid;
+        return `<span class="cmp-leg-item clickable" data-set-component="${filter}"><span class="dot" style="background:${color}"></span>${escapeHTML(cmp ? cmp.name : 'Unassigned')} <b>${n}</b></span>`;
+      }).join('');
+
+      $('#regKpis').innerHTML = `
+        <div class="reg-kpi clickable" data-clear-filters title="Click to clear filters">
+          <div class="kpi-num">${total}</div>
+          <div class="kpi-lbl">${total === 1 ? 'action' : 'actions'} (filtered)</div>
+        </div>
+        <div class="reg-kpi donut-kpi">
+          <svg class="kpi-donut" viewBox="0 0 64 64">
+            <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--bg-3)" stroke-width="9" />
+            ${donutSegs}
+            <text x="${cx}" y="${cy + 4}" text-anchor="middle" class="kpi-donut-num">${donePct}%</text>
+          </svg>
+          <div class="kpi-donut-legend">
+            <span class="cmp-leg-item clickable" data-set-status="done"><span class="dot" style="background:var(--ok)"></span>Done <b>${cnt.done}</b></span>
+            <span class="cmp-leg-item clickable" data-set-status="doing"><span class="dot" style="background:var(--accent)"></span>Doing <b>${cnt.doing}</b></span>
+            <span class="cmp-leg-item clickable" data-set-status="blocked"><span class="dot" style="background:var(--bad)"></span>Blocked <b>${cnt.blocked}</b></span>
+            <span class="cmp-leg-item clickable" data-set-status="todo"><span class="dot" style="background:var(--neutral)"></span>Todo <b>${cnt.todo}</b></span>
+          </div>
+        </div>
+        <div class="reg-kpi clickable" data-set-due="late" title="Click to filter to overdue">
+          <div class="kpi-num ${overdue > 0 ? 'bad' : ''}">${overdue}</div>
+          <div class="kpi-lbl">overdue</div>
+          <div class="kpi-sub clickable-inline" data-set-due="week" title="Click to filter to due this week">${soon} due ≤ 7d</div>
+        </div>
+        <div class="reg-kpi grow">
+          <div class="kpi-lbl">By component</div>
+          <div class="kpi-stack">${compBars}</div>
+          <div class="cmp-legend">${compLegend}</div>
+        </div>
+        <div class="reg-kpi grow">
+          <div class="kpi-lbl">Opened vs completed (30d)</div>
+          ${lineChartSVG}
+          <div class="cmp-legend">
+            <span class="cmp-leg-item"><span class="dot" style="background:rgba(154,161,184,.7)"></span>Open now <b>${todayOpenCount}</b></span>
+            <span class="cmp-leg-item"><span class="dot" style="background:var(--accent)"></span>Opened <b>${totalOpened}</b></span>
+            <span class="cmp-leg-item"><span class="dot" style="background:var(--ok)"></span>Completed <b>${totalClosed}</b></span>
+            <span class="cmp-leg-item"><span class="dot" style="background:var(--text-faint);opacity:.5"></span>today</span>
+          </div>
+        </div>
+        `;
+
+      // Wire KPI click filters (idempotent — replaces previous listener).
+      // Single click → set filter. Double click → clear that filter only.
+      const kpiPanel = $('#regKpis');
+      const handleKpi = (e, mode) => {
+        const el = e.target.closest('[data-set-status],[data-set-due],[data-set-component],[data-clear-filters]');
+        if (!el) return;
+        e.preventDefault();
+        if (el.dataset.clearFilters !== undefined) {
+          applyTopbarFilter({ clearAll: true });
+          return;
+        }
+        const set = {};
+        const v = mode === 'clear' ? '' : undefined;
+        if (el.dataset.setStatus !== undefined)   set.status    = v ?? el.dataset.setStatus;
+        if (el.dataset.setDue !== undefined)      set.due       = v ?? el.dataset.setDue;
+        if (el.dataset.setComponent !== undefined) set.component = v ?? el.dataset.setComponent;
+        applyTopbarFilter(set);
+      };
+      kpiPanel.onclick    = (e) => handleKpi(e, 'set');
+      kpiPanel.ondblclick = (e) => handleKpi(e, 'clear');
+    }
+
+    function rowHTML(a) {
+      const cmp = findComponent(proj, a.component);
+      const c = cmp ? componentColor(cmp.color) : null;
+      const dueCls = statusOfDue(a.due, a.status);
+      const tint = c ? `style="--row-tint: rgba(${c.rgb},.10);"` : '';
+      const stat = STATUSES.find((s) => s.id === a.status);
+      const isOverdue = a.status !== 'done' && a.due && dayDiff(a.due, todayISO()) < 0;
+      const overdueBadge = isOverdue
+        ? `<span class="overdue-badge" title="Overdue by ${Math.abs(dayDiff(a.due, todayISO()))} day(s)">⏰</span>`
+        : '';
+      return `
+        <div class="reg-row ${isOverdue ? 'is-overdue' : ''}" data-id="${a.id}" ${tint}>
+          <div class="reg-cell title-cell">
+            ${overdueBadge}
+            <input type="text" class="reg-inp title-inp" data-field="title" value="${escapeHTML(a.title)}" />
+            ${a.notes ? '<span class="tag" title="Has notes">note</span>' : ''}
+          </div>
+          <div class="reg-cell">
+            <select class="reg-inp reg-comp" data-field="component" ${c ? `style="color:rgb(${c.rgb}); border-color:rgba(${c.rgb},.4);"` : ''}>
+              <option value="">— None</option>
+              ${(proj.components || []).map((m) => `<option value="${m.id}" ${m.id === a.component ? 'selected' : ''}>${escapeHTML(m.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="reg-cell">
+            <select class="reg-inp" data-field="owner">
+              ${state.people.map((p) => `<option value="${p.id}" ${p.id === a.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="reg-cell status-cell">
+            <span class="col-dot ${stat?.dot}"></span>
+            <select class="reg-inp" data-field="status">
+              ${STATUSES.map((s) => `<option value="${s.id}" ${s.id === a.status ? 'selected' : ''}>${s.name}</option>`).join('')}
+            </select>
+          </div>
+          <div class="reg-cell">
+            <input type="date" class="reg-inp ${dueCls}" data-field="due" value="${a.due || ''}" />
+          </div>
+          <div class="reg-cell">
+            <input type="date" class="reg-inp ${a.predictedCompletion ? 'overridden' : 'derived'}" data-field="predictedCompletion" value="${predictedCompletion(a)}" title="${a.predictedCompletion ? 'Custom predicted date — click 𝕩 to clear' : 'Defaults to due date'}" />
+          </div>
+          <div class="reg-cell">
+            <input type="date" class="reg-inp ${a.actualCompletion ? 'overridden' : 'derived'}" data-field="actualCompletion" value="${actualCompletion(a)}" ${a.status !== 'done' && !a.actualCompletion ? 'placeholder="—" disabled' : ''} title="${a.actualCompletion ? 'Custom actual date' : (a.status === 'done' ? 'Defaults to date marked done' : 'Set when action is marked done')}" />
+          </div>
+          <div class="reg-cell">
+            <input type="number" class="reg-inp commit-inp" data-field="commitment" min="5" max="100" step="5" value="${typeof a.commitment === 'number' ? a.commitment : 100}" />
+          </div>
+          <div class="reg-cell muted">${a.updatedAt ? fmtDate(a.updatedAt) : '—'}</div>
+          <div class="reg-cell">
+            <button class="row-del" title="Delete action" aria-label="Delete">×</button>
+          </div>
+        </div>`;
+    }
+
+    function drawTable() {
       const acts = (proj.actions || []).filter(actionMatchesFilters).slice();
       acts.sort((a, b) => {
         const av = regSortValue(a, regState.sortBy, proj);
@@ -989,27 +2041,65 @@
       if (!acts.length) {
         body.innerHTML = '<div class="empty">No actions match the current filters.</div>';
       } else {
-        body.innerHTML = acts.map((a) => {
-          const cmp = findComponent(proj, a.component);
-          const c = cmp ? componentColor(cmp.color) : null;
-          const dueCls = statusOfDue(a.due, a.status);
-          const stat = STATUSES.find((s) => s.id === a.status);
-          return `
-            <div class="reg-row" data-id="${a.id}">
-              <div class="reg-cell title">${escapeHTML(a.title)}${a.notes ? ' <span class="tag">note</span>' : ''}</div>
-              <div class="reg-cell">${cmp ? `<span class="component-chip" style="background:rgba(${c.rgb},.2);color:rgb(${c.rgb})">${escapeHTML(cmp.name)}</span>` : '<span class="muted">—</span>'}</div>
-              <div class="reg-cell"><span class="avatar">${initials(personName(a.owner))}</span><span class="ow-name">${escapeHTML(personName(a.owner))}</span></div>
-              <div class="reg-cell"><span class="col-dot ${stat?.dot}"></span> ${stat?.name}</div>
-              <div class="reg-cell due ${dueCls}">${a.due ? fmtDate(a.due) : '—'}</div>
-              <div class="reg-cell muted">${a.updatedAt ? fmtDate(a.updatedAt) : '—'}</div>
-            </div>`;
-        }).join('');
-        $$('.reg-row', body).forEach((row) =>
-          row.addEventListener('click', () => openDrawer(row.dataset.id)));
+        body.innerHTML = acts.map(rowHTML).join('');
       }
       $$('.reg-col', view).forEach((b) => b.classList.remove('asc', 'desc'));
       const active = view.querySelector(`.reg-col[data-col="${regState.sortBy}"]`);
       if (active) active.classList.add(regState.sortDir);
+    }
+
+    // Snapshot + lightweight save: don't full-render the view (would lose
+    // input focus and table scroll) — just save and refresh KPIs/row tint.
+    function snapshotForUndo() {
+      undoStack.push(JSON.stringify(state));
+      if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+      redoStack = [];
+    }
+    function applyEdit(id, field, raw) {
+      const a = proj.actions.find((x) => x.id === id);
+      if (!a) return;
+      let changed = false;
+      const today = todayISO();
+      if (field === 'title') {
+        const v = String(raw).trim();
+        if (v && v !== a.title) { a.title = v; changed = true; }
+      } else if (field === 'component') {
+        const v = raw || null;
+        if (v !== a.component) { a.component = v; changed = true; }
+      } else if (field === 'owner') {
+        const v = String(raw);
+        if (v && v !== a.owner) {
+          a.history.push({ at: today, what: `Owner: ${personName(a.owner)} → ${personName(v)}` });
+          a.owner = v; changed = true;
+        }
+      } else if (field === 'status') {
+        const v = String(raw);
+        if (v && v !== a.status) {
+          a.history.push({ at: today, what: `Status: ${a.status} → ${v}` });
+          a.status = v; changed = true;
+        }
+      } else if (field === 'due') {
+        const v = raw || null;
+        if (v !== a.due) {
+          a.history.push({ at: today, what: `Due: ${a.due || '—'} → ${v || '—'}` });
+          a.due = v; changed = true;
+        }
+      } else if (field === 'commitment') {
+        const v = clamp(parseInt(raw, 10) || 100, 5, 100);
+        if (v !== a.commitment) { a.commitment = v; changed = true; }
+      } else if (field === 'predictedCompletion') {
+        const v = raw || null;
+        if ((a.predictedCompletion || null) !== v) { a.predictedCompletion = v; changed = true; }
+      } else if (field === 'actualCompletion') {
+        const v = raw || null;
+        if ((a.actualCompletion || null) !== v) { a.actualCompletion = v; changed = true; }
+      }
+      if (changed) {
+        a.updatedAt = today;
+        snapshotForUndo();
+        saveState();
+        drawKpis();
+      }
     }
 
     $$('.reg-col', view).forEach((btn) => {
@@ -1017,11 +2107,62 @@
         const col = btn.dataset.col;
         if (regState.sortBy === col) regState.sortDir = regState.sortDir === 'asc' ? 'desc' : 'asc';
         else { regState.sortBy = col; regState.sortDir = 'asc'; }
-        draw();
+        drawTable();
       });
     });
+
+    // Event delegation on the body for inline edits and row deletion
+    const body = $('#regBody');
+    body.addEventListener('change', (e) => {
+      const inp = e.target.closest('.reg-inp');
+      if (!inp) return;
+      const row = inp.closest('.reg-row');
+      const id = row?.dataset.id;
+      if (!id) return;
+      applyEdit(id, inp.dataset.field, inp.value);
+      // Refresh just this row so swatches/colors/late state update
+      const a = (curProject().actions || []).find((x) => x.id === id);
+      if (a) {
+        const newRow = document.createElement('div');
+        newRow.innerHTML = rowHTML(a).trim();
+        row.replaceWith(newRow.firstChild);
+      }
+    });
+    body.addEventListener('click', (e) => {
+      const del = e.target.closest('.row-del');
+      if (!del) return;
+      const row = del.closest('.reg-row');
+      const id = row?.dataset.id;
+      const a = (curProject().actions || []).find((x) => x.id === id);
+      if (!a) return;
+      if (!confirm(`Move "${a.title}" to Archive? You can restore it later.`)) return;
+      const sourceProj = projectOfAction(id) || proj;
+      const target = (sourceProj.actions || []).find((x) => x.id === id);
+      if (target) {
+        target.deletedAt = todayISO();
+        target.history.push({ at: todayISO(), what: 'Moved to Archive' });
+        target.updatedAt = todayISO();
+      }
+      snapshotForUndo();
+      saveState();
+      drawKpis();
+      row.remove();
+    });
+    // Right-click on a register row → action context menu
+    body.addEventListener('contextmenu', (e) => {
+      const row = e.target.closest('.reg-row[data-id]');
+      if (!row) return;
+      e.preventDefault();
+      const id = row.dataset.id;
+      const a = (curProject().actions || []).find((x) => x.id === id);
+      if (!a) return;
+      showContextMenu(e.clientX, e.clientY, actionContextItems(a));
+    });
+
     $('#btnAddAction').addEventListener('click', () => openQuickAdd('action'));
-    draw();
+
+    drawKpis();
+    drawTable();
   }
 
   /* ---------------------------- Timeline ----------------------------- */
@@ -1259,10 +2400,11 @@
     }
     const startISO = fmtISO(start);
 
-    // Build lanes by person
+    // Build lanes by person + a bottom events cell to align with the strip
     const people = state.people;
     lanesEl.innerHTML = `<div class="tl-lane header">Owner</div>` +
-      people.map((p) => `<div class="tl-lane" data-owner="${p.id}">${escapeHTML(p.name)}</div>`).join('');
+      people.map((p) => `<div class="tl-lane" data-owner="${p.id}">${escapeHTML(p.name)}</div>`).join('') +
+      `<div class="tl-lane events-lane">Events</div>`;
 
     // Axis
     drawAxis(axisEl, start, totalDays, dw, tlState.granularity);
@@ -1374,18 +2516,84 @@
     todayLine.style.left = todayOffset + 'px';
     gridEl.appendChild(todayLine);
 
-    // Milestones as diamonds spanning all rows
+    // Build the unified events list (milestones / deliverables / meetings)
+    // and render vertical lines spanning the whole grid + a label strip
+    // pinned to the bottom of the grid to avoid clutter.
     const proj = curProject();
+    const events = [];
     (proj.milestones || []).forEach((m) => {
-      if (!m.date) return;
-      const offset = Math.round((parseDate(m.date) - start) / dayMs);
-      if (offset < 0 || offset > totalDays) return;
-      const ms = document.createElement('div');
-      ms.className = 'tl-milestone';
-      ms.style.left = (offset * dw) + 'px';
-      ms.title = `${m.name} — ${fmtFull(m.date)}`;
-      ms.innerHTML = `<span>◇ ${escapeHTML(m.name)}</span>`;
-      gridEl.appendChild(ms);
+      if (m.date) events.push({ kind: 'milestone', date: m.date, name: m.name, status: m.status, sub: 'Milestone' });
+    });
+    (proj.deliverables || []).forEach((dv) => {
+      if (dv.dueDate) events.push({ kind: 'deliverable', date: dv.dueDate, name: dv.name, status: dv.status, sub: 'Deliverable' });
+    });
+    (proj.meetings || []).forEach((mt) => {
+      if (mt.kind === 'oneoff' && mt.date) {
+        events.push({ kind: 'meeting', date: mt.date, name: mt.title, sub: 'Meeting' + (mt.time ? ' ' + mt.time : '') });
+      } else if (mt.kind === 'weekly' && mt.dayOfWeek !== undefined) {
+        // Expand weekly meeting across the visible window
+        const since = mt.startDate ? parseDate(mt.startDate) : start;
+        let dt = new Date(Math.max(start.getTime(), since.getTime()));
+        while (dt.getDay() !== mt.dayOfWeek) dt = new Date(dt.getTime() + dayMs);
+        const last = new Date(start.getTime() + totalDays * dayMs);
+        let first = true;
+        while (dt <= last) {
+          events.push({
+            kind: 'meeting-weekly',
+            date: fmtISO(dt),
+            name: mt.title,
+            sub: 'Weekly' + (mt.time ? ' ' + mt.time : ''),
+            isFirst: first,
+          });
+          first = false;
+          dt = new Date(dt.getTime() + 7 * dayMs);
+        }
+      }
+    });
+
+    // Filter to visible window and sort
+    const winStart = start.getTime();
+    const winEnd = winStart + totalDays * dayMs;
+    const visibleEvents = events.filter((e) => {
+      const t = parseDate(e.date).getTime();
+      return t >= winStart && t <= winEnd;
+    }).sort((a, b) => a.date.localeCompare(b.date));
+
+    // Vertical line per event (spans whole grid including the events row)
+    visibleEvents.forEach((e) => {
+      const offset = Math.round((parseDate(e.date) - start) / dayMs);
+      const x = offset * dw;
+      const line = document.createElement('div');
+      line.className = `tl-event-line tl-evt-${e.kind}`;
+      line.style.left = x + 'px';
+      gridEl.appendChild(line);
+    });
+
+    // Events row at the bottom of the grid (inside tl-grid, so vertical
+    // lines naturally extend down to it). Markers stack to avoid overlap.
+    const eventsRow = document.createElement('div');
+    eventsRow.className = 'tl-events-row';
+    gridEl.appendChild(eventsRow);
+
+    // Place markers, alternating top/bottom slots and skipping repeated weekly
+    // labels (only the first occurrence gets a label) to keep the strip clean.
+    let slotIdx = 0;
+    visibleEvents.forEach((e) => {
+      const offset = Math.round((parseDate(e.date) - start) / dayMs);
+      const x = offset * dw;
+      const labelSuppress = e.kind === 'meeting-weekly' && !e.isFirst;
+      if (labelSuppress) return;
+      const slot = slotIdx % 3; // 3 vertical lanes inside the strip
+      slotIdx++;
+      const m = document.createElement('div');
+      m.className = `tl-event-mark tl-evt-${e.kind} slot-${slot}`;
+      m.style.left = x + 'px';
+      const icon = e.kind === 'milestone' ? '◇'
+                 : e.kind === 'deliverable' ? '◆'
+                 : '⊕';
+      m.title = `${e.sub}: ${e.name} — ${fmtFull(e.date)}`;
+      m.innerHTML = `<span class="evt-icon">${icon}</span><span class="evt-name">${escapeHTML(e.name)}</span>`;
+      eventsRow.appendChild(m);
     });
 
     // Draw bars
@@ -1430,6 +2638,17 @@
       attachBarDND(bar, a, startISO);
       const row = gridEl.children[ownerIdx];
       row.appendChild(bar);
+      // If the bar is too narrow to legibly hold the title, render an
+      // overflow label just to the right of the bar.
+      const NARROW_PX = 100;
+      if (w < NARROW_PX) {
+        const overflow = document.createElement('span');
+        overflow.className = `tl-bar-overflow ${a.status}`;
+        overflow.style.left = (left + w + 4) + 'px';
+        overflow.textContent = a.title;
+        overflow.title = `${a.title} — due ${fmtFull(a.due)}`;
+        row.appendChild(overflow);
+      }
     });
 
     // Double-click empty space creates an action
@@ -1528,6 +2747,12 @@
       e.stopPropagation();
       openDrawer(action.id);
     });
+    bar.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const a = (curProject().actions || []).find((x) => x.id === action.id);
+      if (a) showContextMenu(e.clientX, e.clientY, actionContextItems(a));
+    });
 
     function onMove(e) {
       const dx = e.clientX - originX;
@@ -1625,22 +2850,22 @@
         </div>
       </div>
       <div class="dashboard">
-        <div class="kpi">
+        <div class="kpi clickable" data-dash-filter="late" title="Click to view late items in Register">
           <div class="kpi-label">Late items</div>
           <div class="kpi-value ${k.late > 0 ? 'bad' : 'ok'}">${k.late}</div>
           <div class="kpi-sub">${k.lateRate}% of all actions</div>
         </div>
-        <div class="kpi">
+        <div class="kpi clickable" data-dash-filter="blocked" title="Click to view blocked items in Register">
           <div class="kpi-label">Blocked</div>
           <div class="kpi-value ${k.blocked > 0 ? 'warn' : 'ok'}">${k.blocked}</div>
           <div class="kpi-sub">${k.blockedRatio}% of all actions</div>
         </div>
-        <div class="kpi">
+        <div class="kpi clickable" data-dash-filter="week" title="Click to view items due this week">
           <div class="kpi-label">Due ≤ 7 days</div>
           <div class="kpi-value ${k.upcoming > 4 ? 'warn' : ''}">${k.upcoming}</div>
           <div class="kpi-sub">Upcoming workload</div>
         </div>
-        <div class="kpi">
+        <div class="kpi clickable" data-dash-filter="done" title="Click to view completed items">
           <div class="kpi-label">Completion</div>
           <div class="kpi-value ${k.completionRate >= 70 ? 'ok' : ''}">${k.completionRate}%</div>
           <div class="kpi-sub">${k.done} / ${k.total} done • throughput ${k.throughput}/2w</div>
@@ -1661,6 +2886,20 @@
         </div>
       </div>`;
     root.appendChild(view);
+
+    // Dashboard KPI clicks → navigate to Register pre-filtered.
+    // Double-click clears all filters and still navigates to Register.
+    $$('.kpi.clickable[data-dash-filter]', view).forEach((el) => {
+      el.addEventListener('click', () => {
+        const f = el.dataset.dashFilter;
+        if (f === 'late' || f === 'week') applyTopbarFilter({ due: f, status: '', view: 'register' });
+        else if (f === 'blocked' || f === 'done') applyTopbarFilter({ status: f, due: '', view: 'register' });
+      });
+      el.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        applyTopbarFilter({ clearAll: true, view: 'register' });
+      });
+    });
 
     // Critical focus: late + blocked, then top upcoming
     const today = todayISO();
@@ -1728,6 +2967,29 @@
     let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
     return COMPONENT_COLORS[Math.abs(h) % COMPONENT_COLORS.length];
   }
+
+  // Distinct palette for stacked layers where collision matters (people in
+  // budget chart, cumulative workload, etc). Sized > number of seeded people
+  // so neighbours never share a hue.
+  const PERSON_PALETTE = [
+    { rgb: '96,165,250'  }, // sky
+    { rgb: '244,114,182' }, // pink
+    { rgb: '52,211,153'  }, // mint
+    { rgb: '251,191,36'  }, // amber
+    { rgb: '167,139,250' }, // violet
+    { rgb: '34,211,238'  }, // cyan
+    { rgb: '249,115,22'  }, // orange
+    { rgb: '163,230,53'  }, // lime
+    { rgb: '236,72,153'  }, // fuchsia
+    { rgb: '20,184,166'  }, // teal
+    { rgb: '251,113,133' }, // rose
+    { rgb: '129,140,248' }, // indigo
+    { rgb: '74,222,128'  }, // green
+    { rgb: '125,211,252' }, // light-blue
+    { rgb: '253,164,175' }, // peach
+    { rgb: '161,98,7'    }, // burnt-amber
+  ];
+  function personColorByIndex(i) { return PERSON_PALETTE[i % PERSON_PALETTE.length]; }
 
   // Mine an action's history for "Schedule: A → B…C" entries → array of
   // { at: ISO snapshot date, due: ISO forecast end date }.
@@ -1807,6 +3069,14 @@
         <text x="${padL - 6}" y="${yFor(v) + 3}" text-anchor="end">${v}</text>
       </g>`).join('');
 
+    // Minor horizontal gridlines every 100% (= 1 FTE)
+    const FTE_UNIT = 100;
+    const minorLines = [];
+    for (let v = FTE_UNIT; v <= Math.ceil(maxY); v += FTE_UNIT) {
+      const y = yFor(v).toFixed(1);
+      minorLines.push(`<line class="cumwl-minor" x1="${padL}" x2="${W - padR}" y1="${y}" y2="${y}" />`);
+    }
+
     const capLine = visibleCap > 0
       ? `<line class="chart-cap" x1="${padL}" x2="${W - padR}" y1="${yFor(visibleCap)}" y2="${yFor(visibleCap)}" />
          <text class="chart-label" x="${W - padR - 4}" y="${Math.max(11, yFor(visibleCap) - 3)}" text-anchor="end">cap ${visibleCap}</text>`
@@ -1814,6 +3084,7 @@
 
     return `
       <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
+        ${minorLines.join('')}
         ${capLine}
         ${layers.map((l) => `<path d="${l.path}" fill="rgba(${l.ps.color.rgb},.65)" stroke="rgba(${l.ps.color.rgb},.95)" stroke-width="0.7"><title>${escapeHTML(l.ps.person.name)}</title></path>`).join('')}
         ${yTicks}
@@ -1859,6 +3130,7 @@
 
     state.projects.forEach((proj) => {
       (proj.actions || []).forEach((a) => {
+        if (a.deletedAt) return;
         // created
         if (a.createdAt) {
           const idx = Math.floor((parseDate(a.createdAt) - start) / dayMs / 7);
@@ -1977,7 +3249,7 @@
 
     // Pick top N actions by current due date (focus on most relevant).
     const acts = state.projects.flatMap((p) => (p.actions || []).map((a) => ({ proj: p, a })));
-    const candidates = acts.filter(({ a }) => a.due).map(({ proj, a }) => ({
+    const candidates = acts.filter(({ a }) => a.due && !a.deletedAt).map(({ proj, a }) => ({
       proj, a, hist: scheduleHistory(a),
     })).filter(({ hist }) => hist.length >= 1);
     // Prefer those with movement
@@ -2274,25 +3546,100 @@
 
   /* ---------------------- Engineering side views --------------------- */
 
+  // Shared timeline strip — renders points/markers along a horizontal date axis.
+  // items: [{ id, name, date: 'YYYY-MM-DD', status?, color?, icon? }]
+  function renderTimelineStrip(items) {
+    const dated = items.filter((i) => i.date).map((i) => ({ ...i, t: parseDate(i.date) }));
+    if (!dated.length) return '<div class="empty">Add a date to any item to see it on the timeline.</div>';
+
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const all = [...dated.map((d) => d.t), today];
+    let min = new Date(Math.min(...all));
+    let max = new Date(Math.max(...all));
+    // pad ~10% on each side
+    const span = Math.max(dayMs * 30, max - min);
+    min = new Date(min.getTime() - span * 0.10);
+    max = new Date(max.getTime() + span * 0.10);
+
+    const W = 800, H = 86;
+    const padL = 24, padR = 24, padT = 22, padB = 26;
+    const innerW = W - padL - padR;
+    const xFor = (t) => padL + (t - min) / (max - min) * innerW;
+    const yLine = padT + (H - padT - padB) / 2;
+
+    // Monthly ticks
+    const ticks = [];
+    let dt = new Date(min.getFullYear(), min.getMonth(), 1);
+    if (dt < min) dt = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
+    while (dt <= max) {
+      const x = xFor(dt);
+      ticks.push(`<g><line class="strip-tick" x1="${x}" x2="${x}" y1="${yLine - 6}" y2="${yLine + 6}" /><text class="strip-month" x="${x}" y="${H - 6}" text-anchor="middle">${dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</text></g>`);
+      dt = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
+    }
+
+    const todayX = xFor(today);
+    const todayLine = `<line class="strip-today" x1="${todayX}" x2="${todayX}" y1="${padT - 4}" y2="${H - padB + 6}" /><text class="strip-today-lbl" x="${todayX + 4}" y="${padT - 6}">today</text>`;
+
+    // Stagger labels: alternate above/below to reduce overlap
+    const sorted = dated.slice().sort((a, b) => a.t - b.t);
+    const markers = sorted.map((it, i) => {
+      const x = xFor(it.t);
+      const above = i % 2 === 0;
+      const labelY = above ? padT - 4 : H - padB + 14;
+      const lineY1 = above ? padT - 0 : yLine + 4;
+      const lineY2 = above ? yLine - 4 : H - padB + 6;
+      const cls = it.status === 'done' ? 'done' : (it.t < today && it.status !== 'done' ? 'late' : '');
+      return `
+        <g class="strip-mark ${cls}">
+          <line class="strip-stem" x1="${x}" x2="${x}" y1="${lineY1}" y2="${lineY2}" />
+          <circle cx="${x}" cy="${yLine}" r="5" />
+          <text class="strip-lbl" x="${x}" y="${labelY}" text-anchor="middle">
+            <title>${escapeHTML(it.name)} — ${it.date}${it.status ? ` (${it.status})` : ''}</title>
+            ${escapeHTML(it.name)}
+          </text>
+          <text class="strip-date" x="${x}" y="${above ? padT + 8 : yLine + 18}" text-anchor="middle">${fmtDate(it.date)}</text>
+        </g>`;
+    }).join('');
+
+    return `
+      <svg viewBox="0 0 ${W} ${H}" class="strip-svg" preserveAspectRatio="xMidYMid meet">
+        ${ticks.join('')}
+        <line class="strip-axis" x1="${padL}" x2="${W - padR}" y1="${yLine}" y2="${yLine}" />
+        ${todayLine}
+        ${markers}
+      </svg>`;
+  }
+
   function renderDeliverables(root) {
     const proj = curProject();
     const view = document.createElement('div');
     view.className = 'view';
+    const items = (proj.deliverables || []).map((d) => ({
+      id: d.id, name: d.name, date: d.dueDate, status: d.status,
+    }));
     view.innerHTML = `
       <div class="page-head">
         <div><div class="page-title">Deliverables</div><div class="page-sub">Optional — group actions under a deliverable.</div></div>
         <div class="page-actions"><button class="ghost" id="btnAddDel">+ Deliverable</button></div>
       </div>
-      <div class="row-list" id="delList"></div>`;
+      <div class="row-list" id="delList"></div>
+      <div class="panel chart-panel" style="margin-top:14px;">
+        <div class="panel-title">Timeline</div>
+        ${renderTimelineStrip(items)}
+      </div>`;
     root.appendChild(view);
     const list = $('#delList');
     if (!proj.deliverables?.length) list.innerHTML = '<div class="empty">No deliverables yet.</div>';
     else {
-      list.innerHTML = proj.deliverables.map((d) => `
-        <div class="row">
-          <span>◆ ${escapeHTML(d.name)}</span>
-          <span class="row-meta">${d.dueDate || '—'} • ${escapeHTML(d.status || 'todo')}</span>
-        </div>`).join('');
+      list.innerHTML = proj.deliverables.map((d) => {
+        const dueCls = d.status === 'done' ? '' :
+          (d.dueDate && dayDiff(d.dueDate, todayISO()) < 0 ? 'late' : '');
+        return `
+          <div class="row ${dueCls}">
+            <span>◆ ${escapeHTML(d.name)}</span>
+            <span class="row-meta">${d.dueDate ? fmtFull(d.dueDate) : '—'} • ${escapeHTML(d.status || 'todo')}</span>
+          </div>`;
+      }).join('');
     }
     $('#btnAddDel').addEventListener('click', () => openQuickAdd('deliverable'));
   }
@@ -2301,50 +3648,339 @@
     const proj = curProject();
     const view = document.createElement('div');
     view.className = 'view';
+    const items = (proj.milestones || []).map((m) => ({
+      id: m.id, name: m.name, date: m.date, status: m.status,
+    }));
     view.innerHTML = `
       <div class="page-head">
         <div><div class="page-title">Milestones</div><div class="page-sub">Optional — anchor key dates.</div></div>
         <div class="page-actions"><button class="ghost" id="btnAddMile">+ Milestone</button></div>
       </div>
-      <div class="row-list" id="mileList"></div>`;
+      <div class="row-list" id="mileList"></div>
+      <div class="panel chart-panel" style="margin-top:14px;">
+        <div class="panel-title">Timeline</div>
+        ${renderTimelineStrip(items)}
+      </div>`;
     root.appendChild(view);
     const list = $('#mileList');
     if (!proj.milestones?.length) list.innerHTML = '<div class="empty">No milestones yet.</div>';
     else {
-      list.innerHTML = proj.milestones.map((m) => `
-        <div class="row">
-          <span>◇ ${escapeHTML(m.name)}</span>
-          <span class="row-meta">${m.date || '—'}</span>
-        </div>`).join('');
+      list.innerHTML = proj.milestones.map((m) => {
+        const dueCls = m.status === 'done' ? '' :
+          (m.date && dayDiff(m.date, todayISO()) < 0 ? 'late' : '');
+        return `
+          <div class="row ${dueCls}">
+            <span>◇ ${escapeHTML(m.name)}</span>
+            <span class="row-meta">${m.date ? fmtFull(m.date) : '—'} • ${escapeHTML(m.status || 'todo')}</span>
+          </div>`;
+      }).join('');
     }
     $('#btnAddMile').addEventListener('click', () => openQuickAdd('milestone'));
   }
 
+  // Persistent filter state for the R&O page
+  const roState = { kind: 'all', view: 'list' }; // view: 'list' | 'matrix'
+
+  function openRiskEditor(riskId) {
+    const proj = curProject();
+    const r = (proj.risks || []).find((x) => x.id === riskId);
+    if (!r) return;
+    ensureRiskShape(r);
+    const isOpp = (r.kind || 'risk') === 'opportunity';
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width:560px;">
+        <div class="desc-head">
+          <div class="desc-title">${escapeHTML(r.title)} — ${isOpp ? 'opportunity' : 'risk'}</div>
+          <button class="icon-btn" id="reClose" title="Close">×</button>
+        </div>
+        <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
+          <div class="field"><label>Type</label>
+            <div class="seg" role="tablist" aria-label="Kind">
+              <button type="button" class="seg-btn ${!isOpp ? 'active' : ''}" data-re-kind="risk">▲ Risk</button>
+              <button type="button" class="seg-btn ${isOpp ? 'active' : ''}" data-re-kind="opportunity">▽ Opportunity</button>
+            </div>
+          </div>
+          <div class="field"><label>Title</label><input id="reTitle" value="${escapeHTML(r.title)}" /></div>
+          <div class="qa-row">
+            <div class="field"><label>Inherent P (1-5)</label><input id="rePI" type="number" min="1" max="5" value="${r.inherent.probability}" /></div>
+            <div class="field"><label>Inherent I (1-5)</label><input id="reII" type="number" min="1" max="5" value="${r.inherent.impact}" /></div>
+          </div>
+          <div class="qa-row">
+            <div class="field"><label>Residual P (post-action)</label><input id="rePR" type="number" min="1" max="5" value="${r.residual.probability}" /></div>
+            <div class="field"><label>Residual I (post-action)</label><input id="reIR" type="number" min="1" max="5" value="${r.residual.impact}" /></div>
+          </div>
+          <div class="field"><label>Owner</label>
+            <select id="reOwner">${state.people.map((p) => `<option value="${p.id}" ${p.id === r.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label id="reMitLbl">${isOpp ? 'Capture plan' : 'Mitigation'}</label><textarea id="reMit" style="min-height:80px;">${escapeHTML(r.mitigation || '')}</textarea></div>
+          <div class="field"><label>Linked action (optional)</label>
+            <select id="reActionLink">
+              <option value="">— none —</option>
+              ${(proj.actions || []).slice().sort((a, b) => a.title.localeCompare(b.title)).map((a) => `<option value="${a.id}" ${a.id === r.actionId ? 'selected' : ''}>${escapeHTML(a.title)} — ${escapeHTML(personName(a.owner))}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="desc-foot">
+          <button class="ghost" id="reCancel">Cancel</button>
+          <button class="ghost" id="reDelete" style="margin-left:auto; color:var(--bad);">Delete</button>
+          <button class="primary" id="reSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('reTitle').focus(), 30);
+
+    let kind = isOpp ? 'opportunity' : 'risk';
+    overlay.querySelectorAll('.seg-btn[data-re-kind]').forEach((b) => {
+      b.addEventListener('click', () => {
+        kind = b.dataset.reKind;
+        overlay.querySelectorAll('.seg-btn[data-re-kind]').forEach((x) =>
+          x.classList.toggle('active', x.dataset.reKind === kind));
+        document.getElementById('reMitLbl').textContent =
+          kind === 'opportunity' ? 'Capture plan' : 'Mitigation';
+      });
+    });
+
+    const close = () => overlay.remove();
+    overlay.querySelector('#reClose').addEventListener('click', close);
+    overlay.querySelector('#reCancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+
+    overlay.querySelector('#reSave').addEventListener('click', () => {
+      r.kind = kind;
+      r.title = document.getElementById('reTitle').value.trim() || r.title;
+      r.inherent = {
+        probability: clamp(parseInt(document.getElementById('rePI').value, 10) || 3, 1, 5),
+        impact:      clamp(parseInt(document.getElementById('reII').value, 10) || 3, 1, 5),
+      };
+      r.residual = {
+        probability: clamp(parseInt(document.getElementById('rePR').value, 10) || r.inherent.probability, 1, 5),
+        impact:      clamp(parseInt(document.getElementById('reIR').value, 10) || r.inherent.impact,      1, 5),
+      };
+      r.mitigation = document.getElementById('reMit').value;
+      r.owner = document.getElementById('reOwner').value;
+      r.actionId = document.getElementById('reActionLink').value || null;
+      commit('risk-edit');
+      close();
+      toast('Saved');
+    });
+    overlay.querySelector('#reDelete').addEventListener('click', () => {
+      if (!confirm(`Delete "${r.title}"?`)) return;
+      proj.risks = (proj.risks || []).filter((x) => x.id !== r.id);
+      commit('risk-delete');
+      close();
+      toast('Deleted');
+    });
+  }
+
+  // Helpers — work for both new schema (inherent/residual) and legacy (probability/impact)
+  function getInherent(r) {
+    if (r.inherent && typeof r.inherent.probability === 'number') return r.inherent;
+    return { probability: r.probability || 0, impact: r.impact || 0 };
+  }
+  function getResidual(r) {
+    if (r.residual && typeof r.residual.probability === 'number') return r.residual;
+    return getInherent(r);
+  }
+  function ensureRiskShape(r) {
+    if (!r.inherent) r.inherent = { probability: r.probability || 3, impact: r.impact || 3 };
+    if (!r.residual) r.residual = { ...r.inherent };
+  }
+
+  function riskMatrixSVG(items) {
+    const W = 540, H = 460;
+    const padL = 60, padR = 20, padT = 30, padB = 56;
+    const cellW = (W - padL - padR) / 5;
+    const cellH = (H - padT - padB) / 5;
+
+    const cells = [];
+    for (let p = 1; p <= 5; p++) {
+      for (let i = 1; i <= 5; i++) {
+        const score = p * i;
+        const cls = score >= 15 ? 'extreme' : score >= 10 ? 'high' : score >= 5 ? 'mid' : 'low';
+        const x = padL + (p - 1) * cellW;
+        const y = padT + (5 - i) * cellH;
+        cells.push(`<rect class="mtx-cell mtx-${cls}" x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${cellW.toFixed(1)}" height="${cellH.toFixed(1)}" />`);
+        cells.push(`<text class="mtx-cell-num" x="${(x + cellW/2).toFixed(1)}" y="${(y + cellH/2 + 4).toFixed(1)}" text-anchor="middle">${score}</text>`);
+      }
+    }
+
+    const xLabels = [1, 2, 3, 4, 5].map((p) =>
+      `<text class="mtx-tick" x="${(padL + (p - 0.5) * cellW).toFixed(1)}" y="${padT + 5 * cellH + 16}" text-anchor="middle">${p}</text>`).join('');
+    const yLabels = [1, 2, 3, 4, 5].map((i) =>
+      `<text class="mtx-tick" x="${padL - 8}" y="${(padT + (5 - i + 0.5) * cellH + 4).toFixed(1)}" text-anchor="end">${i}</text>`).join('');
+
+    const markers = items.map((r) => {
+      const inh = getInherent(r);
+      const res = getResidual(r);
+      const xInh = padL + (Math.max(1, inh.probability) - 0.5) * cellW;
+      const yInh = padT + (5 - Math.max(1, inh.impact) + 0.5) * cellH;
+      const xRes = padL + (Math.max(1, res.probability) - 0.5) * cellW;
+      const yRes = padT + (5 - Math.max(1, res.impact) + 0.5) * cellH;
+      const isOpp = (r.kind || 'risk') === 'opportunity';
+      const moved = (xInh !== xRes || yInh !== yRes);
+      let svg = '';
+      if (moved) {
+        // Arrow from inherent to residual using a marker-end
+        svg += `<line class="mtx-arrow ${isOpp ? 'opp' : 'risk'}" x1="${xInh.toFixed(1)}" y1="${yInh.toFixed(1)}" x2="${xRes.toFixed(1)}" y2="${yRes.toFixed(1)}" marker-end="url(#mtxArrow${isOpp ? 'Opp' : 'Risk'})" />`;
+      }
+      // Inherent point (hollow ring)
+      svg += `<circle class="mtx-pt mtx-pt-inh ${isOpp ? 'opp' : 'risk'}" cx="${xInh.toFixed(1)}" cy="${yInh.toFixed(1)}" r="7"><title>${escapeHTML(r.title)} — inherent P${inh.probability}×I${inh.impact} = ${inh.probability * inh.impact}</title></circle>`;
+      // Residual point (filled), only if moved
+      if (moved) {
+        svg += `<circle class="mtx-pt mtx-pt-res ${isOpp ? 'opp' : 'risk'}" cx="${xRes.toFixed(1)}" cy="${yRes.toFixed(1)}" r="5"><title>${escapeHTML(r.title)} — residual P${res.probability}×I${res.impact} = ${res.probability * res.impact}</title></circle>`;
+      }
+      return svg;
+    }).join('');
+
+    return `
+      <svg viewBox="0 0 ${W} ${H}" class="mtx-svg" preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <marker id="mtxArrowRisk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(248,113,113,.85)" />
+          </marker>
+          <marker id="mtxArrowOpp" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(74,222,128,.85)" />
+          </marker>
+        </defs>
+        ${cells.join('')}
+        ${xLabels}
+        ${yLabels}
+        <text class="mtx-axis-lbl" x="${(padL + (W - padL - padR) / 2).toFixed(1)}" y="${H - 18}" text-anchor="middle">Probability →</text>
+        <text class="mtx-axis-lbl" x="${20}" y="${(padT + (H - padT - padB) / 2).toFixed(1)}" text-anchor="middle" transform="rotate(-90 20 ${(padT + (H - padT - padB) / 2).toFixed(1)})">Impact →</text>
+        ${markers}
+      </svg>
+      <div class="mtx-legend">
+        <span class="legend-item"><span class="dot mtx-low"></span>Low (≤4)</span>
+        <span class="legend-item"><span class="dot mtx-mid"></span>Medium (5-9)</span>
+        <span class="legend-item"><span class="dot mtx-high"></span>High (10-14)</span>
+        <span class="legend-item"><span class="dot mtx-extreme"></span>Extreme (15+)</span>
+        <span class="sep"></span>
+        <span class="legend-item"><svg width="22" height="10"><circle cx="6" cy="5" r="4" class="mtx-pt-inh risk"/><line x1="10" y1="5" x2="20" y2="5" stroke="rgba(248,113,113,.7)" stroke-width="1.4" /></svg>inherent → residual</span>
+      </div>`;
+  }
+
   function renderRisks(root) {
     const proj = curProject();
+    proj.risks = proj.risks || [];
+    proj.risks.forEach(ensureRiskShape);
     const view = document.createElement('div');
     view.className = 'view';
     view.innerHTML = `
       <div class="page-head">
-        <div><div class="page-title">Risks</div><div class="page-sub">Probability × Impact — both 1 (low) to 5 (high).</div></div>
-        <div class="page-actions"><button class="ghost" id="btnAddRisk">+ Risk</button></div>
+        <div>
+          <div class="page-title">Risks &amp; Opportunities</div>
+          <div class="page-sub">Inherent (raw) vs residual (post-mitigation) on a 5×5 matrix. Risks track downside; opportunities track upside.</div>
+        </div>
+        <div class="page-actions">
+          <div class="seg" role="tablist" aria-label="View">
+            <button class="seg-btn ${roState.view === 'list' ? 'active' : ''}" data-ro-view="list">List</button>
+            <button class="seg-btn ${roState.view === 'matrix' ? 'active' : ''}" data-ro-view="matrix">Matrix</button>
+          </div>
+          <div class="seg" role="tablist" aria-label="Kind">
+            <button class="seg-btn ${roState.kind === 'all' ? 'active' : ''}" data-kind="all">All</button>
+            <button class="seg-btn ${roState.kind === 'risk' ? 'active' : ''}" data-kind="risk">Risks</button>
+            <button class="seg-btn ${roState.kind === 'opportunity' ? 'active' : ''}" data-kind="opportunity">Opportunities</button>
+          </div>
+          <button class="ghost" id="btnAddRisk">+ Risk</button>
+          <button class="ghost" id="btnAddOpp">+ Opportunity</button>
+        </div>
       </div>
-      <div class="row-list" id="riskList"></div>`;
+      <div id="roBody"></div>`;
     root.appendChild(view);
-    const list = $('#riskList');
-    if (!proj.risks?.length) list.innerHTML = '<div class="empty">No risks logged.</div>';
-    else {
-      list.innerHTML = proj.risks.map((r) => {
-        const score = (r.probability || 0) * (r.impact || 0);
-        const cls = score >= 12 ? 'late' : score >= 6 ? 'soon' : '';
+
+    function draw() {
+      const body = $('#roBody');
+      const items = proj.risks.filter((r) => roState.kind === 'all' || (r.kind || 'risk') === roState.kind);
+      if (!items.length) {
+        body.innerHTML = `<div class="empty">${
+          roState.kind === 'opportunity' ? 'No opportunities logged yet.' :
+          roState.kind === 'risk'        ? 'No risks logged yet.' :
+                                           'No risks or opportunities logged.'}</div>`;
+        return;
+      }
+      if (roState.view === 'matrix') {
+        body.innerHTML = `<div class="panel chart-panel">${riskMatrixSVG(items)}</div>`;
+        return;
+      }
+      // List view
+      const sorted = items.slice().sort((a, b) => {
+        const sa = getInherent(a), sb = getInherent(b);
+        return (sb.probability * sb.impact) - (sa.probability * sa.impact);
+      });
+      body.innerHTML = `<div class="row-list">${sorted.map((r) => {
+        const kind = r.kind || 'rule';
+        const inh = getInherent(r);
+        const res = getResidual(r);
+        const inhScore = inh.probability * inh.impact;
+        const resScore = res.probability * res.impact;
+        const moved = inhScore !== resScore;
+        const sevCls = inhScore >= 12 ? 'high' : inhScore >= 6 ? 'mid' : 'low';
+        const icon = kind === 'opportunity' ? '▽' : '△';
+        const responseLbl = kind === 'opportunity' ? 'Capture' : 'Mitigation';
+        const linkedAction = r.actionId ? state.projects.flatMap((p) => p.actions || []).find((a) => a.id === r.actionId) : null;
         return `
-          <div class="row ${cls}">
-            <span>△ ${escapeHTML(r.title)}</span>
-            <span class="row-meta">P${r.probability}×I${r.impact} = ${score} • ${escapeHTML(personName(r.owner))}</span>
+          <div class="row ro-row kind-${kind === 'opportunity' ? 'opportunity' : 'risk'} sev-${sevCls}" data-risk-id="${r.id}">
+            <span class="ro-icon" title="${kind}">${icon}</span>
+            <span class="ro-title">${escapeHTML(r.title)}</span>
+            <span class="ro-score">
+              ${moved ? `<span class="ro-pre">${inhScore}</span><span class="ro-arrow">→</span><b>${resScore}</b>` : `<b>${inhScore}</b>`}
+            </span>
+            <span class="row-meta">
+              <span class="ro-resp" title="${responseLbl}">${escapeHTML(r.mitigation || '—')}</span>
+              ${linkedAction ? `<span class="ro-link clickable" data-open-action="${linkedAction.id}">↗ ${escapeHTML(linkedAction.title)}</span>` : ''}
+              <span class="ro-owner">${escapeHTML(personName(r.owner))}</span>
+            </span>
           </div>`;
-      }).join('');
+      }).join('')}</div>`;
+      // Click linked action → drawer
+      $$('.ro-link[data-open-action]', body).forEach((el) =>
+        el.addEventListener('click', () => openDrawer(el.dataset.openAction)));
+      // Right-click on a risk/opportunity row → context menu (Edit / Delete)
+      $$('.ro-row[data-risk-id]', body).forEach((row) => {
+        row.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const id = row.dataset.riskId;
+          const r = (proj.risks || []).find((x) => x.id === id);
+          if (!r) return;
+          const isOpp = (r.kind || 'risk') === 'opportunity';
+          showContextMenu(e.clientX, e.clientY, [
+            { icon: '✎', label: 'Edit…', onClick: () => openRiskEditor(id) },
+            { divider: true },
+            { icon: '×', label: `Delete ${isOpp ? 'opportunity' : 'risk'}`, danger: true, onClick: () => {
+              if (!confirm(`Delete "${r.title}"? This cannot be undone (except via undo).`)) return;
+              proj.risks = (proj.risks || []).filter((x) => x.id !== id);
+              commit('risk-delete');
+              toast('Deleted');
+            }},
+          ]);
+        });
+        // Double-click also opens the editor (consistent with kanban / gantt)
+        row.addEventListener('dblclick', () => openRiskEditor(row.dataset.riskId));
+      });
     }
-    $('#btnAddRisk').addEventListener('click', () => openQuickAdd('risk'));
+
+    $$('.seg-btn[data-kind]', view).forEach((b) => {
+      b.addEventListener('click', () => {
+        roState.kind = b.dataset.kind;
+        $$('.seg-btn[data-kind]', view).forEach((x) => x.classList.toggle('active', x.dataset.kind === roState.kind));
+        draw();
+      });
+    });
+    $$('.seg-btn[data-ro-view]', view).forEach((b) => {
+      b.addEventListener('click', () => {
+        roState.view = b.dataset.roView;
+        $$('.seg-btn[data-ro-view]', view).forEach((x) => x.classList.toggle('active', x.dataset.roView === roState.view));
+        draw();
+      });
+    });
+    $('#btnAddRisk').addEventListener('click', () => openQuickAdd('risk', { kind: 'risk' }));
+    $('#btnAddOpp').addEventListener('click', () => openQuickAdd('risk', { kind: 'opportunity' }));
+    draw();
   }
 
   function renderDecisions(root) {
@@ -2386,15 +4022,22 @@
     if (!proj.components.length) {
       list.innerHTML = '<div class="empty">No components yet — add one to start colour-coding actions.</div>';
     } else {
+      const knownCCs = getCostCentres();
       list.innerHTML = proj.components.map((pt) => {
         const c = componentColor(pt.color);
         const count = (proj.actions || []).filter((a) => a.component === pt.id).length;
+        const ccOptions = [...new Set([...knownCCs, ...(pt.costCenter ? [pt.costCenter] : [])])];
         return `
           <div class="row" data-component-id="${pt.id}">
             <span class="component-swatch" style="background: rgba(${c.rgb},.9);"></span>
             <input class="inline component-name" value="${escapeHTML(pt.name)}" />
             <select class="inline component-color">
               ${COMPONENT_COLORS.map((co) => `<option value="${co.id}" ${co.id === pt.color ? 'selected' : ''}>${co.name}</option>`).join('')}
+            </select>
+            <select class="inline component-cc" title="Cost centre">
+              <option value="">— none —</option>
+              ${ccOptions.map((code) => `<option value="${escapeHTML(code)}" ${code === pt.costCenter ? 'selected' : ''}>${escapeHTML(code)}</option>`).join('')}
+              <option value="__new__">+ New cost centre…</option>
             </select>
             <span class="row-meta">${count} action${count === 1 ? '' : 's'}</span>
             <button class="icon-btn component-del" title="Delete">×</button>
@@ -2414,6 +4057,32 @@
           if (pt) { pt.color = sel.value; commit('component-recolor'); }
         });
       });
+      $$('.component-cc', list).forEach((sel) => {
+        sel.addEventListener('change', () => {
+          const id = sel.closest('[data-component-id]').dataset.componentId;
+          const pt = proj.components.find((p) => p.id === id);
+          if (!pt) return;
+          let v = sel.value;
+          if (v === '__new__') {
+            const code = prompt('New cost-centre code (alphanumeric, dashes/underscores allowed):');
+            if (!code) { sel.value = pt.costCenter || ''; return; }
+            const trimmed = code.trim();
+            if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+              toast('Cost centre: alphanumeric only');
+              sel.value = pt.costCenter || '';
+              return;
+            }
+            state.budgets = state.budgets || {};
+            state.budgets[trimmed] = state.budgets[trimmed] || {};
+            v = trimmed;
+          }
+          v = v || null;
+          if (pt.costCenter !== v) {
+            pt.costCenter = v;
+            commit('component-cc');
+          }
+        });
+      });
       $$('.component-del', list).forEach((btn) => {
         btn.addEventListener('click', () => {
           const id = btn.closest('[data-component-id]').dataset.componentId;
@@ -2427,6 +4096,625 @@
       });
     }
     $('#btnAddComponent').addEventListener('click', () => openQuickAdd("component"));
+  }
+
+  // EVM KPI hover tooltip — single floating element, populated on demand
+  let evmTipEl = null;
+  function ensureEvmTipEl() {
+    if (evmTipEl) return evmTipEl;
+    evmTipEl = document.createElement('div');
+    evmTipEl.className = 'evm-tooltip';
+    document.body.appendChild(evmTipEl);
+    return evmTipEl;
+  }
+  function showEvmTooltip(metric, x, y) {
+    const def = EVM_DEFS[metric];
+    if (!def) return;
+    const tip = ensureEvmTipEl();
+    tip.innerHTML = `
+      <div class="evm-name">${escapeHTML(metric)} — ${escapeHTML(def.name)}</div>
+      <div class="evm-formula"><span class="evm-lbl">Formula</span><code>${escapeHTML(def.formula)}</code></div>
+      <div class="evm-desc">${escapeHTML(def.desc)}</div>`;
+    tip.style.display = 'block';
+    const r = tip.getBoundingClientRect();
+    let px = x + 14, py = y + 14;
+    if (px + r.width  > innerWidth  - 8) px = x - r.width - 14;
+    if (py + r.height > innerHeight - 8) py = y - r.height - 14;
+    tip.style.left = Math.max(8, px) + 'px';
+    tip.style.top  = Math.max(8, py) + 'px';
+  }
+  function hideEvmTooltip() { if (evmTipEl) evmTipEl.style.display = 'none'; }
+
+  function wireEvmTooltipsOnce() {
+    if (document._evmWired) return;
+    document._evmWired = true;
+    document.addEventListener('mouseover', (e) => {
+      const card = e.target.closest('.bk[data-evm]');
+      if (card) showEvmTooltip(card.dataset.evm, e.clientX, e.clientY);
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!evmTipEl || evmTipEl.style.display === 'none') return;
+      const card = e.target.closest('.bk[data-evm]');
+      if (!card) { hideEvmTooltip(); return; }
+      // keep showing — re-position smoothly
+      showEvmTooltip(card.dataset.evm, e.clientX, e.clientY);
+    });
+    document.addEventListener('mouseout', (e) => {
+      const card = e.target.closest('.bk[data-evm]');
+      if (!card) return;
+      const next = e.relatedTarget;
+      if (next && card.contains(next)) return;
+      hideEvmTooltip();
+    });
+  }
+
+  /* ------------------------ Cost-centre budgets ---------------------- */
+
+  // Hours per FTE-week. Used to convert commitment % → planned hours.
+  const HOURS_PER_WEEK = 40;
+
+  // Earned-Value Management metric definitions (used for the budget KPI tooltips)
+  const EVM_DEFS = {
+    BAC: { name: 'Budget at Completion',     formula: 'Σ weekly budget across the horizon',
+           desc: 'The total approved budget for the cost centre.' },
+    PV:  { name: 'Planned Value',             formula: 'Σ budget up to today',
+           desc: 'How much work, in budgeted terms, was planned to be done by now.' },
+    AC:  { name: 'Actual Cost',               formula: 'Σ actual cost up to today',
+           desc: 'Cost actually incurred so far, summed from action commitments × hourly rates.' },
+    EV:  { name: 'Earned Value',              formula: 'Σ planned cost × % complete',
+           desc: 'The budgeted value of the work actually performed. Done actions credit full cost; in-flight ones credit by elapsed/total duration.' },
+    CV:  { name: 'Cost Variance',             formula: 'EV − AC',
+           desc: 'Positive = under budget for the work done. Negative = over budget.' },
+    SV:  { name: 'Schedule Variance',         formula: 'EV − PV',
+           desc: 'Positive = ahead of schedule. Negative = behind: less work delivered than planned.' },
+    CPI: { name: 'Cost Performance Index',    formula: 'EV ÷ AC',
+           desc: '> 1: getting more value per € spent than budgeted. < 1: cost overrun.' },
+    SPI: { name: 'Schedule Performance Index', formula: 'EV ÷ PV',
+           desc: '> 1: ahead of schedule. < 1: behind schedule.' },
+    EAC: { name: 'Estimate at Completion',    formula: 'BAC ÷ CPI',
+           desc: 'Forecast of the total cost at the end of the horizon, extrapolating current cost performance.' },
+    ETC: { name: 'Estimate to Complete',      formula: 'EAC − AC',
+           desc: 'Forecast of remaining spend from today to completion.' },
+    VAC: { name: 'Variance at Completion',    formula: 'BAC − EAC',
+           desc: 'Forecast surplus (positive) or shortfall (negative) at completion vs the original budget.' },
+  };
+  function personRate(personId) {
+    const p = state.people.find((x) => x.id === personId);
+    return (p && typeof p.hourlyRate === 'number') ? p.hourlyRate : 100;
+  }
+  function avgHourlyRate() {
+    const ppl = state.people || [];
+    if (!ppl.length) return 100;
+    return ppl.reduce((s, p) => s + (p.hourlyRate || 100), 0) / ppl.length;
+  }
+
+  function getCostCentres() {
+    const set = new Set();
+    state.projects.forEach((p) => (p.components || []).forEach((c) => {
+      if (c.costCenter) set.add(c.costCenter);
+    }));
+    // Also include cost centres that exist only in budgets (defined ahead of components)
+    Object.keys(state.budgets || {}).forEach((cc) => set.add(cc));
+    return [...set].sort();
+  }
+
+  function componentsForCC(cc) {
+    const out = [];
+    state.projects.forEach((p) => (p.components || []).forEach((c) => {
+      if (c.costCenter === cc) out.push({ proj: p, component: c });
+    }));
+    return out;
+  }
+
+  function actionsForCC(cc) {
+    const ids = new Set(componentsForCC(cc).map(({ component }) => component.id));
+    const out = [];
+    state.projects.forEach((p) => (p.actions || []).forEach((a) => {
+      if (a.deletedAt) return;
+      if (ids.has(a.component)) out.push(a);
+    }));
+    return out;
+  }
+
+  function actionPlannedHours(a) {
+    if (!a.due) return 0;
+    const cmt = (typeof a.commitment === 'number') ? a.commitment : 100;
+    const startD = a.startDate ? parseDate(a.startDate) : new Date(parseDate(a.due).getTime() - 2 * dayMs);
+    const endD = parseDate(a.due);
+    const days = Math.max(1, Math.round((endD - startD) / dayMs) + 1);
+    return (cmt / 100) * HOURS_PER_WEEK * (days / 7);
+  }
+  function actionPlannedCost(a) {
+    return actionPlannedHours(a) * personRate(a.owner);
+  }
+
+  function _ccWeekOverlap(cc, weekStartISO) {
+    const wsT = parseDate(weekStartISO).getTime();
+    const weT = wsT + 7 * dayMs - 1;
+    const out = [];
+    actionsForCC(cc).forEach((a) => {
+      if (!a.due) return;
+      const startT = a.startDate
+        ? parseDate(a.startDate).getTime()
+        : parseDate(a.due).getTime() - 2 * dayMs;
+      const endT = parseDate(a.due).getTime();
+      if (endT < wsT || startT > weT) return;
+      const overlapStart = Math.max(startT, wsT);
+      const overlapEnd   = Math.min(endT,   weT);
+      const overlapDays  = Math.max(1, Math.round((overlapEnd - overlapStart) / dayMs) + 1);
+      const cmt = (typeof a.commitment === 'number') ? a.commitment : 100;
+      const hours = (cmt / 100) * HOURS_PER_WEEK * (overlapDays / 7);
+      out.push({ a, hours, cost: hours * personRate(a.owner) });
+    });
+    return out;
+  }
+  function actualHoursForCCWeek(cc, weekStartISO) {
+    return _ccWeekOverlap(cc, weekStartISO).reduce((s, x) => s + x.hours, 0);
+  }
+  function actualCostForCCWeek(cc, weekStartISO) {
+    return _ccWeekOverlap(cc, weekStartISO).reduce((s, x) => s + x.cost, 0);
+  }
+
+  // Per-component breakdown for a CC for a given week.
+  // Returns { [componentId]: { hours, cost, name, color } }
+  function _ccComponentBreakdownForWeek(cc, weekStartISO) {
+    const out = {};
+    componentsForCC(cc).forEach(({ component }) => {
+      out[component.id] = { hours: 0, cost: 0, name: component.name, color: component.color };
+    });
+    _ccWeekOverlap(cc, weekStartISO).forEach((x) => {
+      const cid = x.a.component;
+      if (!out[cid]) return;
+      out[cid].hours += x.hours;
+      out[cid].cost  += x.cost;
+    });
+    return out;
+  }
+
+  // Per-person breakdown for a CC for a given week.
+  function _ccPersonBreakdownForWeek(cc, weekStartISO) {
+    const out = {};
+    _ccWeekOverlap(cc, weekStartISO).forEach((x) => {
+      const pid = x.a.owner;
+      if (!out[pid]) {
+        const p = state.people.find((pp) => pp.id === pid);
+        out[pid] = { hours: 0, cost: 0, name: p?.name || 'Unassigned', id: pid };
+      }
+      out[pid].hours += x.hours;
+      out[pid].cost  += x.cost;
+    });
+    return out;
+  }
+  function peopleForCC(cc) {
+    const set = new Set();
+    actionsForCC(cc).forEach((a) => { if (a.owner) set.add(a.owner); });
+    return [...set].map((pid) => state.people.find((p) => p.id === pid)).filter(Boolean);
+  }
+
+  // Budgets are stored in HOURS (canonical). evmFor returns measurements in
+  // the requested mode ('cost' or 'hours').
+  function evmFor(cc, weeks, mode) {
+    state.budgets = state.budgets || {};
+    state.budgets[cc] = state.budgets[cc] || {};
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayT = today.getTime();
+    const isCost = mode === 'cost';
+    const avg = avgHourlyRate();
+    const conv = (h) => isCost ? h * avg : h;
+    const budgetsHours = weeks.map((w) => Number(state.budgets[cc][w.isoStart] || 0));
+    const budgets = budgetsHours.map(conv);
+    const actuals = weeks.map((w) => isCost
+      ? actualCostForCCWeek(cc, w.isoStart)
+      : actualHoursForCCWeek(cc, w.isoStart));
+    const BAC = budgets.reduce((s, v) => s + v, 0);
+    let PV = 0, AC = 0;
+    weeks.forEach((w, i) => {
+      if (w.start.getTime() <= todayT) { PV += budgets[i]; AC += actuals[i]; }
+    });
+    let EV = 0;
+    actionsForCC(cc).forEach((a) => {
+      const planned = isCost ? actionPlannedCost(a) : actionPlannedHours(a);
+      if (a.status === 'done') { EV += planned; return; }
+      if (!a.startDate || !a.due) return;
+      const startT = parseDate(a.startDate).getTime();
+      const endT   = parseDate(a.due).getTime();
+      if (todayT <= startT) return;
+      const elapsed = Math.min(todayT, endT) - startT;
+      const dur     = Math.max(1, endT - startT);
+      EV += planned * (elapsed / dur);
+    });
+    const CV  = EV - AC;
+    const SV  = EV - PV;
+    const CPI = AC > 0 ? EV / AC : 1;
+    const SPI = PV > 0 ? EV / PV : 1;
+    const EAC = CPI > 0 ? BAC / CPI : BAC;
+    const ETC = Math.max(0, EAC - AC);
+    const VAC = BAC - EAC;
+    return { BAC, PV, AC, EV, CV, SV, CPI, SPI, EAC, ETC, VAC, budgets, actuals, mode };
+  }
+
+  function fmtBudgetVal(v, mode) {
+    if (mode === 'hours') return v >= 100 ? Math.round(v) + 'h' : v.toFixed(1) + 'h';
+    if (v === 0) return '0 €';
+    if (Math.abs(v) >= 1000) return (v / 1000).toFixed(1) + 'k €';
+    return Math.round(v) + ' €';
+  }
+  function fmtMoney(v) { return fmtBudgetVal(v, 'cost'); }
+
+  function renderBudgets(root) {
+    state.budgets = state.budgets || {};
+    state.settings = state.settings || {};
+    if (state.settings.budgetView !== 'hours' && state.settings.budgetView !== 'cost') {
+      state.settings.budgetView = 'cost';
+    }
+    if (state.settings.budgetGroupBy !== 'component' && state.settings.budgetGroupBy !== 'person') {
+      state.settings.budgetGroupBy = 'component';
+    }
+
+    const view = document.createElement('div');
+    view.className = 'view';
+    const ccs = getCostCentres();
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Cost-centre budgets</div>
+          <div class="page-sub">Drag the green points to set a weekly budget. Bars show actual workload on components mapped to the cost centre. Toggle between € and hours; rates are per-person (edit on the People page).</div>
+        </div>
+        <div class="page-actions">
+          <div class="seg" role="tablist" aria-label="Group by">
+            <button class="seg-btn ${state.settings.budgetGroupBy === 'component' ? 'active' : ''}" data-budget-group="component">By component</button>
+            <button class="seg-btn ${state.settings.budgetGroupBy === 'person' ? 'active' : ''}" data-budget-group="person">By person</button>
+          </div>
+          <div class="seg" role="tablist" aria-label="Unit">
+            <button class="seg-btn ${state.settings.budgetView === 'cost' ? 'active' : ''}" data-budget-view="cost">€ Cost</button>
+            <button class="seg-btn ${state.settings.budgetView === 'hours' ? 'active' : ''}" data-budget-view="hours">⏱ Hours</button>
+          </div>
+          <button class="primary" id="btnNewCC">+ Cost centre</button>
+        </div>
+      </div>
+      ${ccs.length ? '' : '<div class="empty">No cost centres yet — click <b>+ Cost centre</b> above, or add one to a component on the <b>Components</b> page.</div>'}
+      <div id="budgetsList"></div>`;
+    root.appendChild(view);
+
+    $$('.seg-btn[data-budget-view]', view).forEach((b) => {
+      b.addEventListener('click', () => {
+        state.settings.budgetView = b.dataset.budgetView;
+        saveState();
+        $$('.seg-btn[data-budget-view]', view).forEach((x) => x.classList.toggle('active', x.dataset.budgetView === state.settings.budgetView));
+        drawList();
+      });
+    });
+    $$('.seg-btn[data-budget-group]', view).forEach((b) => {
+      b.addEventListener('click', () => {
+        state.settings.budgetGroupBy = b.dataset.budgetGroup;
+        saveState();
+        $$('.seg-btn[data-budget-group]', view).forEach((x) => x.classList.toggle('active', x.dataset.budgetGroup === state.settings.budgetGroupBy));
+        drawList();
+      });
+    });
+    $('#btnNewCC').addEventListener('click', () => {
+      const code = prompt('New cost-centre code (alphanumeric, dashes/underscores allowed):');
+      if (!code) return;
+      const trimmed = code.trim();
+      if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) { toast('Cost centre: alphanumeric only'); return; }
+      if (ccs.includes(trimmed)) { toast('Already exists'); return; }
+      state.budgets[trimmed] = state.budgets[trimmed] || {};
+      saveState();
+      render();
+    });
+
+    function weekStarts(n = 52) {
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      let monday = new Date(today);
+      while (monday.getDay() !== 1) monday = new Date(monday.getTime() - dayMs);
+      const start = new Date(monday.getTime() - 12 * 7 * dayMs); // 12w past + 40w future
+      const out = [];
+      for (let i = 0; i < n; i++) {
+        const s = new Date(start.getTime() + i * 7 * dayMs);
+        out.push({ start: s, isoStart: fmtISO(s) });
+      }
+      return out;
+    }
+
+    function drawList() {
+      const list = $('#budgetsList');
+      if (!ccs.length) { list.innerHTML = ''; return; }
+      const weeks = weekStarts(52);
+      list.innerHTML = ccs.map((cc) => {
+        const safe = cc.replace(/[^A-Za-z0-9_-]/g, '_');
+        return `
+          <div class="budget-card" data-cc="${cc}">
+            <div class="budget-head">
+              <h3>${escapeHTML(cc)}</h3>
+              <div class="budget-legend" id="legend-${safe}"></div>
+            </div>
+            <div class="budget-kpis" id="kpis-${safe}"></div>
+            <div class="budget-chart-wrap"><svg class="budget-chart" id="chart-${safe}"></svg></div>
+          </div>`;
+      }).join('');
+      ccs.forEach((cc) => drawChart(cc, weeks));
+    }
+
+    function drawChart(cc, weeks) {
+      const safe = cc.replace(/[^A-Za-z0-9_-]/g, '_');
+      const mode = state.settings.budgetView;
+      const evm = evmFor(cc, weeks, mode);
+      const fmtV = (v) => fmtBudgetVal(v, mode);
+      const kpiEl = document.getElementById(`kpis-${safe}`);
+      const k = (l, v, cls = '') => `<div class="bk" data-evm="${l}"><div class="bk-l">${l}</div><div class="bk-v ${cls}">${v}</div></div>`;
+      kpiEl.innerHTML = [
+        k('BAC', fmtV(evm.BAC)),
+        k('PV',  fmtV(evm.PV)),
+        k('AC',  fmtV(evm.AC)),
+        k('EV',  fmtV(evm.EV)),
+        k('CV',  (evm.CV >= 0 ? '+' : '') + fmtV(evm.CV), evm.CV >= 0 ? 'ok' : 'bad'),
+        k('SV',  (evm.SV >= 0 ? '+' : '') + fmtV(evm.SV), evm.SV >= 0 ? 'ok' : 'bad'),
+        k('CPI', evm.CPI.toFixed(2), evm.CPI >= 1 ? 'ok' : 'bad'),
+        k('SPI', evm.SPI.toFixed(2), evm.SPI >= 1 ? 'ok' : 'bad'),
+        k('EAC', fmtV(evm.EAC), evm.EAC > evm.BAC ? 'bad' : 'ok'),
+        k('ETC', fmtV(evm.ETC)),
+        k('VAC', (evm.VAC >= 0 ? '+' : '') + fmtV(evm.VAC), evm.VAC >= 0 ? 'ok' : 'bad'),
+      ].join('');
+
+      const svg = document.getElementById(`chart-${safe}`);
+      const W = 1100, H = 240;
+      const padL = 64, padR = 18, padT = 14, padB = 32;
+      const innerW = W - padL - padR, innerH = H - padT - padB;
+      svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+      // 'none' makes the SVG stretch to fill its rendered box exactly, so
+      // screen-X / screen-Y → viewBox coords is a straight scale (no letterbox).
+      svg.setAttribute('preserveAspectRatio', 'none');
+
+      // Tight Y range — fit data plus ~12% headroom; tiny floor so an empty CC
+      // doesn't render a degenerate axis.
+      const dataMax = Math.max(0, ...evm.budgets, ...evm.actuals);
+      const maxData = dataMax > 0 ? dataMax : (mode === 'cost' ? 100 : 5);
+      const maxY = maxData * 1.12;
+      const xLeft = (i) => padL + (i / weeks.length) * innerW;
+      const xMid  = (i) => padL + ((i + 0.5) / weeks.length) * innerW;
+      const yFor  = (v) => padT + innerH - (v / maxY) * innerH;
+      const barW = innerW / weeks.length;
+
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const todayT = today.getTime();
+      const todayIdx = weeks.findIndex((w) => w.start.getTime() === todayT);
+
+      const isCostMode = mode === 'cost';
+      const groupBy = state.settings.budgetGroupBy;
+
+      // Build the layer entities (component or person), per-week values, and color.
+      let layerEntities;
+      if (groupBy === 'person') {
+        const ppl = peopleForCC(cc);
+        layerEntities = ppl.map((person, idx) => {
+          const series = weeks.map((w) => {
+            const ent = _ccPersonBreakdownForWeek(cc, w.isoStart)[person.id];
+            if (!ent) return 0;
+            return isCostMode ? ent.cost : ent.hours;
+          });
+          return { kind: 'person', id: person.id, name: person.name, series, color: personColorByIndex(idx) };
+        });
+      } else {
+        const comps = componentsForCC(cc).map(({ component }) => component);
+        layerEntities = comps.map((component) => {
+          const series = weeks.map((w) => {
+            const ent = _ccComponentBreakdownForWeek(cc, w.isoStart)[component.id];
+            if (!ent) return 0;
+            return isCostMode ? ent.cost : ent.hours;
+          });
+          return { kind: 'component', id: component.id, name: component.name, series, color: componentColor(component.color) };
+        });
+      }
+
+      // Stack the series — each layer's TOP is its top boundary, building up
+      let cumPrev = new Array(weeks.length).fill(0);
+      const layers = layerEntities.map((ent) => {
+        const top = ent.series.map((v, i) => cumPrev[i] + v);
+        const fwd = top.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xMid(i).toFixed(1)} ${yFor(v).toFixed(1)}`).join(' ');
+        const back = cumPrev.slice().reverse().map((v, i) => `L ${xMid(weeks.length - 1 - i).toFixed(1)} ${yFor(v).toFixed(1)}`).join(' ');
+        const path = fwd + ' ' + back + ' Z';
+        const layer = { path, ent };
+        cumPrev = top;
+        return layer;
+      });
+      const areas = layers.map((l) => {
+        const c = l.ent.color;
+        return `<path class="b-comp-area" data-${l.ent.kind}-id="${l.ent.id}"
+          d="${l.path}"
+          fill="rgba(${c.rgb},.55)"
+          stroke="rgba(${c.rgb},.95)"
+          stroke-width="0.7"><title>${escapeHTML(l.ent.name)}</title></path>`;
+      }).join('');
+
+      // Populate the chip legend with entities matching the current group-by mode
+      const legendEl = document.getElementById(`legend-${safe}`);
+      if (legendEl) {
+        legendEl.innerHTML = layerEntities.map((ent) => {
+          const c = ent.color;
+          return `<span class="component-chip" style="background:rgba(${c.rgb},.2);color:rgb(${c.rgb})" title="${escapeHTML(ent.kind)}">${escapeHTML(ent.name)}</span>`;
+        }).join('');
+      }
+
+      const linePath = evm.budgets.map((v, i) =>
+        `${i === 0 ? 'M' : 'L'} ${xMid(i).toFixed(1)} ${yFor(v).toFixed(1)}`).join(' ');
+
+      const points = evm.budgets.map((v, i) =>
+        `<circle class="b-point" data-cc="${cc}" data-idx="${i}" data-iso="${weeks[i].isoStart}" cx="${xMid(i).toFixed(1)}" cy="${yFor(v).toFixed(1)}" r="4">
+          <title>Week of ${weeks[i].isoStart} — drag to set budget (${fmtV(v)})</title>
+        </circle>`).join('');
+
+      const todayLine = todayIdx >= 0
+        ? `<line class="b-today" x1="${xLeft(todayIdx).toFixed(1)}" x2="${xLeft(todayIdx).toFixed(1)}" y1="${padT}" y2="${padT + innerH}" />
+           <text class="b-today-lbl" x="${(xLeft(todayIdx) + 4).toFixed(1)}" y="${padT + 10}">today</text>`
+        : '';
+
+      const months = weeks.map((w, i) => {
+        if (w.start.getDate() > 7) return '';
+        return `<text class="b-tick" x="${xMid(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${w.start.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</text>`;
+      }).join('');
+
+      const yTicks = [0, maxY / 2, maxY].map((v) =>
+        `<g class="b-ytick">
+          <line x1="${padL - 3}" x2="${padL}" y1="${yFor(v).toFixed(1)}" y2="${yFor(v).toFixed(1)}" />
+          <text x="${padL - 6}" y="${(yFor(v) + 3).toFixed(1)}" text-anchor="end">${fmtV(v)}</text>
+        </g>`).join('');
+
+      svg.innerHTML = `
+        ${yTicks}
+        ${areas}
+        <path class="b-budget-line" d="${linePath}" />
+        ${todayLine}
+        <line class="b-hover-line" x1="0" x2="0" y1="${padT}" y2="${padT + innerH}" style="display:none" />
+        ${points}
+        ${months}`;
+
+      // Hover tracking — vertical crosshair + side panel listing components & budget
+      let hoverPanel = svg.parentElement.querySelector('.b-hover-panel');
+      if (!hoverPanel) {
+        hoverPanel = document.createElement('div');
+        hoverPanel.className = 'b-hover-panel';
+        svg.parentElement.appendChild(hoverPanel);
+      }
+      const hoverLine = svg.querySelector('.b-hover-line');
+      svg.addEventListener('mousemove', (e) => {
+        const r = svg.getBoundingClientRect();
+        const localX = (e.clientX - r.left) * (W / r.width);
+        if (localX < padL || localX > padL + innerW) {
+          hoverLine.style.display = 'none';
+          hoverPanel.style.display = 'none';
+          return;
+        }
+        let bestI = 0, bestD = Infinity;
+        for (let i = 0; i < weeks.length; i++) {
+          const d = Math.abs(xMid(i) - localX);
+          if (d < bestD) { bestD = d; bestI = i; }
+        }
+        const lineX = xMid(bestI);
+        hoverLine.setAttribute('x1', lineX.toFixed(1));
+        hoverLine.setAttribute('x2', lineX.toFixed(1));
+        hoverLine.style.display = '';
+        const w = weeks[bestI];
+        const budget = evm.budgets[bestI];
+        const totalActual = isCostMode
+          ? actualCostForCCWeek(cc, w.isoStart)
+          : actualHoursForCCWeek(cc, w.isoStart);
+        const compRows = layerEntities.map((ent) => {
+          const v = ent.series[bestI];
+          if (v === 0) return '';
+          return `<div class="b-h-row"><span class="b-h-dot" style="background:rgba(${ent.color.rgb},.95)"></span><b>${escapeHTML(ent.name)}</b><span class="b-h-val">${fmtV(v)}</span></div>`;
+        }).filter(Boolean).join('');
+        const overBudget = totalActual > budget && budget > 0;
+        hoverPanel.innerHTML = `
+          <div class="b-h-head">Week of ${w.isoStart}</div>
+          ${compRows || '<div class="b-h-empty">No activity</div>'}
+          <div class="b-h-row b-h-tot"><b>Total actual</b><span class="b-h-val">${fmtV(totalActual)}</span></div>
+          <div class="b-h-row"><span class="b-h-dot b-h-dot-budget"></span><b>Budget</b><span class="b-h-val ${overBudget ? 'bad' : 'ok'}">${fmtV(budget)}</span></div>
+          ${budget > 0 ? `<div class="b-h-delta ${overBudget ? 'bad' : 'ok'}">${overBudget ? 'Over' : 'Under'} by ${fmtV(Math.abs(totalActual - budget))}</div>` : ''}`;
+        hoverPanel.style.display = 'block';
+        const pr = hoverPanel.getBoundingClientRect();
+        let px = e.clientX + 14;
+        let py = e.clientY + 14;
+        if (px + pr.width  > innerWidth  - 8) px = e.clientX - pr.width - 14;
+        if (py + pr.height > innerHeight - 8) py = e.clientY - pr.height - 14;
+        hoverPanel.style.left = Math.max(8, px) + 'px';
+        hoverPanel.style.top  = Math.max(8, py) + 'px';
+      });
+      svg.addEventListener('mouseleave', () => {
+        hoverLine.style.display = 'none';
+        hoverPanel.style.display = 'none';
+      });
+
+      svg.querySelectorAll('.b-point').forEach((pt) => {
+        pt.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const idx = parseInt(pt.dataset.idx, 10);
+          const iso = pt.dataset.iso;
+          const liveBudgets = evm.budgets.slice();
+          state.budgets[cc] = state.budgets[cc] || {};
+          const isCost = mode === 'cost';
+          const avg = avgHourlyRate();
+          const step = isCost ? 100 : 1;
+          let displayed = liveBudgets[idx] || 0;
+
+          // Floating editable input — shown near the point during drag, focusable on release
+          let editor = document.getElementById('budgetEditor');
+          if (!editor) {
+            editor = document.createElement('input');
+            editor.id = 'budgetEditor';
+            editor.type = 'text';
+            editor.className = 'budget-edit';
+            document.body.appendChild(editor);
+          }
+          editor._cc = cc; editor._iso = iso; editor._idx = idx;
+          editor._isCost = isCost; editor._avg = avg; editor._step = step;
+          editor._chartCtx = { cc, weeks, redraw: () => drawChart(cc, weeks) };
+
+          function applyDisplayedValue(v) {
+            displayed = Math.max(0, Math.round(v / step) * step);
+            const hours = isCost ? displayed / avg : displayed;
+            state.budgets[cc][iso] = Math.round(hours * 10) / 10;
+            liveBudgets[idx] = displayed;
+            pt.setAttribute('cy', yFor(displayed).toFixed(1));
+            const newPath = liveBudgets.map((vv, ii) =>
+              `${ii === 0 ? 'M' : 'L'} ${xMid(ii).toFixed(1)} ${yFor(vv).toFixed(1)}`).join(' ');
+            svg.querySelector('.b-budget-line').setAttribute('d', newPath);
+            editor.value = isCost ? `${displayed} €` : `${displayed} h`;
+          }
+          function placeEditor(clientX, clientY) {
+            editor.style.display = 'block';
+            editor.style.left = (clientX + 14) + 'px';
+            editor.style.top  = (clientY - 28) + 'px';
+          }
+          function onMove(em) {
+            const r = svg.getBoundingClientRect();
+            const localY = (em.clientY - r.top) * (H / r.height);
+            let v = ((padT + innerH) - localY) / innerH * maxY;
+            v = Math.max(0, Math.min(maxData * 2, v));
+            applyDisplayedValue(v);
+            placeEditor(em.clientX, em.clientY);
+          }
+          function commitDrag() {
+            saveState();
+            drawChart(cc, weeks);
+            toast(`${cc}: ${fmtV(displayed)} for ${iso}`);
+          }
+          function onUp(em) {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            // Don't redraw chart yet — let the user fine-tune via the input
+            saveState();
+            placeEditor(em.clientX, em.clientY);
+            editor.focus();
+            editor.select();
+          }
+
+          // Bind editor handlers fresh each drag (closure-scoped state)
+          editor.oninput = () => {
+            const v = parseFloat(editor.value.replace(/[^0-9.\-]/g, '')) || 0;
+            applyDisplayedValue(v);
+          };
+          editor.onkeydown = (ev) => {
+            if (ev.key === 'Enter') { ev.preventDefault(); editor.blur(); }
+            if (ev.key === 'Escape') { ev.preventDefault(); editor.blur(); }
+          };
+          editor.onblur = () => {
+            editor.style.display = 'none';
+            saveState();
+            drawChart(cc, weeks);
+          };
+
+          // Initial position + value
+          applyDisplayedValue(displayed);
+          placeEditor(e.clientX, e.clientY);
+
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        });
+      });
+    }
+
+    drawList();
   }
 
   /* -------------------------- Portfolio / People --------------------- */
@@ -2470,24 +4758,29 @@
   function weeklyLoad(personId, weeks = 12) {
     const today = new Date(); today.setHours(0, 0, 0, 0);
     let weekStart = new Date(today);
-    while (weekStart.getDay() !== 1) weekStart = new Date(weekStart.getTime() - dayMs); // back to Monday
+    while (weekStart.getDay() !== 1) weekStart = new Date(weekStart.getTime() - dayMs);
     const out = [];
     for (let w = 0; w < weeks; w++) {
       const wStart = new Date(weekStart.getTime() + w * 7 * dayMs);
       const wEnd = new Date(wStart.getTime() + 6 * dayMs);
       const items = [];
+      let commitmentSum = 0;
       state.projects.forEach((proj) => {
         (proj.actions || []).forEach((a) => {
+          if (a.deletedAt) return;
           if (a.owner !== personId || a.status === 'done') return;
           if (!a.due) return;
           const due = parseDate(a.due);
           const start = a.startDate ? parseDate(a.startDate) :
-            new Date(due.getTime() - 2 * dayMs); // default 3-day window
-          // Overlap test: action [start..due] intersects [wStart..wEnd]
-          if (start <= wEnd && due >= wStart) items.push({ a, proj });
+            new Date(due.getTime() - 2 * dayMs);
+          if (start <= wEnd && due >= wStart) {
+            items.push({ a, proj });
+            commitmentSum += (typeof a.commitment === 'number') ? a.commitment : 100;
+          }
         });
       });
-      out.push({ weekStart: wStart, count: items.length, items });
+      // `count` is now in % of FTE (commitment sum), not action headcount.
+      out.push({ weekStart: wStart, count: commitmentSum, items });
     }
     return out;
   }
@@ -2545,7 +4838,7 @@
     });
     view.innerHTML = `
       <div class="page-head">
-        <div><div class="page-title">People</div><div class="page-sub">${state.people.length} members • workload across all projects, projected over the next 12 weeks</div></div>
+        <div><div class="page-title">People</div><div class="page-sub">${state.people.length} members • capacity in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year) • workload across all projects, projected over the next 12 weeks</div></div>
         <div class="page-actions"><button class="ghost" id="btnNewPerson">+ Person</button></div>
       </div>
       <div class="panel">
@@ -2559,12 +4852,16 @@
         </div>
         <div id="peopleWl">
           ${wl.map(({ p, open, series, peakWeek }) => {
-            const cap = p.capacity || 5;
-            const pct = clamp(Math.round((open / cap) * 100), 0, 200);
+            const cap = p.capacity || 100;
+            // open is action count (headcount); compute current commitment % across active actions
+            const openCmt = state.projects.flatMap((pr) => pr.actions || [])
+              .filter((a) => a.owner === p.id && a.status !== 'done' && !a.deletedAt)
+              .reduce((s, a) => s + ((typeof a.commitment === 'number') ? a.commitment : 100), 0);
+            const pct = clamp(Math.round((openCmt / cap) * 100), 0, 200);
             const cls = pct > 100 ? 'over' : pct > 80 ? 'warn' : 'ok';
             const peakCls = peakWeek.count > cap ? 'over' : peakWeek.count > cap * 0.8 ? 'warn' : 'ok';
             return `
-              <div class="person-row">
+              <div class="person-row clickable" data-owner-id="${p.id}" title="Click to filter Register to ${escapeHTML(p.name)}">
                 <div class="name-cell">
                   <span class="avatar">${initials(p.name)}</span>
                   <span class="who">
@@ -2574,7 +4871,7 @@
                 </div>
                 <div class="now-load">
                   <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(100, pct)}%"></div></div>
-                  <div class="bar-val">${open}/${cap}</div>
+                  <div class="bar-val">${openCmt}% / ${cap}%</div>
                 </div>
                 <div class="spark-wrap">
                   ${workloadSparkSVG(p, series)}
@@ -2586,6 +4883,33 @@
       </div>`;
     root.appendChild(view);
     $('#btnNewPerson').addEventListener('click', () => openQuickAdd('person'));
+    $$('.person-row.clickable', view).forEach((row) => {
+      row.addEventListener('click', () => {
+        applyTopbarFilter({ owner: row.dataset.ownerId, view: 'register' });
+      });
+      row.addEventListener('dblclick', (e) => {
+        e.preventDefault();
+        applyTopbarFilter({ owner: '', view: 'register' });
+      });
+      row.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const id = row.dataset.ownerId;
+        const p = state.people.find((x) => x.id === id);
+        showContextMenu(e.clientX, e.clientY, [
+          { icon: '✎', label: 'Edit person…', onClick: () => openPersonEditor(id) },
+          { icon: '⌕', label: `Filter Register to ${p?.name || ''}`, onClick: () => applyTopbarFilter({ owner: id, view: 'register' }) },
+          { divider: true },
+          { icon: '×', label: 'Delete person…', danger: true, onClick: () => {
+            const open = state.projects.flatMap((pr) => pr.actions || []).filter((a) => a.owner === id && a.status !== 'done').length;
+            if (!confirm(`Delete ${p?.name}?` + (open ? ` (${open} open action${open === 1 ? '' : 's'} will be unassigned).` : ''))) return;
+            state.projects.forEach((pr) => (pr.actions || []).forEach((a) => { if (a.owner === id) a.owner = null; }));
+            state.people = state.people.filter((x) => x.id !== id);
+            commit('person-delete');
+            toast('Deleted');
+          }},
+        ]);
+      });
+    });
   }
 
   /* -------------------------- Detail drawer -------------------------- */
@@ -2598,8 +4922,13 @@
     const body = $('#drawerBody');
     body.innerHTML = `
       <div class="field"><label>Title</label><input id="dTitle" value="${escapeHTML(a.title)}" /></div>
-      <div class="field"><label>Owner</label>
-        <select id="dOwner">${state.people.map((p) => `<option value="${p.id}" ${p.id === a.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div class="field"><label>Owner</label>
+          <select id="dOwner">${state.people.map((p) => `<option value="${p.id}" ${p.id === a.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Originator</label>
+          <select id="dOriginator"><option value="">— same as owner</option>${state.people.map((p) => `<option value="${p.id}" ${p.id === a.originator ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+        </div>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <div class="field"><label>Status</label>
@@ -2644,6 +4973,7 @@
       a.deliverable = $('#dDel').value || null;
       a.milestone = $('#dMile').value || null;
       a.component = $('#dComponent').value || null;
+      a.originator = $('#dOriginator')?.value || null;
       a.commitment = clamp(parseInt($('#dCmt').value, 10) || 100, 5, 100);
       if (oldCmt !== a.commitment) a.history.push({ at: todayISO(), what: `Commitment: ${oldCmt}% → ${a.commitment}%` });
       a.notes = $('#dNotes').value;
@@ -2656,11 +4986,17 @@
       toast('Saved');
     });
     $('#dDelete').addEventListener('click', () => {
-      if (!confirm('Delete this action?')) return;
-      proj.actions = proj.actions.filter((x) => x.id !== a.id);
+      if (!confirm('Move this action to Archive? You can restore it later.')) return;
+      const sourceProj = projectOfAction(a.id) || proj;
+      const target = (sourceProj.actions || []).find((x) => x.id === a.id);
+      if (target) {
+        target.deletedAt = todayISO();
+        target.history.push({ at: todayISO(), what: 'Moved to Archive' });
+        target.updatedAt = todayISO();
+      }
       commit('delete');
       closeDrawer();
-      toast('Deleted');
+      toast('Moved to Archive');
     });
   }
   function closeDrawer() { $('#drawer').hidden = true; }
@@ -2668,8 +5004,12 @@
   /* --------------------------- Quick add ----------------------------- */
 
   let qaType = 'action';
-  function openQuickAdd(type = 'action') {
+  let qaInit = {};
+  let qaSaveCallback = null;
+  function openQuickAdd(type = 'action', init = {}, onSave = null) {
     qaType = type;
+    qaInit = init || {};
+    qaSaveCallback = onSave || null;
     $$('.qa-tab').forEach((t) => t.classList.toggle('active', t.dataset.qa === type));
     drawQA();
     $('#quickAdd').hidden = false;
@@ -2681,33 +5021,48 @@
     const body = $('#qaBody');
     const proj = curProject();
     if (qaType === 'action') {
+      const initTitle = qaInit.title || '';
+      const initNotes = qaInit.notes || '';
       body.innerHTML = `
-        <div class="field"><label>Title</label><input id="qTitle" placeholder="What needs to be done?" /></div>
+        <div class="field"><label>Title</label><input id="qTitle" placeholder="What needs to be done?" value="${escapeHTML(initTitle)}" /></div>
         <div class="qa-row">
           <div class="field"><label>Owner</label>
             <select id="qOwner">${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
           </div>
-          <div class="field"><label>Due</label><input id="qDue" type="date" value="${todayISO()}" /></div>
+          <div class="field"><label>Originator</label>
+            <select id="qOriginator"><option value="">— same as owner</option>${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
+          </div>
         </div>
         <div class="qa-row">
           <div class="field"><label>Status</label>
             <select id="qStatus">${STATUSES.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
           </div>
+          <div class="field"><label>Due</label><input id="qDue" type="date" value="${todayISO()}" /></div>
+        </div>
+        <div class="qa-row">
           <div class="field"><label>Component (optional)</label>
-            <select id="qComponent"><option value="">—</option>${(proj.components || []).map((pt) => `<option value="${pt.id}">${escapeHTML(pt.name)}</option>`).join('')}</select>
+            <select id="qComponent"><option value="">—</option>${(proj.components || []).map((pt) => `<option value="${pt.id}" ${pt.id === qaInit.component ? 'selected' : ''}>${escapeHTML(pt.name)}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Deliverable (optional)</label>
+            <select id="qDel"><option value="">—</option>${(proj.deliverables || []).map((d) => `<option value="${d.id}">${escapeHTML(d.name)}</option>`).join('')}</select>
           </div>
         </div>
         <div class="field">
           <label>Commitment <span class="muted" id="qCmtVal">100%</span></label>
           <input id="qCmt" type="range" min="5" max="100" step="5" value="100" oninput="document.getElementById('qCmtVal').textContent = this.value + '%';" />
         </div>
-        <div class="field"><label>Deliverable (optional)</label>
-          <select id="qDel"><option value="">—</option>${(proj.deliverables || []).map((d) => `<option value="${d.id}">${escapeHTML(d.name)}</option>`).join('')}</select>
-        </div>
-        <div class="field"><label>Notes</label><textarea id="qNotes" placeholder="Optional context"></textarea></div>`;
+        <div class="field"><label>Notes</label><textarea id="qNotes" placeholder="Optional context">${escapeHTML(initNotes)}</textarea></div>`;
     } else if (qaType === "component") {
+      const knownCCs = getCostCentres();
       body.innerHTML = `
         <div class="field"><label>Name</label><input id="qName" placeholder="e.g. Power, AOCS, Backend…" /></div>
+        <div class="field"><label>Cost centre (optional)</label>
+          <select id="qCC">
+            <option value="">— none —</option>
+            ${knownCCs.map((c) => `<option value="${escapeHTML(c)}">${escapeHTML(c)}</option>`).join('')}
+            <option value="__new__">+ New cost centre…</option>
+          </select>
+        </div>
         <div class="field"><label>Color</label>
           <div id="qComponentColors" class="color-grid">
             ${COMPONENT_COLORS.map((c, i) => `
@@ -2732,16 +5087,42 @@
         <div class="field"><label>Name</label><input id="qName" /></div>
         <div class="field"><label>Date</label><input id="qDate" type="date" /></div>`;
     } else if (qaType === 'risk') {
+      const kind = qaInit.kind === 'opportunity' ? 'opportunity' : 'risk';
+      const actionsList = (proj.actions || []).slice().sort((a, b) => a.title.localeCompare(b.title));
       body.innerHTML = `
-        <div class="field"><label>Title</label><input id="qTitle" /></div>
+        <div class="field"><label>Type</label>
+          <div class="seg" role="tablist" aria-label="Kind">
+            <button type="button" class="seg-btn ${kind === 'risk' ? 'active' : ''}" data-qa-kind="risk">▲ Risk</button>
+            <button type="button" class="seg-btn ${kind === 'opportunity' ? 'active' : ''}" data-qa-kind="opportunity">▽ Opportunity</button>
+          </div>
+        </div>
+        <div class="field"><label>Title</label><input id="qTitle" placeholder="${kind === 'opportunity' ? 'Upside event to chase' : 'Downside event to mitigate'}" /></div>
         <div class="qa-row">
-          <div class="field"><label>Probability (1-5)</label><input id="qProb" type="number" min="1" max="5" value="3" /></div>
-          <div class="field"><label>Impact (1-5)</label><input id="qImp" type="number" min="1" max="5" value="3" /></div>
+          <div class="field"><label>Inherent P (1-5)</label><input id="qProb" type="number" min="1" max="5" value="3" /></div>
+          <div class="field"><label>Inherent I (1-5)</label><input id="qImp" type="number" min="1" max="5" value="3" /></div>
+        </div>
+        <div class="qa-row">
+          <div class="field"><label>Residual P (post-action)</label><input id="qProbR" type="number" min="1" max="5" value="2" /></div>
+          <div class="field"><label>Residual I (post-action)</label><input id="qImpR" type="number" min="1" max="5" value="2" /></div>
         </div>
         <div class="field"><label>Owner</label>
           <select id="qOwner">${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
         </div>
-        <div class="field"><label>Mitigation</label><textarea id="qMit"></textarea></div>`;
+        <div class="field"><label id="qMitLbl">${kind === 'opportunity' ? 'Capture plan' : 'Mitigation'}</label><textarea id="qMit" placeholder="Brief description of the response"></textarea></div>
+        <div class="field"><label>Linked action (optional)</label>
+          <select id="qActionLink">
+            <option value="">— none —</option>
+            ${actionsList.map((a) => `<option value="${a.id}">${escapeHTML(a.title)} — ${escapeHTML(personName(a.owner))}</option>`).join('')}
+          </select>
+        </div>`;
+      $$('.seg-btn[data-qa-kind]', body).forEach((b) => {
+        b.addEventListener('click', () => {
+          qaInit.kind = b.dataset.qaKind;
+          $$('.seg-btn[data-qa-kind]', body).forEach((x) => x.classList.toggle('active', x.dataset.qaKind === qaInit.kind));
+          $('#qMitLbl').textContent = qaInit.kind === 'opportunity' ? 'Capture plan' : 'Mitigation';
+          $('#qTitle').placeholder = qaInit.kind === 'opportunity' ? 'Upside event to chase' : 'Downside event to mitigate';
+        });
+      });
     } else if (qaType === 'decision') {
       body.innerHTML = `
         <div class="field"><label>Title</label><input id="qTitle" /></div>
@@ -2752,6 +5133,43 @@
           </div>
           <div class="field"><label>Date</label><input id="qDate" type="date" value="${todayISO()}" /></div>
         </div>`;
+    } else if (qaType === 'meeting') {
+      const kind = qaInit.mtKind || 'oneoff';
+      body.innerHTML = `
+        <div class="field"><label>Title</label><input id="qTitle" placeholder="e.g. Weekly standup, PDR walkthrough" /></div>
+        <div class="field"><label>Type</label>
+          <div class="seg" role="tablist">
+            <button type="button" class="seg-btn ${kind === 'oneoff' ? 'active' : ''}" data-mt-kind="oneoff">One-off</button>
+            <button type="button" class="seg-btn ${kind === 'weekly' ? 'active' : ''}" data-mt-kind="weekly">Weekly</button>
+          </div>
+        </div>
+        <div class="qa-row" id="qMtOneoff" ${kind === 'weekly' ? 'hidden' : ''}>
+          <div class="field"><label>Date</label><input id="qDate" type="date" value="${todayISO()}" /></div>
+          <div class="field"><label>Time (optional)</label><input id="qTime" type="time" /></div>
+        </div>
+        <div class="qa-row" id="qMtWeekly" ${kind === 'oneoff' ? 'hidden' : ''}>
+          <div class="field"><label>Day of week</label>
+            <select id="qDow">
+              <option value="1">Monday</option>
+              <option value="2">Tuesday</option>
+              <option value="3">Wednesday</option>
+              <option value="4">Thursday</option>
+              <option value="5">Friday</option>
+              <option value="6">Saturday</option>
+              <option value="0">Sunday</option>
+            </select>
+          </div>
+          <div class="field"><label>Starts</label><input id="qStartDate" type="date" value="${todayISO()}" /></div>
+          <div class="field"><label>Time (optional)</label><input id="qTime2" type="time" /></div>
+        </div>`;
+      $$('.seg-btn[data-mt-kind]', body).forEach((b) => {
+        b.addEventListener('click', () => {
+          qaInit.mtKind = b.dataset.mtKind;
+          $$('.seg-btn[data-mt-kind]', body).forEach((x) => x.classList.toggle('active', x.dataset.mtKind === qaInit.mtKind));
+          $('#qMtOneoff').hidden = qaInit.mtKind !== 'oneoff';
+          $('#qMtWeekly').hidden = qaInit.mtKind !== 'weekly';
+        });
+      });
     } else if (qaType === 'person') {
       body.innerHTML = `
         <div class="field"><label>Name</label><input id="qName" /></div>
@@ -2767,6 +5185,11 @@
   }
 
   function saveQA() {
+    if (curProjectIsMerged()) {
+      toast('Pick a single project to add items.');
+      closeQuickAdd();
+      return;
+    }
     const proj = curProject();
     if (qaType === 'action') {
       const title = $('#qTitle').value.trim();
@@ -2774,6 +5197,7 @@
       const a = {
         id: uid('a'), title,
         owner: $('#qOwner').value,
+        originator: $('#qOriginator')?.value || null,
         due: $('#qDue').value || null,
         status: $('#qStatus').value,
         priority: 0,
@@ -2781,6 +5205,7 @@
         component: $('#qComponent')?.value || null,
         deliverable: $('#qDel').value || null,
         milestone: null,
+        description: qaInit.description || null,
         notes: $('#qNotes').value || '',
         createdAt: todayISO(), updatedAt: todayISO(),
         history: [{ at: todayISO(), what: 'Created' }],
@@ -2790,8 +5215,20 @@
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
       const color = (document.querySelector('input[name="qComponentColor"]:checked')?.value) || COMPONENT_COLORS[0].id;
+      let ccRaw = $('#qCC')?.value || '';
+      if (ccRaw === '__new__') {
+        const code = prompt('New cost-centre code (alphanumeric, dashes/underscores allowed):');
+        if (!code) ccRaw = '';
+        else if (!/^[A-Za-z0-9_-]+$/.test(code.trim())) {
+          return toast('Cost centre: alphanumeric only');
+        } else {
+          ccRaw = code.trim();
+          state.budgets = state.budgets || {};
+          state.budgets[ccRaw] = state.budgets[ccRaw] || {};
+        }
+      }
       proj.components = proj.components || [];
-      proj.components.push({ id: uid('cm'), name, color });
+      proj.components.push({ id: uid('cm'), name, color, costCenter: ccRaw || null });
     } else if (qaType === 'deliverable') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
@@ -2805,12 +5242,19 @@
     } else if (qaType === 'risk') {
       const title = $('#qTitle').value.trim();
       if (!title) return toast('Title required');
+      const inhP = clamp(parseInt($('#qProb').value, 10) || 3, 1, 5);
+      const inhI = clamp(parseInt($('#qImp').value, 10) || 3, 1, 5);
+      const resP = clamp(parseInt($('#qProbR').value, 10) || inhP, 1, 5);
+      const resI = clamp(parseInt($('#qImpR').value, 10) || inhI, 1, 5);
       proj.risks = proj.risks || [];
       proj.risks.push({
-        id: uid('r'), title,
-        probability: clamp(parseInt($('#qProb').value, 10) || 3, 1, 5),
-        impact: clamp(parseInt($('#qImp').value, 10) || 3, 1, 5),
+        id: uid(qaInit.kind === 'opportunity' ? 'o' : 'r'),
+        kind: qaInit.kind === 'opportunity' ? 'opportunity' : 'risk',
+        title,
+        inherent: { probability: inhP, impact: inhI },
+        residual: { probability: resP, impact: resI },
         mitigation: $('#qMit').value || '',
+        actionId: $('#qActionLink').value || null,
         owner: $('#qOwner').value,
       });
     } else if (qaType === 'decision') {
@@ -2823,6 +5267,21 @@
         owner: $('#qOwner').value,
         date: $('#qDate').value || todayISO(),
       });
+    } else if (qaType === 'meeting') {
+      const title = $('#qTitle').value.trim();
+      if (!title) return toast('Title required');
+      const kind = qaInit.mtKind || 'oneoff';
+      const m = { id: uid('mtg'), kind, title };
+      if (kind === 'oneoff') {
+        m.date = $('#qDate').value || todayISO();
+        m.time = $('#qTime').value || null;
+      } else {
+        m.dayOfWeek = parseInt($('#qDow').value, 10);
+        m.startDate = $('#qStartDate').value || todayISO();
+        m.time = $('#qTime2').value || null;
+      }
+      proj.meetings = proj.meetings || [];
+      proj.meetings.push(m);
     } else if (qaType === 'person') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
@@ -2842,9 +5301,254 @@
       state.projects.push(np);
       state.currentProjectId = np.id;
     }
+    // Capture the just-pushed action for callback consumers (e.g. notes panel).
+    let createdAction = null;
+    if (qaType === 'action') createdAction = proj.actions[proj.actions.length - 1];
+    const cb = qaSaveCallback;
+    qaSaveCallback = null;
     commit('add');
     closeQuickAdd();
     toast('Added');
+    if (cb && createdAction) cb(createdAction);
+  }
+
+  /* -------------------------- Context menu --------------------------- */
+
+  let _ctxOutsideHandler = null;
+  function showContextMenu(x, y, items) {
+    closeContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'ctx-menu';
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+    items.forEach((it) => {
+      if (it.divider) {
+        const d = document.createElement('div');
+        d.className = 'ctx-divider';
+        menu.appendChild(d);
+        return;
+      }
+      const b = document.createElement('button');
+      b.className = 'ctx-item' + (it.danger ? ' danger' : '');
+      b.innerHTML = `<span class="ctx-icon">${it.icon || ''}</span><span>${escapeHTML(it.label)}</span>`;
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        closeContextMenu();
+        try { it.onClick?.(); } catch (err) { console.error(err); }
+      });
+      menu.appendChild(b);
+    });
+    document.body.appendChild(menu);
+    const r = menu.getBoundingClientRect();
+    if (r.right > innerWidth)  menu.style.left = (innerWidth - r.width - 6) + 'px';
+    if (r.bottom > innerHeight) menu.style.top  = (innerHeight - r.height - 6) + 'px';
+    // Outside-click closer: only fires when click is OUTSIDE the menu, so
+    // item button clicks aren't pre-empted by removing the menu mid-event.
+    _ctxOutsideHandler = (e) => {
+      if (menu.contains(e.target)) return;
+      closeContextMenu();
+    };
+    setTimeout(() => document.addEventListener('mousedown', _ctxOutsideHandler), 0);
+  }
+  function closeContextMenu() {
+    document.querySelectorAll('.ctx-menu').forEach((m) => m.remove());
+    if (_ctxOutsideHandler) {
+      document.removeEventListener('mousedown', _ctxOutsideHandler);
+      _ctxOutsideHandler = null;
+    }
+  }
+
+  function openPersonEditor(personId) {
+    const p = state.people.find((x) => x.id === personId);
+    if (!p) return;
+    $('#drawerTitle').textContent = 'Edit person';
+    $('#drawerBody').innerHTML = `
+      <div class="field"><label>Name</label><input id="pEdName" value="${escapeHTML(p.name)}" /></div>
+      <div class="field"><label>Role</label><input id="pEdRole" value="${escapeHTML(p.role || '')}" placeholder="Job title" /></div>
+      <div class="field"><label>Expertise / skills</label><textarea id="pEdSkills" placeholder="e.g. Avionics design, EMC testing">${escapeHTML(p.expertise || '')}</textarea></div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div class="field"><label>Capacity (% of FTE)</label><input id="pEdCap" type="number" min="0" max="200" value="${p.capacity || 100}" title="100% = full-time. 1 FTE = 8h/day × 5 days/week, 212 working days/year." /></div>
+        <div class="field"><label>Hourly rate (€/h)</label><input id="pEdRate" type="number" min="0" step="5" value="${p.hourlyRate || 100}" /></div>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <button class="primary" id="pEdSave">Save</button>
+        <button class="ghost" id="pEdDelete" style="margin-left:auto; color:var(--bad);">Delete</button>
+      </div>`;
+    $('#drawer').hidden = false;
+    $('#pEdSave').addEventListener('click', () => {
+      const oldName = p.name;
+      p.name = $('#pEdName').value.trim() || p.name;
+      p.role = $('#pEdRole').value.trim();
+      p.expertise = $('#pEdSkills').value.trim();
+      p.capacity = clamp(parseInt($('#pEdCap').value, 10) || 100, 0, 200);
+      p.hourlyRate = Math.max(0, parseFloat($('#pEdRate').value) || 100);
+      commit('person-edit');
+      closeDrawer();
+      toast(oldName !== p.name ? 'Renamed to ' + p.name : 'Saved');
+    });
+    $('#pEdDelete').addEventListener('click', () => {
+      const open = state.projects.flatMap((pr) => pr.actions || []).filter((a) => a.owner === p.id && a.status !== 'done').length;
+      if (!confirm(`Delete ${p.name}?` + (open ? ` (${open} open action${open === 1 ? '' : 's'} will be unassigned).` : ''))) return;
+      state.projects.forEach((pr) => (pr.actions || []).forEach((a) => { if (a.owner === p.id) a.owner = null; }));
+      state.people = state.people.filter((x) => x.id !== p.id);
+      commit('person-delete');
+      closeDrawer();
+      toast('Deleted');
+    });
+  }
+
+  /* ---------------------------- Notes panel -------------------------- */
+
+  let notesSaveTimer = null;
+  let savedRange = null; // selection range in the notes body, captured before opening modals
+
+  function notesIsOpen() { return !$('#notesPanel').hidden; }
+
+  function applyNotesPanel() {
+    const open = state.notesOpen === true;
+    const panel = $('#notesPanel');
+    const app = $('#app');
+    if (!panel || !app) return;
+    if (open) {
+      panel.hidden = false;
+      app.classList.add('notes-open');
+      loadNotesForCurrentProject();
+    } else {
+      panel.hidden = true;
+      app.classList.remove('notes-open');
+    }
+  }
+
+  function loadNotesForCurrentProject() {
+    const proj = curProject();
+    if (!proj) return;
+    state.notes = state.notes || {};
+    const body = $('#notesBody');
+    const html = state.notes[proj.id];
+    body.innerHTML = html || `<p><i>Notes for <b>${escapeHTML(proj.name)}</b> — type freely. Use the toolbar to format and to insert actions assigned to people.</i></p><p></p>`;
+    $('#notesMeta').textContent = proj.name;
+  }
+
+  function saveNotesNow() {
+    const proj = curProject();
+    if (!proj) return;
+    state.notes = state.notes || {};
+    state.notes[proj.id] = $('#notesBody').innerHTML;
+    saveState();
+    const s = $('#notesSaved');
+    if (s) { s.textContent = 'Saved'; s.classList.remove('saving'); }
+  }
+  function scheduleNotesSave() {
+    clearTimeout(notesSaveTimer);
+    const s = $('#notesSaved');
+    if (s) { s.textContent = 'Saving…'; s.classList.add('saving'); }
+    notesSaveTimer = setTimeout(saveNotesNow, 350);
+  }
+
+  function snapshotSelection() {
+    const sel = window.getSelection();
+    const body = $('#notesBody');
+    if (sel.rangeCount && body.contains(sel.anchorNode)) {
+      savedRange = sel.getRangeAt(0).cloneRange();
+    }
+  }
+  function restoreSelection() {
+    if (!savedRange) {
+      const body = $('#notesBody');
+      body.focus();
+      const sel = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      range.collapse(false);
+      sel.removeAllRanges(); sel.addRange(range);
+      return;
+    }
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(savedRange);
+    $('#notesBody').focus();
+  }
+
+  function insertActionChip(action) {
+    restoreSelection();
+    const due = action.due ? fmtDate(action.due) : '—';
+    const owner = personName(action.owner);
+    const safe = (s) => String(s).replace(/[<>"&]/g, (c) =>
+      ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c]));
+    const html = ` <span class="note-chip" contenteditable="false" data-action-id="${action.id}">` +
+      `<span class="chip-mark">✓</span>` +
+      `<b>${safe(action.title)}</b>` +
+      `<span class="chip-meta">${safe(owner)} · ${safe(due)}</span>` +
+      `</span>&nbsp;`;
+    document.execCommand('insertHTML', false, html);
+    scheduleNotesSave();
+  }
+
+  function refreshNoteChips() {
+    const body = $('#notesBody');
+    if (!body) return;
+    body.querySelectorAll('.note-chip').forEach((chip) => {
+      const id = chip.dataset.actionId;
+      const a = state.projects.flatMap((p) => p.actions || []).find((x) => x.id === id);
+      if (!a) {
+        chip.classList.add('chip-stale');
+        return;
+      }
+      chip.classList.remove('chip-stale');
+      const mark = a.status === 'done' ? '✓' : a.status === 'blocked' ? '⨯' : a.status === 'doing' ? '◐' : '○';
+      const markEl = chip.querySelector('.chip-mark');
+      if (markEl) markEl.textContent = mark;
+      chip.classList.toggle('done', a.status === 'done');
+      chip.classList.toggle('blocked', a.status === 'blocked');
+    });
+  }
+
+  function wireNotesPanel() {
+    const panel = $('#notesPanel');
+    if (!panel || panel.dataset.wired === '1') return;
+    panel.dataset.wired = '1';
+
+    $('#btnNotesClose').addEventListener('click', () => {
+      state.notesOpen = false;
+      saveState();
+      applyNotesPanel();
+    });
+
+    // Toolbar formatting
+    panel.querySelectorAll('.notes-toolbar [data-cmd]').forEach((btn) => {
+      // mousedown to preserve selection in contenteditable
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        document.execCommand(btn.dataset.cmd, false, btn.dataset.arg || null);
+        $('#notesBody').focus();
+        scheduleNotesSave();
+      });
+    });
+
+    $('#btnNotesAction').addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      snapshotSelection();
+      openQuickAdd('action', {}, (action) => {
+        insertActionChip(action);
+      });
+    });
+
+    const body = $('#notesBody');
+    body.addEventListener('input', scheduleNotesSave);
+    body.addEventListener('keydown', (e) => {
+      // Shift+Cmd/Ctrl+A → insert action
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        snapshotSelection();
+        openQuickAdd('action', {}, (action) => insertActionChip(action));
+      }
+    });
+    body.addEventListener('click', (e) => {
+      const chip = e.target.closest('.note-chip');
+      if (!chip) return;
+      e.preventDefault();
+      openDrawer(chip.dataset.actionId);
+    });
   }
 
   /* --------------------------- Import/Export ------------------------- */
@@ -2877,6 +5581,8 @@
             p.risks = p.risks || [];
             p.decisions = p.decisions || [];
             p.components = p.components || [];
+            p.meetings = p.meetings || [];
+            p.openPoints = p.openPoints || [];
             p.actions.forEach((a) => {
               a.history = a.history || [];
               a.createdAt = a.createdAt || todayISO();
@@ -2888,6 +5594,8 @@
           state = obj;
           if (!state.currentProjectId) state.currentProjectId = state.projects[0]?.id;
           state.currentView = state.currentView || 'board';
+          state.budgets = state.budgets || {};
+          state.settings = state.settings || {};
           saveState(); render();
           toast('Imported');
         } catch (e) { toast('Import failed: ' + e.message); }
@@ -2903,6 +5611,16 @@
     state = loadState();
     if (state.currentView === 'teams') state.currentView = 'people';
     state.settings = state.settings || {};
+    // Migrate person.capacity from "max parallel actions" (small numbers) to
+    // "% of FTE". Heuristic: capacity < 30 is the legacy unit; multiply by 20.
+    let migrated = false;
+    (state.people || []).forEach((p) => {
+      if (typeof p.capacity === 'number' && p.capacity < 30) {
+        p.capacity = Math.round(p.capacity * 20);
+        migrated = true;
+      }
+    });
+    if (migrated) saveState();
     applyTheme(state.settings.theme || 'dark');
 
     $('#btnSidebarToggle').addEventListener('click', () => {
@@ -2917,6 +5635,7 @@
     $('#projectSelect').addEventListener('change', (e) => {
       state.currentProjectId = e.target.value;
       saveState(); render();
+      if (state.notesOpen) loadNotesForCurrentProject();
     });
     $('#btnNewProject').addEventListener('click', () => openQuickAdd('project'));
 
@@ -2928,6 +5647,16 @@
     $('#btnUndo').addEventListener('click', undo);
     $('#btnRedo').addEventListener('click', redo);
     $('#btnQuickAdd').addEventListener('click', () => openQuickAdd('action'));
+
+    $('#btnNotesToggle').addEventListener('click', () => {
+      state.notesOpen = !state.notesOpen;
+      saveState();
+      applyNotesPanel();
+    });
+    wireNotesPanel();
+    applyNotesPanel();
+    wireHoverDescOnce();
+    wireEvmTooltipsOnce();
 
     $('#btnExport').addEventListener('click', exportJSON);
     $('#btnImport').addEventListener('click', importJSON);
@@ -3009,6 +5738,11 @@
         else if (!$('#drawer').hidden) closeDrawer();
       } else if (e.key === '/' && !inField) {
         e.preventDefault(); $('#search').focus();
+      } else if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
+        e.preventDefault();
+        state.notesOpen = !state.notesOpen;
+        saveState();
+        applyNotesPanel();
       }
     });
 
