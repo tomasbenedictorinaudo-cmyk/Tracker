@@ -216,6 +216,8 @@ input, select, textarea { font: inherit; color: inherit; }
   transition: background var(--transition), color var(--transition), border-color var(--transition);
 }
 .icon-btn:hover { background: var(--bg-3); color: var(--text); border-color: var(--line-2); }
+.icon-btn.danger { color: var(--bad); opacity: .55; }
+.icon-btn.danger:hover { background: rgba(248,113,113,.12); color: var(--bad); border-color: var(--bad); opacity: 1; }
 
 .primary, .ghost {
   border-radius: var(--radius-sm);
@@ -1233,7 +1235,41 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .op-context ul, .op-context ol { padding-left: 18px; margin: 4px 0; }
 .op-context li { margin-bottom: 2px; }
 .op-context a { color: var(--accent); text-decoration: underline; }
-.op-meta { font-size: 10px; color: var(--text-faint); }
+.op-meta {
+  font-size: 10px;
+  color: var(--text-faint);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.op-origin {
+  font-weight: 500;
+  color: var(--text-dim);
+  letter-spacing: .2px;
+}
+.op-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.op-crit-chip {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .4px;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+.op-criticality {
+  font-size: 11px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 3px 6px;
+  color: var(--text-dim);
+}
 .op-actions { display: flex; gap: 6px; align-items: flex-start; }
 .op-promote { font-size: 11px; padding: 5px 10px; }
 .op-discard {
@@ -1620,6 +1656,8 @@ input[type="date"].reg-inp {
 .mtx-tick { fill: var(--text-dim); font-size: 11px; font-weight: 600; }
 .mtx-axis-lbl { fill: var(--text-faint); font-size: 11px; font-style: italic; }
 
+.mtx-pt { cursor: pointer; transition: transform 80ms ease, stroke-width 80ms ease; transform-box: fill-box; transform-origin: center; }
+.mtx-pt:hover { transform: scale(1.35); }
 .mtx-pt-inh.risk        { fill: none; stroke: rgba(248,113,113,.95); stroke-width: 2; }
 .mtx-pt-inh.opp         { fill: none; stroke: rgba(74,222,128,.95);  stroke-width: 2; }
 .mtx-pt-res.risk        { fill: rgba(248,113,113,.95); stroke: var(--bg-1); stroke-width: 1.5; }
@@ -1641,6 +1679,70 @@ input[type="date"].reg-inp {
 .mtx-legend .dot.mtx-extreme { background: rgba(248,113,113,.85); }
 .mtx-legend .sep { width: 1px; height: 14px; background: var(--line); }
 .mtx-legend svg { vertical-align: middle; margin-right: 4px; }
+
+/* Matrix point hover tooltip */
+.mtx-tooltip {
+  position: fixed;
+  display: none;
+  z-index: 300;
+  max-width: 340px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.mtx-tip-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.mtx-tip-icon { font-size: 16px; line-height: 1; }
+.mtx-tip-icon.risk { color: var(--bad); }
+.mtx-tip-icon.opp  { color: var(--ok); }
+.mtx-tip-title { font-weight: 600; flex: 1; color: var(--text); }
+.mtx-tip-stage {
+  font-size: 9px; text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--text-faint);
+  background: var(--bg-3);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.mtx-tip-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 1px 0;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.mtx-tip-lbl {
+  font-size: 9px; text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--text-faint);
+  width: 70px;
+  flex-shrink: 0;
+}
+.mtx-tip-row b { color: var(--text); font-weight: 600; }
+.mtx-tip-mit {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  font-size: 11px;
+}
+.mtx-tip-mit .mtx-tip-lbl { display: block; margin-bottom: 2px; }
+.mtx-tip-link {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--accent);
+}
 .ro-row .row-meta { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; max-width: 320px; }
 .ro-resp {
   font-size: 11px;
@@ -1656,27 +1758,121 @@ input[type="date"].reg-inp {
 .strip-svg {
   width: 100%;
   display: block;
+  overflow: visible;
 }
 .strip-axis { stroke: var(--line-2); stroke-width: 1; }
 .strip-tick { stroke: var(--line); stroke-width: 1; }
-.strip-month { fill: var(--text-faint); font-size: 9px; }
-.strip-today { stroke: var(--accent); stroke-width: 1; opacity: .7; }
+.strip-month { fill: var(--text-faint); font-size: 9.5px; }
+.strip-today { stroke: var(--accent); stroke-width: 1; opacity: .7; stroke-dasharray: 3 3; }
 .strip-today-lbl { fill: var(--accent); font-size: 9px; }
-.strip-stem { stroke: var(--line-2); stroke-width: 1; opacity: .7; }
-.strip-mark circle { fill: var(--accent); stroke: var(--bg-1); stroke-width: 1.5; }
-.strip-mark.done circle { fill: var(--ok); }
-.strip-mark.late circle { fill: var(--bad); }
+.strip-stem { stroke-width: 1; opacity: .55; }
+.strip-mark .strip-pt { transition: r .12s ease, stroke-width .12s ease; cursor: pointer; }
+.strip-mark:hover .strip-pt { r: 8; stroke-width: 2.4; }
+.strip-mark:hover .strip-lbl { font-weight: 700; }
 .strip-lbl {
-  fill: var(--text);
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 600;
+  pointer-events: none;
 }
-.strip-mark.late .strip-lbl { fill: var(--bad); }
-.strip-mark.done .strip-lbl { fill: var(--text-dim); }
 .strip-date {
   fill: var(--text-faint);
   font-size: 9px;
+  pointer-events: none;
 }
+
+/* Links page */
+.links-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+.link-card {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  display: flex; flex-direction: column; gap: 4px;
+  font-size: 12px;
+  transition: border-color var(--transition), background var(--transition);
+}
+.link-card:hover { border-color: var(--line-2); background: var(--bg-3); }
+.link-title {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 13px;
+  word-break: break-word;
+}
+.link-title:hover { text-decoration: underline; }
+.link-host {
+  color: var(--text-faint);
+  font-size: 11px;
+  word-break: break-all;
+}
+.link-desc {
+  color: var(--text-dim);
+  font-size: 11.5px;
+  margin-top: 2px;
+  white-space: pre-wrap;
+}
+.link-comp {
+  display: inline-flex; align-items: center; gap: 6px;
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-top: 4px;
+}
+.link-comp-swatch {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+}
+
+/* Row swatch — colour-tracks rows with their timeline marker */
+.row-swatch {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  box-shadow: 0 0 0 1.5px var(--bg-1);
+  flex-shrink: 0;
+}
+
+/* Floating tooltip for timeline-strip points */
+.strip-tooltip {
+  position: fixed;
+  display: none;
+  z-index: 1000;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  padding: 8px 10px;
+  font-size: 11.5px;
+  color: var(--text);
+  min-width: 180px;
+  pointer-events: none;
+}
+.strip-tip-head {
+  display: flex; align-items: center; gap: 6px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.strip-tip-swatch {
+  display: inline-block; width: 9px; height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.strip-tip-row { display: flex; gap: 8px; padding: 1px 0; }
+.strip-tip-row .strip-tip-lbl {
+  color: var(--text-faint);
+  min-width: 50px;
+  font-size: 11px;
+}
+.strip-tip-row .ok { color: var(--ok); }
+.strip-tip-row .bad { color: var(--bad); }
 
 /* Legend */
 .ytick line { stroke: var(--text-faint); stroke-width: 1; }
@@ -2104,11 +2300,20 @@ kbd {
   height: 18px;
   line-height: 18px;
   font-size: 11px;
-  color: var(--text-dim);
+  color: var(--text);
   white-space: nowrap;
   pointer-events: none;
-  z-index: 1;
+  z-index: 3;
   font-weight: 500;
+  padding: 0 4px;
+  border-radius: 3px;
+  /* Soft background so the label stays readable when a neighbouring bar
+     starts directly to the right of this overflow. */
+  background: linear-gradient(to right, rgba(15,18,28,.85), rgba(15,18,28,.65) 60%, rgba(15,18,28,0));
+}
+:root[data-theme="light"] .tl-bar-overflow {
+  color: var(--text);
+  background: linear-gradient(to right, rgba(255,255,255,.92), rgba(255,255,255,.7) 60%, rgba(255,255,255,0));
 }
 .tl-bar-overflow.done { color: var(--text-faint); text-decoration: line-through; }
 

@@ -84,6 +84,16 @@
   const componentColor = (id) => COMPONENT_COLORS.find((c) => c.id === id) || COMPONENT_COLORS[0];
   const findComponent = (proj, componentId) => (proj.components || []).find((p) => p.id === componentId);
 
+  // Open-point criticality palette + labels (4 levels, low → critical)
+  const CRITICALITY_RGB = {
+    low:      '148,163,184', // slate
+    med:      '96,165,250',  // blue
+    high:     '251,191,36',  // amber
+    critical: '248,113,133', // rose
+  };
+  const CRITICALITY_LABEL = { low: 'Low', med: 'Medium', high: 'High', critical: 'Critical' };
+  const CRITICALITY_TO_PRIORITY = { low: 0, med: 1, high: 2, critical: 3 };
+
   let state = null;
   let undoStack = [];
   let redoStack = [];
@@ -480,6 +490,35 @@
     };
   }
 
+  function emptyState() {
+    const proj = {
+      id: uid('p'),
+      name: 'Untitled project',
+      description: '',
+      actions: [],
+      deliverables: [],
+      milestones: [],
+      risks: [],
+      decisions: [],
+      changes: [],
+      components: [],
+      meetings: [],
+      openPoints: [],
+      links: [],
+      costCenters: [],
+      archive: [],
+      notes: '',
+    };
+    return {
+      people: [],
+      projects: [proj],
+      currentProjectId: proj.id,
+      currentView: 'board',
+      settings: { theme: state?.settings?.theme || 'dark', holidayCountries: [] },
+      budgets: {},
+    };
+  }
+
   /* ----------------------- selectors / helpers ----------------------- */
 
   // Returns the active project. If state.currentProjectId === '__all__',
@@ -494,6 +533,14 @@
   function curProjectIsMerged() {
     return state.currentProjectId === '__all__';
   }
+  // Returns the projects that should be considered "in scope" for cross-cutting
+  // engineering views (budgets, charts) — every project in __all__ mode, or just
+  // the selected project otherwise.
+  function projectsInScope() {
+    if (state.currentProjectId === '__all__') return state.projects;
+    const cur = state.projects.find((p) => p.id === state.currentProjectId);
+    return cur ? [cur] : state.projects;
+  }
   function mergedProject() {
     const flat = (key) => state.projects.flatMap((p) => p[key] || []);
     return {
@@ -507,6 +554,7 @@
       decisions: flat('decisions'),
       components: flat('components'),
       meetings: flat('meetings'),
+      links: flat('links'),
     };
   }
   // Find the source project for an action by id (works in merged mode too)
@@ -663,6 +711,7 @@
       milestones: renderMilestones,
       risks: renderRisks,
       decisions: renderDecisions,
+      links: renderLinks,
     };
     (fns[view] || renderBoard)(main);
   }
@@ -1575,15 +1624,24 @@
         return;
       }
       list.innerHTML = items.map((op) => {
+        // Backfill defaults for legacy items
+        if (!op.criticality) op.criticality = 'med';
+        if (!op.createdAt) op.createdAt = todayISO();
         const cmp = findComponent(proj, op.component);
         const c = cmp ? componentColor(cmp.color) : null;
-        const tint = c ? `style="border-left-color: rgb(${c.rgb})"` : '';
+        const critRgb = CRITICALITY_RGB[op.criticality] || CRITICALITY_RGB.med;
+        // The left border tracks criticality (component shown as a chip below).
+        const tint = `style="border-left-color: rgb(${critRgb})"`;
+        const critLabel = CRITICALITY_LABEL[op.criticality] || 'Medium';
         // op.notes holds rich HTML; legacy plain-string entries render as text
         const contextHtml = op.notes && /<\w+/.test(op.notes) ? op.notes : escapeHTML(op.notes || '');
         return `
-        <div class="op-item" data-id="${op.id}" ${tint}>
+        <div class="op-item crit-${op.criticality}" data-id="${op.id}" ${tint}>
           <div class="op-content">
-            <div class="op-title" contenteditable="true" data-field="title">${escapeHTML(op.title)}</div>
+            <div class="op-title-row">
+              <span class="op-crit-chip" title="Criticality" style="background:rgba(${critRgb},.18);color:rgb(${critRgb});border:1px solid rgb(${critRgb})">${critLabel}</span>
+              <div class="op-title" contenteditable="true" data-field="title">${escapeHTML(op.title)}</div>
+            </div>
             <div class="op-context-wrap">
               <div class="op-toolbar">
                 <button type="button" data-cmd="bold" title="Bold"><b>B</b></button>
@@ -1600,11 +1658,17 @@
               <div class="op-context" contenteditable="true" data-placeholder="Add rich context — bold, lists, links, colour…">${contextHtml}</div>
             </div>
             <div class="op-meta">
-              added ${fmtFull(op.createdAt)}
+              <span class="op-origin" title="Auto-set when this open point was originated">Originated ${fmtFull(op.createdAt)}</span>
               ${cmp ? `<span class="component-chip" style="background:rgba(${c.rgb},.2);color:rgb(${c.rgb})">${escapeHTML(cmp.name)}</span>` : ''}
             </div>
           </div>
           <div class="op-actions">
+            <select class="op-criticality" title="Criticality">
+              <option value="low" ${op.criticality === 'low' ? 'selected' : ''}>Low</option>
+              <option value="med" ${op.criticality === 'med' ? 'selected' : ''}>Medium</option>
+              <option value="high" ${op.criticality === 'high' ? 'selected' : ''}>High</option>
+              <option value="critical" ${op.criticality === 'critical' ? 'selected' : ''}>Critical</option>
+            </select>
             <select class="op-component" title="Link to a component">
               <option value="">— component</option>
               ${(proj.components || []).map((pt) => `<option value="${pt.id}" ${pt.id === op.component ? 'selected' : ''}>${escapeHTML(pt.name)}</option>`).join('')}
@@ -1672,6 +1736,15 @@
             commit('op-component');
           });
         }
+        const critSel = el.querySelector('.op-criticality');
+        if (critSel) {
+          critSel.addEventListener('change', () => {
+            const op = proj.openPoints.find((x) => x.id === id);
+            if (!op) return;
+            op.criticality = critSel.value;
+            commit('op-criticality');
+          });
+        }
         el.querySelector('.op-promote').addEventListener('click', () => {
           const op = proj.openPoints.find((x) => x.id === id);
           if (!op) return;
@@ -1683,6 +1756,7 @@
             notes: isHtml ? '' : (op.notes || ''),
             description: isHtml ? op.notes : '',
             component: op.component,
+            priority: CRITICALITY_TO_PRIORITY[op.criticality] ?? 1,
           }, () => {
             proj.openPoints = proj.openPoints.filter((x) => x.id !== id);
             commit('op-promote');
@@ -1701,7 +1775,7 @@
       const v = $('#opInput').value.trim();
       if (!v) return;
       const comp = $('#opQuickComp')?.value || null;
-      proj.openPoints.unshift({ id: uid('op'), title: v, notes: '', component: comp, createdAt: todayISO() });
+      proj.openPoints.unshift({ id: uid('op'), title: v, notes: '', component: comp, criticality: 'med', createdAt: todayISO() });
       $('#opInput').value = '';
       if ($('#opQuickComp')) $('#opQuickComp').value = '';
       commit('op-add');
@@ -2638,10 +2712,15 @@
       attachBarDND(bar, a, startISO);
       const row = gridEl.children[ownerIdx];
       row.appendChild(bar);
-      // If the bar is too narrow to legibly hold the title, render an
-      // overflow label just to the right of the bar.
-      const NARROW_PX = 100;
-      if (w < NARROW_PX) {
+      // If the bar's usable interior is too narrow to legibly hold the title,
+      // render an overflow label to the right of the bar. Reserve space for the
+      // resize handles (8 px each) and the side padding (6 px each), plus any
+      // warn icons / commitment chip glued to the front of the label.
+      const HANDLES_PAD = 8 + 8 + 6 + 6; // 28 px reserved by handles + padding
+      const PREFIX_PX = (warnIcons ? 14 : 0) + (cmtChip ? 30 : 0);
+      const titlePx = a.title.length * 6.2 + 4; // estimate (font 11, weight 400)
+      const usable = w - HANDLES_PAD - PREFIX_PX;
+      if (usable < titlePx) {
         const overflow = document.createElement('span');
         overflow.className = `tl-bar-overflow ${a.status}`;
         overflow.style.left = (left + w + 4) + 'px';
@@ -3547,7 +3626,9 @@
   /* ---------------------- Engineering side views --------------------- */
 
   // Shared timeline strip — renders points/markers along a horizontal date axis.
-  // items: [{ id, name, date: 'YYYY-MM-DD', status?, color?, icon? }]
+  // items: [{ id, name, date: 'YYYY-MM-DD', status?, rgb?, icon? }]
+  // Uses lane-packing so labels never overlap, plus a stable per-item color
+  // (passed in as `rgb`) so the row swatch matches the timeline circle.
   function renderTimelineStrip(items) {
     const dated = items.filter((i) => i.date).map((i) => ({ ...i, t: parseDate(i.date) }));
     if (!dated.length) return '<div class="empty">Add a date to any item to see it on the timeline.</div>';
@@ -3556,16 +3637,52 @@
     const all = [...dated.map((d) => d.t), today];
     let min = new Date(Math.min(...all));
     let max = new Date(Math.max(...all));
-    // pad ~10% on each side
     const span = Math.max(dayMs * 30, max - min);
     min = new Date(min.getTime() - span * 0.10);
     max = new Date(max.getTime() + span * 0.10);
 
-    const W = 800, H = 86;
-    const padL = 24, padR = 24, padT = 22, padB = 26;
+    const sorted = dated.slice().sort((a, b) => a.t - b.t);
+    const W = 880;
+    const padL = 28, padR = 28;
     const innerW = W - padL - padR;
     const xFor = (t) => padL + (t - min) / (max - min) * innerW;
-    const yLine = padT + (H - padT - padB) / 2;
+
+    // Lane packing — alternate sides, then stack into rows.
+    // Each label occupies a horizontal extent at the lane's y; we pick the
+    // lowest-numbered lane where the new extent doesn't overlap any prior label.
+    const CHAR_W = 6.0; // px per char (10px font, font-weight 600)
+    const PAD_X  = 6;   // gap between adjacent labels
+    const ROW_H  = 14;  // vertical pitch between lanes
+    const labelW = (s) => Math.max(28, Math.min(160, s.length * CHAR_W));
+    const lanesAbove = []; // each: array of {x0, x1}
+    const lanesBelow = [];
+    function fit(lanes, x0, x1) {
+      for (let l = 0; l < lanes.length; l++) {
+        if (!lanes[l].some((r) => x1 + PAD_X >= r.x0 && x0 - PAD_X <= r.x1)) {
+          lanes[l].push({ x0, x1 });
+          return l;
+        }
+      }
+      lanes.push([{ x0, x1 }]);
+      return lanes.length - 1;
+    }
+
+    const placed = sorted.map((it, i) => {
+      const x = xFor(it.t);
+      const w = labelW(it.name);
+      const x0 = x - w / 2, x1 = x + w / 2;
+      // Alternate above/below for a balanced look, then pack into the first free lane.
+      const above = i % 2 === 0;
+      const lane = above ? fit(lanesAbove, x0, x1) : fit(lanesBelow, x0, x1);
+      return { ...it, x, above, lane };
+    });
+
+    const lanesA = Math.max(1, lanesAbove.length);
+    const lanesB = Math.max(1, lanesBelow.length);
+    const padT = 14 + lanesA * ROW_H;
+    const padB = 18 + lanesB * ROW_H + 12;
+    const H = padT + padB + 16;
+    const yLine = padT + 8;
 
     // Monthly ticks
     const ticks = [];
@@ -3573,31 +3690,45 @@
     if (dt < min) dt = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
     while (dt <= max) {
       const x = xFor(dt);
-      ticks.push(`<g><line class="strip-tick" x1="${x}" x2="${x}" y1="${yLine - 6}" y2="${yLine + 6}" /><text class="strip-month" x="${x}" y="${H - 6}" text-anchor="middle">${dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</text></g>`);
+      ticks.push(`<g><line class="strip-tick" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${yLine - 5}" y2="${yLine + 5}" /><text class="strip-month" x="${x.toFixed(1)}" y="${(H - 4).toFixed(1)}" text-anchor="middle">${dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</text></g>`);
       dt = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
     }
 
     const todayX = xFor(today);
-    const todayLine = `<line class="strip-today" x1="${todayX}" x2="${todayX}" y1="${padT - 4}" y2="${H - padB + 6}" /><text class="strip-today-lbl" x="${todayX + 4}" y="${padT - 6}">today</text>`;
+    const todayLine = `<line class="strip-today" x1="${todayX.toFixed(1)}" x2="${todayX.toFixed(1)}" y1="${(padT - 6).toFixed(1)}" y2="${(H - padB + 6).toFixed(1)}" /><text class="strip-today-lbl" x="${(todayX + 4).toFixed(1)}" y="${(padT - 8).toFixed(1)}">today</text>`;
 
-    // Stagger labels: alternate above/below to reduce overlap
-    const sorted = dated.slice().sort((a, b) => a.t - b.t);
-    const markers = sorted.map((it, i) => {
-      const x = xFor(it.t);
-      const above = i % 2 === 0;
-      const labelY = above ? padT - 4 : H - padB + 14;
-      const lineY1 = above ? padT - 0 : yLine + 4;
-      const lineY2 = above ? yLine - 4 : H - padB + 6;
-      const cls = it.status === 'done' ? 'done' : (it.t < today && it.status !== 'done' ? 'late' : '');
+    const markers = placed.map((it) => {
+      const x = it.x;
+      const labelY = it.above
+        ? padT - 6 - (lanesAbove.length - 1 - it.lane) * ROW_H
+        : H - padB + 14 + it.lane * ROW_H;
+      const dateY = it.above ? labelY + 10 : labelY + 10;
+      const stemY1 = it.above
+        ? labelY - 8
+        : yLine + 6;
+      const stemY2 = it.above
+        ? yLine - 6
+        : labelY - 12;
+      const isDone = it.status === 'done';
+      const isLate = !isDone && it.t < today;
+      const cls = isDone ? 'done' : (isLate ? 'late' : '');
+      const rgb = it.rgb || '129,140,248';
+      const labelFill = isDone ? 'var(--text-dim)' : (isLate ? 'var(--bad)' : `rgb(${rgb})`);
+      const safeName = escapeHTML(it.name);
+      // Status badge: ✓ for done, ! for late — overlay above the dot so the
+      // per-item colour still tracks between row swatch and circle fill.
+      const badge = isDone
+        ? `<g class="strip-badge done"><circle cx="${(x + 7).toFixed(1)}" cy="${(yLine - 7).toFixed(1)}" r="5" fill="var(--ok)" stroke="var(--bg-1)" stroke-width="1.5" /><text x="${(x + 7).toFixed(1)}" y="${(yLine - 4).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="7" font-weight="700">✓</text></g>`
+        : isLate
+          ? `<g class="strip-badge late"><circle cx="${(x + 7).toFixed(1)}" cy="${(yLine - 7).toFixed(1)}" r="5" fill="var(--bad)" stroke="var(--bg-1)" stroke-width="1.5" /><text x="${(x + 7).toFixed(1)}" y="${(yLine - 4).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="8" font-weight="700">!</text></g>`
+          : '';
       return `
-        <g class="strip-mark ${cls}">
-          <line class="strip-stem" x1="${x}" x2="${x}" y1="${lineY1}" y2="${lineY2}" />
-          <circle cx="${x}" cy="${yLine}" r="5" />
-          <text class="strip-lbl" x="${x}" y="${labelY}" text-anchor="middle">
-            <title>${escapeHTML(it.name)} — ${it.date}${it.status ? ` (${it.status})` : ''}</title>
-            ${escapeHTML(it.name)}
-          </text>
-          <text class="strip-date" x="${x}" y="${above ? padT + 8 : yLine + 18}" text-anchor="middle">${fmtDate(it.date)}</text>
+        <g class="strip-mark ${cls}" data-strip-id="${it.id}">
+          <line class="strip-stem" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${stemY1.toFixed(1)}" y2="${stemY2.toFixed(1)}" stroke="rgb(${rgb})" />
+          <circle class="strip-pt" cx="${x.toFixed(1)}" cy="${yLine}" r="6" fill="rgb(${rgb})" stroke="var(--bg-1)" stroke-width="1.6" />
+          ${badge}
+          <text class="strip-lbl" x="${x.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" fill="${labelFill}">${safeName}</text>
+          <text class="strip-date" x="${x.toFixed(1)}" y="${dateY.toFixed(1)}" text-anchor="middle">${fmtDate(it.date)}</text>
         </g>`;
     }).join('');
 
@@ -3610,13 +3741,65 @@
       </svg>`;
   }
 
+  // Shared floating tooltip + hover wiring for the deliverables / milestones strip.
+  let _stripTipEl = null;
+  function ensureStripTipEl() {
+    if (_stripTipEl) return _stripTipEl;
+    _stripTipEl = document.createElement('div');
+    _stripTipEl.className = 'strip-tooltip';
+    document.body.appendChild(_stripTipEl);
+    return _stripTipEl;
+  }
+  function wireStripHover(scope, lookup) {
+    const svg = scope.querySelector('.strip-svg');
+    if (!svg) return;
+    const tip = ensureStripTipEl();
+    function show(g, x, y) {
+      const it = lookup(g.dataset.stripId);
+      if (!it) return;
+      const today = todayISO();
+      const diff = dayDiff(it.date, today);
+      const rel = diff === 0 ? 'today'
+        : diff > 0 ? `in ${diff} day${diff === 1 ? '' : 's'}`
+        : `${-diff} day${diff === -1 ? '' : 's'} ago`;
+      const isDone = it.status === 'done';
+      const isLate = !isDone && diff < 0;
+      const statusLbl = isDone ? '✓ Done'
+        : isLate ? '⚠ Late'
+        : (it.status === 'doing' ? '◐ In progress' : '○ Not started');
+      const swatch = it.rgb ? `<span class="strip-tip-swatch" style="background:rgb(${it.rgb})"></span>` : '';
+      tip.innerHTML = `
+        <div class="strip-tip-head">${swatch}<span class="strip-tip-title">${escapeHTML(it.name)}</span></div>
+        <div class="strip-tip-row"><span class="strip-tip-lbl">Date</span><span>${fmtFull(it.date)}</span></div>
+        <div class="strip-tip-row"><span class="strip-tip-lbl">When</span><span>${rel}</span></div>
+        <div class="strip-tip-row"><span class="strip-tip-lbl">Status</span><span class="${isDone ? 'ok' : isLate ? 'bad' : ''}">${statusLbl}</span></div>`;
+      tip.style.display = 'block';
+      const r = tip.getBoundingClientRect();
+      let px = x + 14, py = y + 14;
+      if (px + r.width  > innerWidth  - 8) px = x - r.width  - 14;
+      if (py + r.height > innerHeight - 8) py = y - r.height - 14;
+      tip.style.left = Math.max(8, px) + 'px';
+      tip.style.top  = Math.max(8, py) + 'px';
+    }
+    function hide() { tip.style.display = 'none'; }
+    svg.addEventListener('mousemove', (e) => {
+      const g = e.target.closest('.strip-mark[data-strip-id]');
+      if (!g) { hide(); return; }
+      show(g, e.clientX, e.clientY);
+    });
+    svg.addEventListener('mouseleave', hide);
+  }
+
   function renderDeliverables(root) {
     const proj = curProject();
     const view = document.createElement('div');
     view.className = 'view';
-    const items = (proj.deliverables || []).map((d) => ({
+    const sortedDels = (proj.deliverables || []).slice().sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
+    const items = sortedDels.map((d, i) => ({
       id: d.id, name: d.name, date: d.dueDate, status: d.status,
+      rgb: PERSON_PALETTE[i % PERSON_PALETTE.length].rgb,
     }));
+    const colorById = Object.fromEntries(items.map((it) => [it.id, it.rgb]));
     view.innerHTML = `
       <div class="page-head">
         <div><div class="page-title">Deliverables</div><div class="page-sub">Optional — group actions under a deliverable.</div></div>
@@ -3631,26 +3814,112 @@
     const list = $('#delList');
     if (!proj.deliverables?.length) list.innerHTML = '<div class="empty">No deliverables yet.</div>';
     else {
-      list.innerHTML = proj.deliverables.map((d) => {
+      list.innerHTML = sortedDels.map((d) => {
         const dueCls = d.status === 'done' ? '' :
           (d.dueDate && dayDiff(d.dueDate, todayISO()) < 0 ? 'late' : '');
+        const rgb = colorById[d.id] || '129,140,248';
         return `
-          <div class="row ${dueCls}">
+          <div class="row ${dueCls}" data-deliverable-id="${d.id}">
+            <span class="row-swatch" style="background:rgb(${rgb})" aria-hidden="true"></span>
             <span>◆ ${escapeHTML(d.name)}</span>
             <span class="row-meta">${d.dueDate ? fmtFull(d.dueDate) : '—'} • ${escapeHTML(d.status || 'todo')}</span>
           </div>`;
       }).join('');
+      wireStripHover(view, (id) => items.find((x) => x.id === id));
+      $$('.row[data-deliverable-id]', list).forEach((row) => {
+        row.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const id = row.dataset.deliverableId;
+          const d = (proj.deliverables || []).find((x) => x.id === id);
+          if (!d) return;
+          showContextMenu(e.clientX, e.clientY, [
+            { icon: '✎', label: 'Edit…', onClick: () => openDeliverableEditor(id) },
+            { divider: true },
+            { icon: '×', label: 'Delete deliverable', danger: true, onClick: () => {
+              const linked = (proj.actions || []).filter((a) => a.deliverable === id).length;
+              if (!confirm(`Delete "${d.name}"?` + (linked ? ` (${linked} action${linked === 1 ? '' : 's'} will become unlinked)` : ''))) return;
+              proj.deliverables = (proj.deliverables || []).filter((x) => x.id !== id);
+              (proj.actions || []).forEach((a) => { if (a.deliverable === id) a.deliverable = null; });
+              commit('deliverable-delete');
+              toast('Deleted');
+            }},
+          ]);
+        });
+        row.addEventListener('dblclick', () => openDeliverableEditor(row.dataset.deliverableId));
+      });
     }
     $('#btnAddDel').addEventListener('click', () => openQuickAdd('deliverable'));
+  }
+
+  function openDeliverableEditor(deliverableId) {
+    const proj = curProject();
+    const d = (proj.deliverables || []).find((x) => x.id === deliverableId);
+    if (!d) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width:520px;">
+        <div class="desc-head">
+          <div class="desc-title">Edit deliverable</div>
+          <button class="icon-btn" id="dvClose" title="Close">×</button>
+        </div>
+        <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
+          <div class="field"><label>Name</label><input id="dvName" value="${escapeHTML(d.name)}" /></div>
+          <div class="qa-row">
+            <div class="field"><label>Due</label><input id="dvDue" type="date" value="${d.dueDate || ''}" /></div>
+            <div class="field"><label>Status</label>
+              <select id="dvStatus">
+                <option value="todo" ${d.status === 'todo' ? 'selected' : ''}>Not started</option>
+                <option value="doing" ${d.status === 'doing' ? 'selected' : ''}>In progress</option>
+                <option value="done" ${d.status === 'done' ? 'selected' : ''}>Done</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="desc-foot">
+          <button class="ghost" id="dvCancel">Cancel</button>
+          <button class="ghost" id="dvDelete" style="margin-left:auto; color:var(--bad);">Delete</button>
+          <button class="primary" id="dvSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('dvName').focus(), 30);
+    const close = () => overlay.remove();
+    overlay.querySelector('#dvClose').addEventListener('click', close);
+    overlay.querySelector('#dvCancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+    overlay.querySelector('#dvSave').addEventListener('click', () => {
+      d.name = document.getElementById('dvName').value.trim() || d.name;
+      d.dueDate = document.getElementById('dvDue').value || null;
+      d.status = document.getElementById('dvStatus').value;
+      commit('deliverable-edit');
+      close();
+      toast('Saved');
+    });
+    overlay.querySelector('#dvDelete').addEventListener('click', () => {
+      const linked = (proj.actions || []).filter((a) => a.deliverable === d.id).length;
+      if (!confirm(`Delete "${d.name}"?` + (linked ? ` (${linked} action${linked === 1 ? '' : 's'} will become unlinked)` : ''))) return;
+      proj.deliverables = (proj.deliverables || []).filter((x) => x.id !== d.id);
+      (proj.actions || []).forEach((a) => { if (a.deliverable === d.id) a.deliverable = null; });
+      commit('deliverable-delete');
+      close();
+      toast('Deleted');
+    });
   }
 
   function renderMilestones(root) {
     const proj = curProject();
     const view = document.createElement('div');
     view.className = 'view';
-    const items = (proj.milestones || []).map((m) => ({
+    const sortedMs = (proj.milestones || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const items = sortedMs.map((m, i) => ({
       id: m.id, name: m.name, date: m.date, status: m.status,
+      rgb: PERSON_PALETTE[i % PERSON_PALETTE.length].rgb,
     }));
+    const colorById = Object.fromEntries(items.map((it) => [it.id, it.rgb]));
     view.innerHTML = `
       <div class="page-head">
         <div><div class="page-title">Milestones</div><div class="page-sub">Optional — anchor key dates.</div></div>
@@ -3665,21 +3934,182 @@
     const list = $('#mileList');
     if (!proj.milestones?.length) list.innerHTML = '<div class="empty">No milestones yet.</div>';
     else {
-      list.innerHTML = proj.milestones.map((m) => {
+      list.innerHTML = sortedMs.map((m) => {
         const dueCls = m.status === 'done' ? '' :
           (m.date && dayDiff(m.date, todayISO()) < 0 ? 'late' : '');
+        const rgb = colorById[m.id] || '129,140,248';
         return `
-          <div class="row ${dueCls}">
+          <div class="row ${dueCls}" data-milestone-id="${m.id}">
+            <span class="row-swatch" style="background:rgb(${rgb})" aria-hidden="true"></span>
             <span>◇ ${escapeHTML(m.name)}</span>
             <span class="row-meta">${m.date ? fmtFull(m.date) : '—'} • ${escapeHTML(m.status || 'todo')}</span>
           </div>`;
       }).join('');
+      wireStripHover(view, (id) => items.find((x) => x.id === id));
+      $$('.row[data-milestone-id]', list).forEach((row) => {
+        row.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const id = row.dataset.milestoneId;
+          const m = (proj.milestones || []).find((x) => x.id === id);
+          if (!m) return;
+          showContextMenu(e.clientX, e.clientY, [
+            { icon: '✎', label: 'Edit…', onClick: () => openMilestoneEditor(id) },
+            { divider: true },
+            { icon: '×', label: 'Delete milestone', danger: true, onClick: () => {
+              const linked = (proj.actions || []).filter((a) => a.milestone === id).length;
+              if (!confirm(`Delete "${m.name}"?` + (linked ? ` (${linked} action${linked === 1 ? '' : 's'} will become unlinked)` : ''))) return;
+              proj.milestones = (proj.milestones || []).filter((x) => x.id !== id);
+              (proj.actions || []).forEach((a) => { if (a.milestone === id) a.milestone = null; });
+              commit('milestone-delete');
+              toast('Deleted');
+            }},
+          ]);
+        });
+        row.addEventListener('dblclick', () => openMilestoneEditor(row.dataset.milestoneId));
+      });
     }
     $('#btnAddMile').addEventListener('click', () => openQuickAdd('milestone'));
   }
 
+  function openMilestoneEditor(milestoneId) {
+    const proj = curProject();
+    const m = (proj.milestones || []).find((x) => x.id === milestoneId);
+    if (!m) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width:520px;">
+        <div class="desc-head">
+          <div class="desc-title">Edit milestone</div>
+          <button class="icon-btn" id="msClose" title="Close">×</button>
+        </div>
+        <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
+          <div class="field"><label>Name</label><input id="msName" value="${escapeHTML(m.name)}" /></div>
+          <div class="qa-row">
+            <div class="field"><label>Date</label><input id="msDate" type="date" value="${m.date || ''}" /></div>
+            <div class="field"><label>Status</label>
+              <select id="msStatus">
+                <option value="todo" ${m.status === 'todo' ? 'selected' : ''}>Not started</option>
+                <option value="doing" ${m.status === 'doing' ? 'selected' : ''}>In progress</option>
+                <option value="done" ${m.status === 'done' ? 'selected' : ''}>Done</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <div class="desc-foot">
+          <button class="ghost" id="msCancel">Cancel</button>
+          <button class="ghost" id="msDelete" style="margin-left:auto; color:var(--bad);">Delete</button>
+          <button class="primary" id="msSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('msName').focus(), 30);
+    const close = () => overlay.remove();
+    overlay.querySelector('#msClose').addEventListener('click', close);
+    overlay.querySelector('#msCancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+    overlay.querySelector('#msSave').addEventListener('click', () => {
+      m.name = document.getElementById('msName').value.trim() || m.name;
+      m.date = document.getElementById('msDate').value || null;
+      m.status = document.getElementById('msStatus').value;
+      commit('milestone-edit');
+      close();
+      toast('Saved');
+    });
+    overlay.querySelector('#msDelete').addEventListener('click', () => {
+      const linked = (proj.actions || []).filter((a) => a.milestone === m.id).length;
+      if (!confirm(`Delete "${m.name}"?` + (linked ? ` (${linked} action${linked === 1 ? '' : 's'} will become unlinked)` : ''))) return;
+      proj.milestones = (proj.milestones || []).filter((x) => x.id !== m.id);
+      (proj.actions || []).forEach((a) => { if (a.milestone === m.id) a.milestone = null; });
+      commit('milestone-delete');
+      close();
+      toast('Deleted');
+    });
+  }
+
   // Persistent filter state for the R&O page
   const roState = { kind: 'all', view: 'list' }; // view: 'list' | 'matrix'
+
+  let _mtxTipEl = null;
+  function ensureMtxTipEl() {
+    if (_mtxTipEl) return _mtxTipEl;
+    _mtxTipEl = document.createElement('div');
+    _mtxTipEl.className = 'mtx-tooltip';
+    document.body.appendChild(_mtxTipEl);
+    return _mtxTipEl;
+  }
+  function wireRiskMatrixHover(scope) {
+    const proj = curProject();
+    const svg = scope.querySelector('.mtx-svg');
+    if (!svg) return;
+    const tip = ensureMtxTipEl();
+    function show(circle, x, y) {
+      const r = (proj.risks || []).find((rr) => rr.id === circle.dataset.riskId);
+      if (!r) return;
+      ensureRiskShape(r);
+      const isOpp = (r.kind || 'risk') === 'opportunity';
+      const stage = circle.dataset.ptStage; // 'inherent' | 'residual'
+      const inh = r.inherent, res = r.residual;
+      const inhScore = inh.probability * inh.impact;
+      const resScore = res.probability * res.impact;
+      const linked = r.actionId
+        ? state.projects.flatMap((p) => p.actions || []).find((a) => a.id === r.actionId)
+        : null;
+      tip.innerHTML = `
+        <div class="mtx-tip-head">
+          <span class="mtx-tip-icon ${isOpp ? 'opp' : 'risk'}">${isOpp ? '▽' : '▲'}</span>
+          <span class="mtx-tip-title">${escapeHTML(r.title)}</span>
+          <span class="mtx-tip-stage">${stage}</span>
+        </div>
+        <div class="mtx-tip-row"><span class="mtx-tip-lbl">Inherent</span><span>P${inh.probability} × I${inh.impact} = <b>${inhScore}</b></span></div>
+        <div class="mtx-tip-row"><span class="mtx-tip-lbl">Residual</span><span>P${res.probability} × I${res.impact} = <b>${resScore}</b></span></div>
+        <div class="mtx-tip-row"><span class="mtx-tip-lbl">Owner</span><span>${escapeHTML(personName(r.owner))}</span></div>
+        ${r.mitigation ? `<div class="mtx-tip-mit"><span class="mtx-tip-lbl">${isOpp ? 'Capture' : 'Mitigation'}</span>${escapeHTML(r.mitigation)}</div>` : ''}
+        ${linked ? `<div class="mtx-tip-link">↗ ${escapeHTML(linked.title)} <span style="color:var(--text-faint)">— ${escapeHTML(personName(linked.owner))}</span></div>` : ''}`;
+      tip.style.display = 'block';
+      const rr = tip.getBoundingClientRect();
+      let px = x + 14, py = y + 14;
+      if (px + rr.width  > innerWidth  - 8) px = x - rr.width - 14;
+      if (py + rr.height > innerHeight - 8) py = y - rr.height - 14;
+      tip.style.left = Math.max(8, px) + 'px';
+      tip.style.top  = Math.max(8, py) + 'px';
+    }
+    function hide() { tip.style.display = 'none'; }
+    svg.addEventListener('mousemove', (e) => {
+      const c = e.target.closest('.mtx-pt[data-risk-id]');
+      if (!c) { hide(); return; }
+      show(c, e.clientX, e.clientY);
+    });
+    svg.addEventListener('mouseleave', hide);
+    svg.addEventListener('contextmenu', (e) => {
+      const c = e.target.closest('.mtx-pt[data-risk-id]');
+      if (!c) return;
+      e.preventDefault();
+      hide();
+      const id = c.dataset.riskId;
+      const r = (proj.risks || []).find((rr) => rr.id === id);
+      if (!r) return;
+      const isOpp = (r.kind || 'risk') === 'opportunity';
+      showContextMenu(e.clientX, e.clientY, [
+        { icon: '✎', label: 'Edit…', onClick: () => openRiskEditor(id) },
+        { divider: true },
+        { icon: '×', label: `Delete ${isOpp ? 'opportunity' : 'risk'}`, danger: true, onClick: () => {
+          if (!confirm(`Delete "${r.title}"?`)) return;
+          curProject().risks = (curProject().risks || []).filter((x) => x.id !== id);
+          commit('risk-delete');
+          toast('Deleted');
+        }},
+      ]);
+    });
+    // Double-click also opens the editor
+    svg.addEventListener('dblclick', (e) => {
+      const c = e.target.closest('.mtx-pt[data-risk-id]');
+      if (c) openRiskEditor(c.dataset.riskId);
+    });
+  }
 
   function openRiskEditor(riskId) {
     const proj = curProject();
@@ -3825,14 +4255,11 @@
       const moved = (xInh !== xRes || yInh !== yRes);
       let svg = '';
       if (moved) {
-        // Arrow from inherent to residual using a marker-end
         svg += `<line class="mtx-arrow ${isOpp ? 'opp' : 'risk'}" x1="${xInh.toFixed(1)}" y1="${yInh.toFixed(1)}" x2="${xRes.toFixed(1)}" y2="${yRes.toFixed(1)}" marker-end="url(#mtxArrow${isOpp ? 'Opp' : 'Risk'})" />`;
       }
-      // Inherent point (hollow ring)
-      svg += `<circle class="mtx-pt mtx-pt-inh ${isOpp ? 'opp' : 'risk'}" cx="${xInh.toFixed(1)}" cy="${yInh.toFixed(1)}" r="7"><title>${escapeHTML(r.title)} — inherent P${inh.probability}×I${inh.impact} = ${inh.probability * inh.impact}</title></circle>`;
-      // Residual point (filled), only if moved
+      svg += `<circle class="mtx-pt mtx-pt-inh ${isOpp ? 'opp' : 'risk'}" data-risk-id="${r.id}" data-pt-stage="inherent" cx="${xInh.toFixed(1)}" cy="${yInh.toFixed(1)}" r="7"></circle>`;
       if (moved) {
-        svg += `<circle class="mtx-pt mtx-pt-res ${isOpp ? 'opp' : 'risk'}" cx="${xRes.toFixed(1)}" cy="${yRes.toFixed(1)}" r="5"><title>${escapeHTML(r.title)} — residual P${res.probability}×I${res.impact} = ${res.probability * res.impact}</title></circle>`;
+        svg += `<circle class="mtx-pt mtx-pt-res ${isOpp ? 'opp' : 'risk'}" data-risk-id="${r.id}" data-pt-stage="residual" cx="${xRes.toFixed(1)}" cy="${yRes.toFixed(1)}" r="5"></circle>`;
       }
       return svg;
     }).join('');
@@ -3905,6 +4332,7 @@
       }
       if (roState.view === 'matrix') {
         body.innerHTML = `<div class="panel chart-panel">${riskMatrixSVG(items)}</div>`;
+        wireRiskMatrixHover(body);
         return;
       }
       // List view
@@ -3998,12 +4426,201 @@
     if (!proj.decisions?.length) list.innerHTML = '<div class="empty">No decisions logged.</div>';
     else {
       list.innerHTML = proj.decisions.map((d) => `
-        <div class="row">
+        <div class="row" data-decision-id="${d.id}">
           <span>⬡ ${escapeHTML(d.title)}</span>
           <span class="row-meta">${escapeHTML(personName(d.owner))} • ${d.date || ''}</span>
         </div>`).join('');
+      $$('.row[data-decision-id]', list).forEach((row) => {
+        row.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const id = row.dataset.decisionId;
+          const d = (proj.decisions || []).find((x) => x.id === id);
+          if (!d) return;
+          showContextMenu(e.clientX, e.clientY, [
+            { icon: '✎', label: 'Edit…', onClick: () => openDecisionEditor(id) },
+            { divider: true },
+            { icon: '×', label: 'Delete decision', danger: true, onClick: () => {
+              if (!confirm(`Delete "${d.title}"?`)) return;
+              proj.decisions = (proj.decisions || []).filter((x) => x.id !== id);
+              commit('decision-delete');
+              toast('Deleted');
+            }},
+          ]);
+        });
+        row.addEventListener('dblclick', () => openDecisionEditor(row.dataset.decisionId));
+      });
     }
     $('#btnAddDec').addEventListener('click', () => openQuickAdd('decision'));
+  }
+
+  function openDecisionEditor(decisionId) {
+    const proj = curProject();
+    const d = (proj.decisions || []).find((x) => x.id === decisionId);
+    if (!d) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width:520px;">
+        <div class="desc-head">
+          <div class="desc-title">Edit decision</div>
+          <button class="icon-btn" id="deClose" title="Close">×</button>
+        </div>
+        <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
+          <div class="field"><label>Title</label><input id="deTitle" value="${escapeHTML(d.title)}" /></div>
+          <div class="field"><label>Rationale</label><textarea id="deRat" style="min-height:90px;">${escapeHTML(d.rationale || '')}</textarea></div>
+          <div class="qa-row">
+            <div class="field"><label>Owner</label>
+              <select id="deOwner">${state.people.map((p) => `<option value="${p.id}" ${p.id === d.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+            </div>
+            <div class="field"><label>Date</label><input id="deDate" type="date" value="${d.date || ''}" /></div>
+          </div>
+        </div>
+        <div class="desc-foot">
+          <button class="ghost" id="deCancel">Cancel</button>
+          <button class="ghost" id="deDelete" style="margin-left:auto; color:var(--bad);">Delete</button>
+          <button class="primary" id="deSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('deTitle').focus(), 30);
+    const close = () => overlay.remove();
+    overlay.querySelector('#deClose').addEventListener('click', close);
+    overlay.querySelector('#deCancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+    overlay.querySelector('#deSave').addEventListener('click', () => {
+      d.title = document.getElementById('deTitle').value.trim() || d.title;
+      d.rationale = document.getElementById('deRat').value;
+      d.owner = document.getElementById('deOwner').value;
+      d.date = document.getElementById('deDate').value || d.date;
+      commit('decision-edit');
+      close();
+      toast('Saved');
+    });
+    overlay.querySelector('#deDelete').addEventListener('click', () => {
+      if (!confirm(`Delete "${d.title}"?`)) return;
+      proj.decisions = (proj.decisions || []).filter((x) => x.id !== d.id);
+      commit('decision-delete');
+      close();
+      toast('Deleted');
+    });
+  }
+
+  function renderLinks(root) {
+    const proj = curProject();
+    proj.links = proj.links || [];
+    const view = document.createElement('div');
+    view.className = 'view';
+    view.innerHTML = `
+      <div class="page-head">
+        <div><div class="page-title">Links</div><div class="page-sub">Important references — websites, drives, files. Optionally tag with a component.</div></div>
+        <div class="page-actions"><button class="ghost" id="btnAddLink">+ Link</button></div>
+      </div>
+      <div class="links-list" id="linksList"></div>`;
+    root.appendChild(view);
+    const list = $('#linksList');
+    if (!proj.links.length) {
+      list.innerHTML = '<div class="empty">No links yet — add one to keep your team\'s key references in one place.</div>';
+    } else {
+      list.innerHTML = proj.links.map((l) => {
+        const comp = l.component ? findComponent(proj, l.component) : null;
+        const compRgb = comp ? componentColor(comp.color).rgb : null;
+        const host = (() => { try { return new URL(l.url).hostname.replace(/^www\./, ''); } catch (e) { return l.url; } })();
+        return `
+          <div class="link-card" data-link-id="${l.id}">
+            <a class="link-title" href="${escapeHTML(l.url)}" target="_blank" rel="noopener noreferrer">↗ ${escapeHTML(l.title || host || l.url)}</a>
+            <div class="link-host">${escapeHTML(host)}</div>
+            ${l.description ? `<div class="link-desc">${escapeHTML(l.description)}</div>` : ''}
+            ${comp ? `<div class="link-comp"><span class="link-comp-swatch" style="background:rgb(${compRgb})"></span>${escapeHTML(comp.name)}</div>` : ''}
+          </div>`;
+      }).join('');
+      $$('.link-card[data-link-id]', list).forEach((card) => {
+        card.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const id = card.dataset.linkId;
+          const l = (proj.links || []).find((x) => x.id === id);
+          if (!l) return;
+          showContextMenu(e.clientX, e.clientY, [
+            { icon: '✎', label: 'Edit…', onClick: () => openLinkEditor(id) },
+            { icon: '⧉', label: 'Copy URL', onClick: () => {
+              navigator.clipboard?.writeText(l.url).then(() => toast('Copied')).catch(() => toast('Copy failed'));
+            }},
+            { divider: true },
+            { icon: '×', label: 'Delete link', danger: true, onClick: () => {
+              if (!confirm(`Delete "${l.title || l.url}"?`)) return;
+              proj.links = (proj.links || []).filter((x) => x.id !== id);
+              commit('link-delete');
+              toast('Deleted');
+            }},
+          ]);
+        });
+        card.addEventListener('dblclick', (e) => {
+          if (e.target.closest('a')) return; // let the link click handle itself
+          openLinkEditor(card.dataset.linkId);
+        });
+      });
+    }
+    $('#btnAddLink').addEventListener('click', () => openQuickAdd('link'));
+  }
+
+  function openLinkEditor(linkId) {
+    const proj = curProject();
+    const l = (proj.links || []).find((x) => x.id === linkId);
+    if (!l) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width:560px;">
+        <div class="desc-head">
+          <div class="desc-title">Edit link</div>
+          <button class="icon-btn" id="lnClose" title="Close">×</button>
+        </div>
+        <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
+          <div class="field"><label>Title</label><input id="lnTitle" value="${escapeHTML(l.title || '')}" /></div>
+          <div class="field"><label>URL or path</label><input id="lnUrl" value="${escapeHTML(l.url || '')}" placeholder="https://… or file:///…" /></div>
+          <div class="field"><label>Description</label><textarea id="lnDesc" style="min-height:80px;">${escapeHTML(l.description || '')}</textarea></div>
+          <div class="field"><label>Component (optional)</label>
+            <select id="lnComp">
+              <option value="">— none —</option>
+              ${(proj.components || []).map((c) => `<option value="${c.id}" ${c.id === l.component ? 'selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="desc-foot">
+          <button class="ghost" id="lnCancel">Cancel</button>
+          <button class="ghost" id="lnDelete" style="margin-left:auto; color:var(--bad);">Delete</button>
+          <button class="primary" id="lnSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('lnTitle').focus(), 30);
+    const close = () => overlay.remove();
+    overlay.querySelector('#lnClose').addEventListener('click', close);
+    overlay.querySelector('#lnCancel').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    document.addEventListener('keydown', function escClose(ev) {
+      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
+    });
+    overlay.querySelector('#lnSave').addEventListener('click', () => {
+      const url = document.getElementById('lnUrl').value.trim();
+      if (!url) return toast('URL required');
+      l.title = document.getElementById('lnTitle').value.trim() || url;
+      l.url = url;
+      l.description = document.getElementById('lnDesc').value;
+      l.component = document.getElementById('lnComp').value || null;
+      commit('link-edit');
+      close();
+      toast('Saved');
+    });
+    overlay.querySelector('#lnDelete').addEventListener('click', () => {
+      if (!confirm(`Delete "${l.title || l.url}"?`)) return;
+      proj.links = (proj.links || []).filter((x) => x.id !== l.id);
+      commit('link-delete');
+      close();
+      toast('Deleted');
+    });
   }
 
   function renderComponents(root) {
@@ -4189,18 +4806,20 @@
   }
 
   function getCostCentres() {
+    const inScope = projectsInScope();
     const set = new Set();
-    state.projects.forEach((p) => (p.components || []).forEach((c) => {
-      if (c.costCenter) set.add(c.costCenter);
-    }));
-    // Also include cost centres that exist only in budgets (defined ahead of components)
-    Object.keys(state.budgets || {}).forEach((cc) => set.add(cc));
+    inScope.forEach((p) => {
+      (p.components || []).forEach((c) => { if (c.costCenter) set.add(c.costCenter); });
+      // Also include CCs explicitly declared on the project (e.g. via "+ Cost centre"
+      // before any component is mapped) so they're visible in the Budgets page.
+      (p.costCenters || []).forEach((cc) => { if (cc) set.add(cc); });
+    });
     return [...set].sort();
   }
 
   function componentsForCC(cc) {
     const out = [];
-    state.projects.forEach((p) => (p.components || []).forEach((c) => {
+    projectsInScope().forEach((p) => (p.components || []).forEach((c) => {
       if (c.costCenter === cc) out.push({ proj: p, component: c });
     }));
     return out;
@@ -4209,7 +4828,7 @@
   function actionsForCC(cc) {
     const ids = new Set(componentsForCC(cc).map(({ component }) => component.id));
     const out = [];
-    state.projects.forEach((p) => (p.actions || []).forEach((a) => {
+    projectsInScope().forEach((p) => (p.actions || []).forEach((a) => {
       if (a.deletedAt) return;
       if (ids.has(a.component)) out.push(a);
     }));
@@ -4393,12 +5012,16 @@
       });
     });
     $('#btnNewCC').addEventListener('click', () => {
+      if (curProjectIsMerged()) { toast('Pick a single project first'); return; }
       const code = prompt('New cost-centre code (alphanumeric, dashes/underscores allowed):');
       if (!code) return;
       const trimmed = code.trim();
       if (!/^[A-Za-z0-9_-]+$/.test(trimmed)) { toast('Cost centre: alphanumeric only'); return; }
-      if (ccs.includes(trimmed)) { toast('Already exists'); return; }
+      if (ccs.includes(trimmed)) { toast('Already exists in this project'); return; }
       state.budgets[trimmed] = state.budgets[trimmed] || {};
+      const proj = curProject();
+      proj.costCenters = proj.costCenters || [];
+      if (!proj.costCenters.includes(trimmed)) proj.costCenters.push(trimmed);
       saveState();
       render();
     });
@@ -4804,8 +5427,9 @@
       const h = padT + innerH - y;
       const cls = s.count > cap ? 'over' : s.count > cap * 0.8 ? 'warn' : 'ok';
       const label = s.weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const hours = Math.round((s.count / 100) * HOURS_PER_WEEK);
       return `<rect class="spark-bar ${cls}" x="${x + 2}" y="${y}" width="${Math.max(2, barW - 4)}" height="${Math.max(0, h)}" rx="2">
-        <title>Week of ${label} — ${s.count} action${s.count === 1 ? '' : 's'} (cap ${cap})</title>
+        <title>Week of ${label} — ${s.count}% FTE (${hours} h) · cap ${cap}%</title>
       </rect>`;
     }).join('');
 
@@ -4821,7 +5445,7 @@
     return `
       <svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Workload over time">
         <line class="spark-cap" x1="${padL}" x2="${W - padR}" y1="${capY}" y2="${capY}" stroke-dasharray="4 3" />
-        <text class="spark-cap-label" x="${W - padR - 4}" y="${Math.max(10, capY - 3)}" text-anchor="end">cap ${cap}</text>
+        <text class="spark-cap-label" x="${W - padR - 4}" y="${Math.max(10, capY - 3)}" text-anchor="end">cap ${cap}%</text>
         ${bars}
         ${ticks}
       </svg>`;
@@ -4843,7 +5467,7 @@
       </div>
       <div class="panel">
         <div class="panel-title">
-          Workload
+          Workload <span class="panel-sub">— bars are % of FTE (1 FTE ≈ ${HOURS_PER_WEEK} h/week)</span>
           <span class="legend">
             <span class="legend-item"><span class="dot ok"></span>≤80% cap</span>
             <span class="legend-item"><span class="dot warn"></span>≤100% cap</span>
@@ -4875,7 +5499,7 @@
                 </div>
                 <div class="spark-wrap">
                   ${workloadSparkSVG(p, series)}
-                  <div class="spark-meta"><span class="${peakCls}">peak ${peakWeek.count}</span></div>
+                  <div class="spark-meta"><span class="${peakCls}">peak ${peakWeek.count}% (${Math.round((peakWeek.count / 100) * HOURS_PER_WEEK)} h)</span></div>
                 </div>
               </div>`;
           }).join('')}
@@ -5181,6 +5805,17 @@
       body.innerHTML = `
         <div class="field"><label>Name</label><input id="qName" /></div>
         <div class="field"><label>Description</label><textarea id="qDesc"></textarea></div>`;
+    } else if (qaType === 'link') {
+      body.innerHTML = `
+        <div class="field"><label>Title</label><input id="qTitle" placeholder="Display name" /></div>
+        <div class="field"><label>URL or path</label><input id="qUrl" placeholder="https://… or file:///…" /></div>
+        <div class="field"><label>Description</label><textarea id="qDesc" placeholder="What this is and when to use it"></textarea></div>
+        <div class="field"><label>Component (optional)</label>
+          <select id="qComp">
+            <option value="">— none —</option>
+            ${(proj.components || []).map((c) => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join('')}
+          </select>
+        </div>`;
     }
   }
 
@@ -5200,7 +5835,7 @@
         originator: $('#qOriginator')?.value || null,
         due: $('#qDue').value || null,
         status: $('#qStatus').value,
-        priority: 0,
+        priority: typeof qaInit.priority === 'number' ? qaInit.priority : 0,
         commitment: clamp(parseInt($('#qCmt')?.value, 10) || 100, 5, 100),
         component: $('#qComponent')?.value || null,
         deliverable: $('#qDel').value || null,
@@ -5246,10 +5881,11 @@
       const inhI = clamp(parseInt($('#qImp').value, 10) || 3, 1, 5);
       const resP = clamp(parseInt($('#qProbR').value, 10) || inhP, 1, 5);
       const resI = clamp(parseInt($('#qImpR').value, 10) || inhI, 1, 5);
+      const isOpp = qaInit.kind === 'opportunity';
       proj.risks = proj.risks || [];
       proj.risks.push({
-        id: uid(qaInit.kind === 'opportunity' ? 'o' : 'r'),
-        kind: qaInit.kind === 'opportunity' ? 'opportunity' : 'risk',
+        id: uid(isOpp ? 'o' : 'r'),
+        kind: isOpp ? 'opportunity' : 'risk',
         title,
         inherent: { probability: inhP, impact: inhI },
         residual: { probability: resP, impact: resI },
@@ -5257,6 +5893,9 @@
         actionId: $('#qActionLink').value || null,
         owner: $('#qOwner').value,
       });
+      // If the R&O page is filtered in a way that would hide this new item,
+      // open the filter so the user actually sees what they just added.
+      if (roState.kind === (isOpp ? 'risk' : 'opportunity')) roState.kind = 'all';
     } else if (qaType === 'decision') {
       const title = $('#qTitle').value.trim();
       if (!title) return toast('Title required');
@@ -5296,10 +5935,20 @@
       const np = {
         id: uid('pr'), name,
         description: $('#qDesc').value || '',
-        actions: [], deliverables: [], milestones: [], risks: [], decisions: [], changes: [], components: [],
+        actions: [], deliverables: [], milestones: [], risks: [], decisions: [], changes: [], components: [], links: [],
       };
       state.projects.push(np);
       state.currentProjectId = np.id;
+    } else if (qaType === 'link') {
+      const url = $('#qUrl').value.trim();
+      if (!url) return toast('URL required');
+      const title = $('#qTitle').value.trim() || url;
+      proj.links = proj.links || [];
+      proj.links.push({
+        id: uid('lk'), title, url,
+        description: $('#qDesc').value || '',
+        component: $('#qComp').value || null,
+      });
     }
     // Capture the just-pushed action for callback consumers (e.g. notes panel).
     let createdAction = null;
@@ -5308,7 +5957,10 @@
     qaSaveCallback = null;
     commit('add');
     closeQuickAdd();
-    toast('Added');
+    const addedLabel = qaType === 'risk'
+      ? (qaInit.kind === 'opportunity' ? 'Opportunity added' : 'Risk added')
+      : 'Added';
+    toast(addedLabel);
     if (cb && createdAction) cb(createdAction);
   }
 
@@ -5554,6 +6206,7 @@
   /* --------------------------- Import/Export ------------------------- */
 
   function exportJSON() {
+    flushPendingSaves();
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -5561,6 +6214,17 @@
     a.click();
     URL.revokeObjectURL(url);
     toast('Exported');
+  }
+
+  // Flush any debounced notes timer + force a saveState immediately. Called by
+  // unload / visibility handlers and before export so nothing pending is lost.
+  function flushPendingSaves() {
+    if (notesSaveTimer) {
+      clearTimeout(notesSaveTimer);
+      notesSaveTimer = null;
+      try { saveNotesNow(); } catch (e) { /* notes panel may not be open */ }
+    }
+    try { saveState(); } catch (e) { /* quota */ }
   }
   function importJSON() {
     const input = document.createElement('input');
@@ -5580,9 +6244,13 @@
             p.milestones = p.milestones || [];
             p.risks = p.risks || [];
             p.decisions = p.decisions || [];
+            p.changes = p.changes || [];
             p.components = p.components || [];
             p.meetings = p.meetings || [];
             p.openPoints = p.openPoints || [];
+            p.links = p.links || [];
+            p.costCenters = p.costCenters || [];
+            p.archive = p.archive || [];
             p.actions.forEach((a) => {
               a.history = a.history || [];
               a.createdAt = a.createdAt || todayISO();
@@ -5596,6 +6264,7 @@
           state.currentView = state.currentView || 'board';
           state.budgets = state.budgets || {};
           state.settings = state.settings || {};
+          state.notes = state.notes || {};
           saveState(); render();
           toast('Imported');
         } catch (e) { toast('Import failed: ' + e.message); }
@@ -5667,6 +6336,17 @@
       saveState();
       render();
       toast('Sample data restored');
+    });
+
+    $('#btnEmpty').addEventListener('click', () => {
+      if (!confirm('Wipe everything and start from zero?\n\nThis removes every project, person, action, deliverable, milestone, and note. You can Export first if you want to keep what\'s here.\n\nThis cannot be undone (except via Undo).')) return;
+      const typed = prompt('Type EMPTY (in caps) to confirm wiping all data:');
+      if ((typed || '').trim() !== 'EMPTY') { toast('Cancelled — nothing was changed'); return; }
+      undoStack.push(JSON.stringify(state));
+      state = emptyState();
+      saveState();
+      render();
+      toast('Started fresh');
     });
 
     $('#btnTheme').addEventListener('click', () => {
@@ -5745,6 +6425,15 @@
         applyNotesPanel();
       }
     });
+
+    // Persistence safety net — flush on tab close / hide / refresh, and run a
+    // low-cost periodic save in case a crash skips the unload handlers.
+    window.addEventListener('beforeunload', flushPendingSaves);
+    window.addEventListener('pagehide',     flushPendingSaves);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flushPendingSaves();
+    });
+    setInterval(flushPendingSaves, 10000);
 
     render();
   }

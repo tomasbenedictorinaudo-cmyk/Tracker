@@ -48,6 +48,9 @@
         <button class="nav-item" data-view="archive">
           <span class="nav-icon">⌫</span><span>Archive</span>
         </button>
+        <button class="nav-item" data-view="links">
+          <span class="nav-icon">↗</span><span>Links</span>
+        </button>
 
         <div class="nav-section">Engineering</div>
         <button class="nav-item" data-view="components">
@@ -71,8 +74,9 @@
       </nav>
 
       <div class="sidebar-foot">
-        <button class="ghost" id="btnImport" title="Import JSON">Import</button>
-        <button class="ghost" id="btnExport" title="Export JSON">Export</button>
+        <button class="icon-btn" id="btnImport" title="Import JSON — load a saved file">↓</button>
+        <button class="icon-btn" id="btnExport" title="Export JSON — save current state to a file">↑</button>
+        <button class="icon-btn danger" id="btnEmpty" title="Start from zero — wipe everything">⊘</button>
         <button class="icon-btn" id="btnReset" title="Reset to sample data">↺</button>
         <button class="icon-btn" id="btnTheme" title="Toggle light / dark">◐</button>
       </div>
@@ -155,9 +159,10 @@
         <button class="qa-tab active" data-qa="action">Action</button>
         <button class="qa-tab" data-qa="deliverable">Deliverable</button>
         <button class="qa-tab" data-qa="milestone">Milestone</button>
-        <button class="qa-tab" data-qa="risk">Risk</button>
+        <button class="qa-tab" data-qa="risk">Risk / Opportunity</button>
         <button class="qa-tab" data-qa="decision">Decision</button>
         <button class="qa-tab" data-qa="meeting">Meeting</button>
+        <button class="qa-tab" data-qa="link">Link</button>
         <button class="qa-tab" data-qa="component">Component</button>
         <button class="qa-tab" data-qa="person">Person</button>
         <button class="qa-tab" data-qa="project">Project</button>
