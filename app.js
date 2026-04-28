@@ -103,6 +103,17 @@
   };
   const CRITICALITY_LABEL = { low: 'Low', med: 'Medium', high: 'High', critical: 'Critical' };
   const CRITICALITY_TO_PRIORITY = { low: 0, med: 1, high: 2, critical: 3 };
+  // Action priority levels — same 4-level scale as criticality. Stored as
+  // `a.priorityLevel`; defaults to 'med' for legacy actions in normalizeState.
+  // Note: `a.priority` (a numeric integer) is kept untouched as the in-column
+  // sort key — both fields coexist and serve different purposes.
+  const PRIORITY_LEVELS = [
+    { id: 'low',      label: 'Low',      rgb: CRITICALITY_RGB.low },
+    { id: 'med',      label: 'Medium',   rgb: CRITICALITY_RGB.med },
+    { id: 'high',     label: 'High',     rgb: CRITICALITY_RGB.high },
+    { id: 'critical', label: 'Critical', rgb: CRITICALITY_RGB.critical },
+  ];
+  const priorityLevel = (id) => PRIORITY_LEVELS.find((p) => p.id === id) || PRIORITY_LEVELS[1];
 
   let state = null;
   let undoStack = [];
@@ -836,8 +847,15 @@
       card.style.setProperty('--cmp-chip-bg',  `rgba(${c.rgb},.20)`);
       card.style.setProperty('--cmp-chip-fg',  `rgb(${c.rgb})`);
     }
+    const lvl = priorityLevel(a.priorityLevel);
+    // Only render a chip when priority is non-default (Medium) — keeps cards
+    // calm and lets High/Critical visually pop.
+    const showPriorityChip = a.priorityLevel && a.priorityLevel !== 'med';
     card.innerHTML = `
-      ${component ? `<div class="component-chip">${escapeHTML(component.name)}</div>` : ''}
+      <div class="card-top-row">
+        ${component ? `<div class="component-chip">${escapeHTML(component.name)}</div>` : ''}
+        ${showPriorityChip ? `<span class="prio-chip prio-${lvl.id}" title="Priority: ${lvl.label}" style="background:rgba(${lvl.rgb},.18);color:rgb(${lvl.rgb});border:1px solid rgb(${lvl.rgb})">${lvl.label}</span>` : ''}
+      </div>
       <div class="card-title">${escapeHTML(a.title)}</div>
       <div class="card-meta">
         <span class="avatar" title="${escapeHTML(owner?.name || 'Unassigned')}">${initials(owner?.name)}</span>
@@ -1765,11 +1783,14 @@
         const stepDone = op.steps.filter((s) => s.done).length;
         const stepTotal = op.steps.length;
         const stepsAllDone = stepTotal > 0 && stepDone === stepTotal;
+        const prio = priorityLevel(op.priorityLevel);
+        const showOpPrioChip = op.priorityLevel && op.priorityLevel !== 'med';
         return `
         <div class="op-item crit-${op.criticality}" data-id="${op.id}" ${tint}>
           <div class="op-content">
             <div class="op-title-row">
               <span class="op-crit-chip" title="Criticality" style="background:rgba(${critRgb},.18);color:rgb(${critRgb});border:1px solid rgb(${critRgb})">${critLabel}</span>
+              ${showOpPrioChip ? `<span class="prio-chip prio-${prio.id}" title="Priority: ${prio.label}" style="background:rgba(${prio.rgb},.18);color:rgb(${prio.rgb});border:1px solid rgb(${prio.rgb})">${prio.label}</span>` : ''}
               <div class="op-title" contenteditable="true" data-field="title">${escapeHTML(op.title)}</div>
             </div>
             <div class="op-context-wrap">
@@ -1816,11 +1837,14 @@
             </div>
           </div>
           <div class="op-actions">
-            <select class="op-criticality" title="Criticality">
-              <option value="low" ${op.criticality === 'low' ? 'selected' : ''}>Low</option>
-              <option value="med" ${op.criticality === 'med' ? 'selected' : ''}>Medium</option>
-              <option value="high" ${op.criticality === 'high' ? 'selected' : ''}>High</option>
-              <option value="critical" ${op.criticality === 'critical' ? 'selected' : ''}>Critical</option>
+            <select class="op-criticality" title="Criticality (severity if not addressed)">
+              <option value="low" ${op.criticality === 'low' ? 'selected' : ''}>Crit · Low</option>
+              <option value="med" ${op.criticality === 'med' ? 'selected' : ''}>Crit · Medium</option>
+              <option value="high" ${op.criticality === 'high' ? 'selected' : ''}>Crit · High</option>
+              <option value="critical" ${op.criticality === 'critical' ? 'selected' : ''}>Crit · Critical</option>
+            </select>
+            <select class="op-priority" title="Priority (urgency to address)">
+              ${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (op.priorityLevel || 'med') ? 'selected' : ''}>Prio · ${p.label}</option>`).join('')}
             </select>
             <select class="op-component" title="Link to a component">
               <option value="">— component</option>
@@ -1898,6 +1922,15 @@
             commit('op-criticality');
           });
         }
+        const prioSel = el.querySelector('.op-priority');
+        if (prioSel) {
+          prioSel.addEventListener('change', () => {
+            const op = proj.openPoints.find((x) => x.id === id);
+            if (!op) return;
+            op.priorityLevel = prioSel.value;
+            commit('op-priority');
+          });
+        }
         // Resolution steps — checkbox / edit / delete / add / drag-to-reorder
         wireOpStepHandlers(el, () => proj.openPoints.find((x) => x.id === id));
 
@@ -1912,7 +1945,7 @@
             notes: isHtml ? '' : (op.notes || ''),
             description: isHtml ? op.notes : '',
             component: op.component,
-            priority: CRITICALITY_TO_PRIORITY[op.criticality] ?? 1,
+            priorityLevel: op.priorityLevel || op.criticality || 'med',
           }, () => {
             proj.openPoints = proj.openPoints.filter((x) => x.id !== id);
             commit('op-promote');
@@ -1966,15 +1999,17 @@
 
   function regSortValue(a, col, proj) {
     switch (col) {
-      case 'title':     return (a.title || '').toLowerCase();
-      case 'component': return (findComponent(proj, a.component)?.name || 'zzz').toLowerCase();
-      case 'owner':     return personName(a.owner).toLowerCase();
-      case 'status':    return ['todo','doing','blocked','done'].indexOf(a.status);
-      case 'due':       return a.due || '9999-99-99';
-      case 'predicted': return predictedCompletion(a) || '9999-99-99';
-      case 'actual':    return actualCompletion(a) || '9999-99-99';
-      case 'commitment':return typeof a.commitment === 'number' ? a.commitment : 100;
-      case 'updatedAt': return a.updatedAt || '0000-00-00';
+      case 'title':          return (a.title || '').toLowerCase();
+      case 'component':      return (findComponent(proj, a.component)?.name || 'zzz').toLowerCase();
+      case 'owner':          return personName(a.owner).toLowerCase();
+      case 'status':         return ['todo','doing','blocked','done'].indexOf(a.status);
+      case 'priority':       return ['critical','high','med','low'].indexOf(a.priorityLevel || 'med');
+      case 'due':            return a.due || '9999-99-99';
+      case 'predicted':      return predictedCompletion(a) || '9999-99-99';
+      case 'actual':         return actualCompletion(a) || '9999-99-99';
+      case 'commitment':     return typeof a.commitment === 'number' ? a.commitment : 100;
+      case 'updatedAt':      return a.updatedAt || '0000-00-00';
+      case 'originatorDate': return a.originatorDate || '0000-00-00';
     }
     return 0;
   }
@@ -1998,11 +2033,10 @@
           <button class="reg-col" data-col="component">Component</button>
           <button class="reg-col" data-col="owner">Owner</button>
           <button class="reg-col" data-col="status">Status</button>
+          <button class="reg-col" data-col="priority">Priority</button>
           <button class="reg-col" data-col="due">Due</button>
           <button class="reg-col" data-col="predicted" title="Predicted completion (defaults to due)">Predicted</button>
-          <button class="reg-col" data-col="actual" title="Actual completion (defaults to when marked done)">Actual</button>
-          <button class="reg-col" data-col="commitment">Commit</button>
-          <button class="reg-col" data-col="updatedAt">Updated</button>
+          <button class="reg-col" data-col="originatorDate" title="When this action was originated">Originator date</button>
           <span class="reg-col-spacer" aria-hidden="true"></span>
         </div>
         <div class="reg-body" id="regBody"></div>
@@ -2215,6 +2249,7 @@
       const overdueBadge = isOverdue
         ? `<span class="overdue-badge" title="Overdue by ${Math.abs(dayDiff(a.due, todayISO()))} day(s)">⏰</span>`
         : '';
+      const lvl = priorityLevel(a.priorityLevel);
       return `
         <div class="reg-row ${isOverdue ? 'is-overdue' : ''}" data-id="${a.id}" ${tint}>
           <div class="reg-cell title-cell">
@@ -2239,6 +2274,12 @@
               ${STATUSES.map((s) => `<option value="${s.id}" ${s.id === a.status ? 'selected' : ''}>${s.name}</option>`).join('')}
             </select>
           </div>
+          <div class="reg-cell priority-cell">
+            <span class="reg-prio-pip" style="background:rgb(${lvl.rgb})" title="${lvl.label}"></span>
+            <select class="reg-inp" data-field="priorityLevel" style="color:rgb(${lvl.rgb});">
+              ${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (a.priorityLevel || 'med') ? 'selected' : ''}>${p.label}</option>`).join('')}
+            </select>
+          </div>
           <div class="reg-cell">
             <input type="date" class="reg-inp ${dueCls}" data-field="due" value="${a.due || ''}" />
           </div>
@@ -2246,12 +2287,8 @@
             <input type="date" class="reg-inp ${a.predictedCompletion ? 'overridden' : 'derived'}" data-field="predictedCompletion" value="${predictedCompletion(a)}" title="${a.predictedCompletion ? 'Custom predicted date — click 𝕩 to clear' : 'Defaults to due date'}" />
           </div>
           <div class="reg-cell">
-            <input type="date" class="reg-inp ${a.actualCompletion ? 'overridden' : 'derived'}" data-field="actualCompletion" value="${actualCompletion(a)}" ${a.status !== 'done' && !a.actualCompletion ? 'placeholder="—" disabled' : ''} title="${a.actualCompletion ? 'Custom actual date' : (a.status === 'done' ? 'Defaults to date marked done' : 'Set when action is marked done')}" />
+            <input type="date" class="reg-inp" data-field="originatorDate" value="${a.originatorDate || a.createdAt || ''}" title="When this action was originated" />
           </div>
-          <div class="reg-cell">
-            <input type="number" class="reg-inp commit-inp" data-field="commitment" min="5" max="100" step="5" value="${typeof a.commitment === 'number' ? a.commitment : 100}" />
-          </div>
-          <div class="reg-cell muted">${a.updatedAt ? fmtDate(a.updatedAt) : '—'}</div>
           <div class="reg-cell">
             <button class="row-del" title="Delete action" aria-label="Delete">×</button>
           </div>
@@ -2323,6 +2360,22 @@
       } else if (field === 'actualCompletion') {
         const v = raw || null;
         if ((a.actualCompletion || null) !== v) { a.actualCompletion = v; changed = true; }
+      } else if (field === 'priorityLevel') {
+        const v = PRIORITY_LEVELS.some((p) => p.id === raw) ? raw : 'med';
+        if ((a.priorityLevel || 'med') !== v) {
+          a.history = a.history || [];
+          a.history.push({ at: today, what: `Priority: ${priorityLevel(a.priorityLevel || 'med').label} → ${priorityLevel(v).label}` });
+          a.priorityLevel = v;
+          changed = true;
+        }
+      } else if (field === 'originatorDate') {
+        const v = raw || null;
+        if ((a.originatorDate || null) !== v) {
+          a.history = a.history || [];
+          a.history.push({ at: today, what: `Originator date: ${a.originatorDate || '—'} → ${v || '—'}` });
+          a.originatorDate = v;
+          changed = true;
+        }
       }
       if (changed) {
         a.updatedAt = today;
@@ -3073,9 +3126,183 @@
 
   /* ---------------------------- Dashboard ---------------------------- */
 
+  // Compute the 5 decision-making KPIs surfaced at the top of the Dashboard.
+  // These are derived metrics — no schema additions, just better synthesis of
+  // existing fields (commitments, risks, action timestamps, EVM, CR dates).
+  function computeDecisionKpis(proj) {
+    const todayISO_ = todayISO();
+
+    // 1. Team utilisation — for each horizon, sum committed % FTE across all
+    // people / sum capacity. Spare expressed in FTE-weeks.
+    const totalCapPct = state.people.reduce((s, p) => s + (p.capacity || 100), 0) || 1;
+    const utilFor = (weeksAhead) => {
+      let totalCommit = 0;
+      state.people.forEach((p) => {
+        weeklyLoad(p.id, weeksAhead).forEach((w) => { totalCommit += w.count || 0; });
+      });
+      const totalCapPeriod = totalCapPct * weeksAhead;
+      const pct = totalCapPeriod ? Math.round((totalCommit / totalCapPeriod) * 100) : 0;
+      const spareFte = ((totalCapPeriod - totalCommit) / 100);
+      return { pct, spareFte };
+    };
+    const u4  = utilFor(4);
+    const u8  = utilFor(8);
+    const u12 = utilFor(12);
+
+    // 2. Risk exposure — sum of P×I, residual vs. inherent, with unmitigated tally
+    const risks = (proj.risks || []).filter((r) => (r.kind || 'risk') !== 'opportunity');
+    let inh = 0, res = 0, unmitigated = 0;
+    risks.forEach((r) => {
+      const i  = ((r.inherent && r.inherent.probability) || 0) * ((r.inherent && r.inherent.impact) || 0);
+      const rs = ((r.residual && r.residual.probability) || 0) * ((r.residual && r.residual.impact) || 0);
+      inh += i;
+      res += rs;
+      if (!r.actionId) unmitigated += rs;
+    });
+    const reduction = inh > 0 ? Math.round((1 - res / inh) * 100) : 0;
+
+    // 3. Stale actions — open and not updated in ≥ 14 days
+    const STALE_DAYS = 14;
+    const open = (proj.actions || []).filter((a) => !a.deletedAt && a.status !== 'done');
+    const stale = open.filter((a) => {
+      if (!a.updatedAt) return true;
+      return dayDiff(todayISO_, a.updatedAt) >= STALE_DAYS;
+    });
+    const topStale = stale.slice().sort((a, b) => (a.updatedAt || '').localeCompare(b.updatedAt || '')).slice(0, 3);
+    const stalePct = open.length ? Math.round((stale.length / open.length) * 100) : 0;
+
+    // 4. Project EVM rollup — sum BAC/PV/AC/EV across cost-centres in scope
+    const ccs = getCostCentres();
+    let BAC = 0, PV = 0, AC = 0, EV = 0;
+    if (ccs.length) {
+      // Same week table evmFor builds; reuse the helper for consistency
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      let monday = new Date(today);
+      while (monday.getDay() !== 1) monday = new Date(monday.getTime() - dayMs);
+      const start = new Date(monday.getTime() - 12 * 7 * dayMs);
+      const weeks = [];
+      for (let i = 0; i < 52; i++) {
+        const s = new Date(start.getTime() + i * 7 * dayMs);
+        weeks.push({ start: s, isoStart: fmtISO(s) });
+      }
+      ccs.forEach((cc) => {
+        const e = evmFor(cc, weeks, 'cost');
+        BAC += e.BAC; PV += e.PV; AC += e.AC; EV += e.EV;
+      });
+    }
+    const CPI = AC > 0 ? EV / AC : 1;
+    const SPI = PV > 0 ? EV / PV : 1;
+
+    // 5. CR governance — median turnaround + count of pending > 14 d
+    const changes = proj.changes || [];
+    const decided = changes.filter((c) => c.status === 'approved' || c.status === 'rejected' || c.status === 'implemented');
+    const turnarounds = decided
+      .filter((c) => c.originatedDate && c.decisionDate)
+      .map((c) => Math.max(0, dayDiff(c.decisionDate, c.originatedDate)));
+    let medianTurn = null;
+    if (turnarounds.length) {
+      const sorted = turnarounds.slice().sort((a, b) => a - b);
+      const mid = Math.floor(sorted.length / 2);
+      medianTurn = sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+    }
+    const pending = changes.filter((c) => c.status === 'proposed' || c.status === 'under_review');
+    const stalePending = pending.filter((c) => c.originatedDate && dayDiff(todayISO_, c.originatedDate) >= 14).length;
+
+    return {
+      util: { u4, u8, u12 },
+      risk: { inh, res, unmitigated, reduction, count: risks.length },
+      stale: { count: stale.length, totalOpen: open.length, stalePct, top: topStale },
+      evm: { BAC, PV, AC, EV, CPI, SPI, hasData: ccs.length > 0 && AC > 0 },
+      cr: { medianTurn, pending: pending.length, stalePending, decided: decided.length, total: changes.length },
+    };
+  }
+
+  function decisionKpisHTML(d) {
+    const todayISO_ = todayISO();
+    const utilCls = (p) => p > 100 ? 'bad' : p > 85 ? 'warn' : 'ok';
+    const fmtFte = (f) => (f >= 0 ? '+' : '') + f.toFixed(1) + ' FTE-w';
+    const riskCls = d.risk.res >= 100 ? 'bad' : d.risk.res >= 50 ? 'warn' : d.risk.count === 0 ? '' : 'ok';
+    const staleCls = d.stale.count > 8 ? 'bad' : d.stale.count > 3 ? 'warn' : 'ok';
+    const cpiCls = d.evm.CPI >= 1 ? 'ok' : d.evm.CPI >= 0.9 ? 'warn' : 'bad';
+    const spiCls = d.evm.SPI >= 1 ? 'ok' : d.evm.SPI >= 0.9 ? 'warn' : 'bad';
+    const crCls  = (d.cr.medianTurn ?? 0) > 14 ? 'bad' : (d.cr.medianTurn ?? 0) > 7 ? 'warn' : (d.cr.medianTurn != null ? 'ok' : '');
+    const utilBars = [['4 w', d.util.u4], ['8 w', d.util.u8], ['12 w', d.util.u12]].map(([lbl, u]) => `
+      <div class="dkpi-mb">
+        <span class="dkpi-mb-lbl">${lbl}</span>
+        <span class="dkpi-mb-track"><span class="dkpi-mb-fill ${utilCls(u.pct)}" style="width:${Math.min(100, u.pct)}%"></span></span>
+        <span class="dkpi-mb-val">${u.pct}%</span>
+      </div>`).join('');
+    const staleList = d.stale.top.length
+      ? d.stale.top.map((a) => {
+          const days = a.updatedAt ? Math.abs(dayDiff(todayISO_, a.updatedAt)) : '—';
+          return `<div class="dkpi-list-row clickable" data-action-id="${a.id}" title="Open action">
+            <span class="dkpi-list-text">${escapeHTML(a.title)}</span>
+            <span class="dkpi-list-meta">${days}${typeof days === 'number' ? 'd' : ''}</span>
+          </div>`;
+        }).join('')
+      : '<div class="dkpi-list-empty">No stale actions — nice.</div>';
+
+    return `
+      <div class="dkpi-grid">
+        <div class="dkpi">
+          <div class="dkpi-label">Team utilisation</div>
+          <div class="dkpi-num ${utilCls(d.util.u4.pct)}">${d.util.u4.pct}%</div>
+          <div class="dkpi-sub">next 4 w · ${fmtFte(d.util.u4.spareFte)} spare</div>
+          <div class="dkpi-mini">${utilBars}</div>
+        </div>
+
+        <div class="dkpi">
+          <div class="dkpi-label">Risk exposure</div>
+          <div class="dkpi-num ${riskCls}">${d.risk.res}</div>
+          <div class="dkpi-sub">residual P×I · ${d.risk.count} risk${d.risk.count === 1 ? '' : 's'}</div>
+          <div class="dkpi-strip">
+            <span class="dkpi-strip-pill">↓ ${d.risk.reduction}% from ${d.risk.inh}</span>
+            ${d.risk.unmitigated > 0
+              ? `<span class="dkpi-strip-warn">⚠ ${d.risk.unmitigated} unmitigated</span>`
+              : (d.risk.count > 0 ? '<span class="dkpi-strip-ok">all linked</span>' : '<span class="dkpi-strip-muted">none logged</span>')}
+          </div>
+        </div>
+
+        <div class="dkpi">
+          <div class="dkpi-label">Stale actions</div>
+          <div class="dkpi-num ${staleCls}">${d.stale.count}</div>
+          <div class="dkpi-sub">of ${d.stale.totalOpen} open · ${d.stale.stalePct}% untouched ≥14 d</div>
+          <div class="dkpi-list">${staleList}</div>
+        </div>
+
+        <div class="dkpi">
+          <div class="dkpi-label">Project performance</div>
+          <div class="dkpi-dual">
+            <div class="dkpi-dual-cell">
+              <div class="dkpi-dual-num ${cpiCls}">${d.evm.hasData ? d.evm.CPI.toFixed(2) : '—'}</div>
+              <div class="dkpi-dual-lbl">CPI</div>
+            </div>
+            <div class="dkpi-dual-sep"></div>
+            <div class="dkpi-dual-cell">
+              <div class="dkpi-dual-num ${spiCls}">${d.evm.hasData ? d.evm.SPI.toFixed(2) : '—'}</div>
+              <div class="dkpi-dual-lbl">SPI</div>
+            </div>
+          </div>
+          <div class="dkpi-sub">${d.evm.hasData ? 'cost / schedule index · all CCs' : 'add a budget to a cost-centre'}</div>
+        </div>
+
+        <div class="dkpi">
+          <div class="dkpi-label">Change governance</div>
+          <div class="dkpi-num ${crCls}">${d.cr.medianTurn != null ? d.cr.medianTurn + ' d' : '—'}</div>
+          <div class="dkpi-sub">${d.cr.medianTurn != null ? 'median turnaround · ' : ''}${d.cr.decided} decided · ${d.cr.pending} open</div>
+          <div class="dkpi-strip">
+            ${d.cr.stalePending > 0
+              ? `<span class="dkpi-strip-warn">⚠ ${d.cr.stalePending} pending &gt;14 d</span>`
+              : (d.cr.total > 0 ? '<span class="dkpi-strip-ok">no aging pending</span>' : '<span class="dkpi-strip-muted">no CRs yet</span>')}
+          </div>
+        </div>
+      </div>`;
+  }
+
   function renderDashboard(root) {
     const proj = curProject();
     const k = kpis();
+    const decisionKpis = computeDecisionKpis(proj);
     const view = document.createElement('div');
     view.className = 'view';
     view.innerHTML = `
@@ -3085,6 +3312,7 @@
           <div class="page-sub">Health summary based on current data</div>
         </div>
       </div>
+      ${decisionKpisHTML(decisionKpis)}
       <div class="dashboard">
         <div class="kpi clickable" data-dash-filter="late" title="Click to view late items in Register">
           <div class="kpi-label">Late items</div>
@@ -3122,6 +3350,11 @@
         </div>
       </div>`;
     root.appendChild(view);
+
+    // Stale-action rows in the decision-KPI panel → open the drawer for that action
+    $$('.dkpi-list-row[data-action-id]', view).forEach((el) => {
+      el.addEventListener('click', () => openDrawer(el.dataset.actionId));
+    });
 
     // Dashboard KPI clicks → navigate to Register pre-filtered.
     // Double-click clears all filters and still navigates to Register.
@@ -4977,10 +5210,13 @@
         // Rationale supports rich HTML; legacy plain entries render as text
         const rationaleHtml = c.rationale && /<\w+/.test(c.rationale) ? c.rationale : escapeHTML(c.rationale || '');
         const analysisHtml  = c.analysis  && /<\w+/.test(c.analysis)  ? c.analysis  : escapeHTML(c.analysis  || '');
+        const prio = priorityLevel(c.priorityLevel);
+        const showCrPrioChip = c.priorityLevel && c.priorityLevel !== 'med';
         return `
           <div class="cr-card" data-cr-id="${c.id}">
             <div class="cr-row1">
               <span class="cr-status" style="background:rgba(${s.rgb},.18);color:rgb(${s.rgb});border:1px solid rgb(${s.rgb})">${s.label}</span>
+              ${showCrPrioChip ? `<span class="prio-chip prio-${prio.id}" title="Priority: ${prio.label}" style="background:rgba(${prio.rgb},.18);color:rgb(${prio.rgb});border:1px solid rgb(${prio.rgb})">${prio.label}</span>` : ''}
               <span class="cr-title">${escapeHTML(c.title)}</span>
               ${cmp ? `<span class="component-chip" style="background:rgba(${cc.rgb},.2);color:rgb(${cc.rgb})">${escapeHTML(cmp.name)}</span>` : ''}
             </div>
@@ -5075,6 +5311,7 @@
       impact: { schedule: 0, cost: 0, scope: '', risk: '' },
       component: null,
       linkUrl: null,
+      priorityLevel: 'med',
     };
   }
 
@@ -5100,6 +5337,11 @@
             <div class="field"><label>Status</label>
               <select id="crStatus">
                 ${CR_STATUSES.map((s) => `<option value="${s.id}" ${s.id === c.status ? 'selected' : ''}>${s.label}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Priority</label>
+              <select id="crPriorityLevel">
+                ${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (c.priorityLevel || 'med') ? 'selected' : ''}>${p.label}</option>`).join('')}
               </select>
             </div>
             <div class="field"><label>Originator</label>
@@ -5180,6 +5422,7 @@
         risk:     document.getElementById('crRisk').value,
       };
       c.linkUrl   = document.getElementById('crLinkUrl').value.trim() || null;
+      c.priorityLevel = document.getElementById('crPriorityLevel')?.value || c.priorityLevel || 'med';
       c.component = document.getElementById('crComp').value || null;
       c.decisionBy = document.getElementById('crDecisionBy').value || null;
       const dDate = document.getElementById('crDecisionDate').value;
@@ -6076,8 +6319,78 @@
         state.currentView = 'board';
         saveState(); render();
       });
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const pid = el.dataset.pid;
+        const p = state.projects.find((x) => x.id === pid);
+        if (!p) return;
+        showContextMenu(e.clientX, e.clientY, [
+          { icon: '✎', label: 'Edit project…', onClick: () => openProjectEditor(pid) },
+          { icon: '⌕', label: 'Open project',  onClick: () => {
+            state.currentProjectId = pid;
+            state.currentView = 'board';
+            saveState(); render();
+          }},
+          { divider: true },
+          { icon: '×', label: 'Delete project', danger: true, onClick: () => {
+            if (state.projects.length <= 1) { toast('Cannot delete the only project'); return; }
+            const counts = {
+              actions: (p.actions || []).length,
+              deliverables: (p.deliverables || []).length,
+              milestones: (p.milestones || []).length,
+              risks: (p.risks || []).length,
+            };
+            const summary = Object.entries(counts).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`).join(', ');
+            const msg = `Delete project "${p.name}"?` + (summary ? `\n\nThis will permanently remove ${summary}.\n\nThis cannot be undone (except via Undo).` : '');
+            if (!confirm(msg)) return;
+            const typed = prompt(`Type DELETE to confirm permanently removing "${p.name}":`);
+            if ((typed || '').trim() !== 'DELETE') { toast('Cancelled — nothing was changed'); return; }
+            state.projects = state.projects.filter((x) => x.id !== pid);
+            if (state.currentProjectId === pid) state.currentProjectId = state.projects[0]?.id || null;
+            commit('project-delete');
+            toast('Deleted');
+          }},
+        ]);
+      });
     });
     $('#btnNewProj2').addEventListener('click', () => openQuickAdd('project'));
+  }
+
+  function openProjectEditor(projectId) {
+    const p = state.projects.find((x) => x.id === projectId);
+    if (!p) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width:520px;">
+        <div class="desc-head">
+          <div class="desc-title">Edit project</div>
+          <button class="icon-btn" id="prClose" title="Close">×</button>
+        </div>
+        <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
+          <div class="field"><label>Name</label><input id="prName" value="${escapeHTML(p.name)}" /></div>
+          <div class="field"><label>Description</label><textarea id="prDesc" style="min-height:100px;">${escapeHTML(p.description || '')}</textarea></div>
+        </div>
+        <div class="desc-foot">
+          <button class="ghost" id="prCancel">Cancel</button>
+          <button class="primary" id="prSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('prName').focus(), 30);
+    const close = () => overlay.remove();
+    overlay.querySelector('#prClose').addEventListener('click', close);
+    overlay.querySelector('#prCancel').addEventListener('click', close);
+    // Modal closes ONLY via the explicit × / Cancel — no backdrop or Escape.
+    overlay.querySelector('#prSave').addEventListener('click', () => {
+      const name = document.getElementById('prName').value.trim();
+      if (!name) return toast('Name required');
+      p.name = name;
+      p.description = document.getElementById('prDesc').value;
+      commit('project-edit');
+      close();
+      toast('Saved');
+    });
   }
 
   // Compute weekly workload for a person across the next `weeks` weeks.
@@ -6261,9 +6574,12 @@
           <input id="dOriginatorDate" type="date" value="${a.originatorDate || a.createdAt || ''}" title="When this action was originated" />
         </div>
       </div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
         <div class="field"><label>Status</label>
           <select id="dStatus">${STATUSES.map((s) => `<option value="${s.id}" ${s.id === a.status ? 'selected' : ''}>${s.name}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Priority</label>
+          <select id="dPriorityLevel">${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (a.priorityLevel || 'med') ? 'selected' : ''}>${p.label}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Due</label><input id="dDue" type="date" value="${a.due || ''}" /></div>
       </div>
@@ -6308,6 +6624,11 @@
       const oldOrigDate = a.originatorDate;
       a.originatorDate = $('#dOriginatorDate')?.value || a.originatorDate || a.createdAt || todayISO();
       if (oldOrigDate !== a.originatorDate) a.history.push({ at: todayISO(), what: `Originator date: ${oldOrigDate || '—'} → ${a.originatorDate || '—'}` });
+      const oldPriorityLevel = a.priorityLevel || 'med';
+      a.priorityLevel = $('#dPriorityLevel')?.value || a.priorityLevel || 'med';
+      if (oldPriorityLevel !== a.priorityLevel) {
+        a.history.push({ at: todayISO(), what: `Priority: ${priorityLevel(oldPriorityLevel).label} → ${priorityLevel(a.priorityLevel).label}` });
+      }
       a.commitment = clamp(parseInt($('#dCmt').value, 10) || 100, 5, 100);
       if (oldCmt !== a.commitment) a.history.push({ at: todayISO(), what: `Commitment: ${oldCmt}% → ${a.commitment}%` });
       a.notes = $('#dNotes').value;
@@ -6380,6 +6701,9 @@
         <div class="qa-row">
           <div class="field"><label>Status</label>
             <select id="qStatus">${STATUSES.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Priority</label>
+            <select id="qPriorityLevel">${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (qaInit.priorityLevel || 'med') ? 'selected' : ''}>${p.label}</option>`).join('')}</select>
           </div>
           <div class="field"><label>Due</label><input id="qDue" type="date" value="${todayISO()}" /></div>
         </div>
@@ -6557,6 +6881,7 @@
         due: $('#qDue').value || null,
         status: $('#qStatus').value,
         priority: typeof qaInit.priority === 'number' ? qaInit.priority : 0,
+        priorityLevel: $('#qPriorityLevel')?.value || qaInit.priorityLevel || 'med',
         commitment: clamp(parseInt($('#qCmt')?.value, 10) || 100, 5, 100),
         component: $('#qComponent')?.value || null,
         deliverable: $('#qDel').value || null,
@@ -6981,6 +7306,9 @@
         a.title = a.title || '';
         a.status = a.status || 'todo';
         a.priority = (typeof a.priority === 'number') ? a.priority : 0;
+        // priorityLevel — added later; older exports default to 'med' so the
+        // existing rank-by-priority sort behaviour stays unchanged. Retrocompat.
+        a.priorityLevel = (a.priorityLevel && PRIORITY_LEVELS.some((p) => p.id === a.priorityLevel)) ? a.priorityLevel : 'med';
         a.commitment = (typeof a.commitment === 'number') ? a.commitment : 100;
         a.owner = a.owner || null;
         a.originator = a.originator || null;
@@ -7053,6 +7381,8 @@
         c.impact.risk     = c.impact.risk  || '';
         c.component = c.component || null;
         c.linkUrl = c.linkUrl || null;
+        // priorityLevel — added later; default to 'med' for retrocompat
+        c.priorityLevel = (c.priorityLevel && PRIORITY_LEVELS.some((p) => p.id === c.priorityLevel)) ? c.priorityLevel : 'med';
         delete c.linkTitle; // dropped from schema
       });
 
@@ -7079,6 +7409,8 @@
         op.component = op.component || null;
         op.criticality = op.criticality || 'med';
         op.createdAt = op.createdAt || todayISO();
+        // priorityLevel — added later; default to 'med' for retrocompat
+        op.priorityLevel = (op.priorityLevel && PRIORITY_LEVELS.some((p) => p.id === op.priorityLevel)) ? op.priorityLevel : 'med';
         // Resolution steps — added in a later schema version; default to []
         // for full retrocompat with older exports that never had this field.
         op.steps = Array.isArray(op.steps) ? op.steps : [];
