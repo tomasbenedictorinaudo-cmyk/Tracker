@@ -2875,10 +2875,79 @@ kbd {
 }
 .notes-body:focus { outline: none; }
 .notes-body p { margin: 0 0 10px; }
+.notes-body h1 { font-size: 16px; margin: 16px 0 6px; color: var(--text); font-weight: 700; }
+.notes-body h2 { font-size: 14.5px; margin: 14px 0 6px; color: var(--text); font-weight: 700; }
 .notes-body h3 { font-size: 14px; margin: 14px 0 6px; color: var(--text); }
+.notes-body h4, .notes-body h5, .notes-body h6 {
+  font-size: 13px; margin: 10px 0 4px; color: var(--text-dim); font-weight: 700;
+}
 .notes-body ul, .notes-body ol { padding-left: 22px; margin: 6px 0 10px; }
 .notes-body li { margin-bottom: 3px; }
 .notes-body i, .notes-body em { font-style: italic; color: var(--text-dim); }
+/* Subtle pulse when a TOC link scrolls a heading into view */
+.notes-body .nt-flash {
+  animation: nt-flash 0.9s ease-out;
+}
+@keyframes nt-flash {
+  0%   { background: rgba(110,168,255,.0);  border-radius: 4px; }
+  20%  { background: rgba(110,168,255,.22); }
+  100% { background: rgba(110,168,255,.0);  }
+}
+
+/* Auto-built table of contents — sits above the editable body */
+.notes-toc {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+  padding: 8px 14px 10px;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+.notes-toc[hidden] { display: none; }
+.notes-toc-head {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .14em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.notes-toc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.notes-toc-item {
+  margin: 0;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+.notes-toc-item a {
+  display: block;
+  padding: 2px 4px;
+  color: var(--text-dim);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  border-radius: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color var(--transition), background var(--transition), border-color var(--transition);
+}
+.notes-toc-item a:hover {
+  color: var(--accent);
+  background: var(--bg-3);
+  border-left-color: var(--accent);
+}
+.notes-toc-item.lvl-1 a { color: var(--text); font-weight: 600; padding-left: 6px; }
+.notes-toc-item.lvl-2 a { padding-left: 16px; }
+.notes-toc-item.lvl-3 a { padding-left: 26px; }
+.notes-toc-item.lvl-4 a { padding-left: 36px; font-size: 11px; }
+.notes-toc-item.lvl-5 a,
+.notes-toc-item.lvl-6 a { padding-left: 46px; font-size: 10.5px; color: var(--text-faint); }
 
 .note-chip {
   display: inline-flex;
@@ -2903,6 +2972,79 @@ kbd {
 .note-chip.done { background: rgba(74,222,128,.15); border-color: rgba(74,222,128,.45); }
 .note-chip.done .chip-mark { color: var(--ok); }
 .note-chip.done b { text-decoration: line-through; opacity: .7; }
+.note-chip.person-chip {
+  background: rgba(167,139,250,.15);
+  border-color: rgba(167,139,250,.45);
+}
+.note-chip.person-chip:hover { background: rgba(167,139,250,.28); }
+.note-chip.person-chip .chip-mark { color: rgba(167,139,250,1); font-weight: 700; }
+
+/* Inline @/# autocomplete popup for the meeting notes */
+.notes-ac {
+  position: fixed;
+  z-index: 1000;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0,0,0,.45);
+  padding: 4px;
+  min-width: 220px;
+  max-width: 320px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.notes-ac[hidden] { display: none; }
+.notes-ac .ac-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 6px 8px;
+  text-align: left;
+  cursor: pointer;
+  color: var(--text);
+  font-size: 12px;
+}
+.notes-ac .ac-item:hover,
+.notes-ac .ac-item.active {
+  background: var(--bg-3);
+}
+.notes-ac .ac-item .avatar,
+.notes-ac .ac-item .ac-icon {
+  flex-shrink: 0;
+  width: 22px; height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  border-radius: 50%;
+  background: var(--bg-2);
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.notes-ac .ac-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+.notes-ac .ac-name {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.notes-ac .ac-meta {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .note-chip.blocked { background: rgba(248,113,113,.15); border-color: rgba(248,113,113,.45); }
 .note-chip.blocked .chip-mark { color: var(--bad); }
 .note-chip.chip-stale {

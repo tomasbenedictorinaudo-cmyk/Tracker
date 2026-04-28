@@ -7124,6 +7124,7 @@
     const html = state.notes[proj.id];
     body.innerHTML = html || `<p><i>Notes for <b>${escapeHTML(proj.name)}</b> — type freely. Use the toolbar to format and to insert actions assigned to people.</i></p><p></p>`;
     $('#notesMeta').textContent = proj.name;
+    buildNotesToc();
   }
 
   function saveNotesNow() {
@@ -7134,6 +7135,38 @@
     saveState();
     const s = $('#notesSaved');
     if (s) { s.textContent = 'Saved'; s.classList.remove('saving'); }
+    buildNotesToc();
+  }
+
+  // Auto-built table of contents — scans the notes for H1–H6 elements,
+  // assigns stable ids, and renders a compact clickable list above the
+  // editable body. Hidden when there are no headings (keeps the panel calm).
+  function buildNotesToc() {
+    const body = $('#notesBody');
+    const toc  = $('#notesToc');
+    if (!body || !toc) return;
+    const headings = body.querySelectorAll('h1, h2, h3, h4, h5, h6');
+    const items = [];
+    headings.forEach((h, i) => {
+      const text = (h.textContent || '').trim();
+      if (!text) return;
+      // Stable id per heading position; preserve any author-set id.
+      if (!h.id) {
+        const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'h';
+        h.id = `nt-h-${i}-${slug}`;
+      }
+      items.push({ id: h.id, text, lvl: parseInt(h.tagName[1], 10) || 3 });
+    });
+    if (!items.length) { toc.hidden = true; toc.innerHTML = ''; return; }
+    toc.innerHTML = `
+      <div class="notes-toc-head">Contents</div>
+      <ol class="notes-toc-list">
+        ${items.map((it) => `
+          <li class="notes-toc-item lvl-${it.lvl}">
+            <a href="#${escapeHTML(it.id)}" data-toc-target="${escapeHTML(it.id)}">${escapeHTML(it.text)}</a>
+          </li>`).join('')}
+      </ol>`;
+    toc.hidden = false;
   }
   function scheduleNotesSave() {
     clearTimeout(notesSaveTimer);
@@ -7179,6 +7212,126 @@
       `</span>&nbsp;`;
     document.execCommand('insertHTML', false, html);
     scheduleNotesSave();
+  }
+
+  function insertPersonChip(person) {
+    restoreSelection();
+    const safe = (s) => String(s).replace(/[<>"&]/g, (c) =>
+      ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c]));
+    const html = ` <span class="note-chip person-chip" contenteditable="false" data-person-id="${person.id}">` +
+      `<span class="chip-mark">@</span><b>${safe(person.name)}</b></span>&nbsp;`;
+    document.execCommand('insertHTML', false, html);
+    scheduleNotesSave();
+  }
+
+  /* --- Inline @/# autocomplete inside the meeting-notes editor ---
+   * Typing `@` opens a people picker; typing `#` opens an action picker.
+   * The popup filters as the user types; ArrowUp / ArrowDown navigate,
+   * Enter / Tab insert the chip, Escape dismisses. */
+  let notesAcState = null;
+
+  function getMentionContext(body) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed) return null;
+    if (!body.contains(range.startContainer)) return null;
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return null;
+    const text = node.textContent.slice(0, range.startOffset);
+    // Trigger at start-of-line or after whitespace; query allows letters,
+    // digits, hyphen, underscore, and a single space so "Sofia R" works.
+    const m = text.match(/(?:^|[\s ])([@#])([\w\-]*(?: [\w\-]*)?)$/);
+    if (!m) return null;
+    const kind = m[1];
+    const query = m[2];
+    const triggerStart = range.startOffset - query.length - 1;
+    if (triggerStart < 0) return null;
+    const triggerRange = document.createRange();
+    triggerRange.setStart(node, triggerStart);
+    triggerRange.setEnd(node, range.startOffset);
+    return { kind, query, triggerRange };
+  }
+
+  function showNotesAutocomplete(ctx) {
+    const popup = $('#notesAutocomplete');
+    if (!popup) return;
+    const q = ctx.query.toLowerCase();
+    let items;
+    if (ctx.kind === '@') {
+      items = state.people
+        .filter((p) => p.name.toLowerCase().includes(q))
+        .slice(0, 8);
+    } else {
+      items = state.projects
+        .flatMap((proj) => (proj.actions || []).filter((a) => !a.deletedAt).map((a) => ({ ...a, _proj: proj })))
+        .filter((a) => a.title.toLowerCase().includes(q))
+        .slice(0, 8);
+    }
+    if (!items.length) { hideNotesAutocomplete(); return; }
+    notesAcState = { kind: ctx.kind, query: ctx.query, items, idx: 0, triggerRange: ctx.triggerRange };
+    renderNotesAutocomplete();
+    positionNotesAutocomplete();
+  }
+
+  function hideNotesAutocomplete() {
+    notesAcState = null;
+    const popup = $('#notesAutocomplete');
+    if (popup) { popup.hidden = true; popup.innerHTML = ''; }
+  }
+
+  function renderNotesAutocomplete() {
+    const popup = $('#notesAutocomplete');
+    if (!popup || !notesAcState) return;
+    const { kind, items, idx } = notesAcState;
+    popup.innerHTML = items.map((it, i) => {
+      const sel = i === idx ? 'active' : '';
+      if (kind === '@') {
+        return `<button type="button" class="ac-item ${sel}" data-ac-idx="${i}" role="option">
+          <span class="avatar">${initials(it.name)}</span>
+          <span class="ac-text"><span class="ac-name">${escapeHTML(it.name)}</span><span class="ac-meta">${escapeHTML(it.role || '')}</span></span>
+        </button>`;
+      }
+      const due = it.due ? fmtDate(it.due) : '—';
+      return `<button type="button" class="ac-item ${sel}" data-ac-idx="${i}" role="option">
+        <span class="ac-icon">▤</span>
+        <span class="ac-text"><span class="ac-name">${escapeHTML(it.title)}</span><span class="ac-meta">${escapeHTML(personName(it.owner))} · ${due}</span></span>
+      </button>`;
+    }).join('');
+    popup.hidden = false;
+  }
+
+  function positionNotesAutocomplete() {
+    const popup = $('#notesAutocomplete');
+    if (!popup || !notesAcState) return;
+    const r = notesAcState.triggerRange.getBoundingClientRect();
+    let left = r.left;
+    let top  = r.bottom + 4;
+    // Keep on-screen — flip above if there's no room below
+    const popupRect = popup.getBoundingClientRect();
+    if (top + popupRect.height > innerHeight - 8) {
+      top = Math.max(8, r.top - popupRect.height - 4);
+    }
+    if (left + popupRect.width > innerWidth - 8) {
+      left = Math.max(8, innerWidth - popupRect.width - 8);
+    }
+    popup.style.left = left + 'px';
+    popup.style.top  = top  + 'px';
+  }
+
+  function selectAutocompleteItem(idx) {
+    if (!notesAcState) return;
+    const it = notesAcState.items[idx];
+    if (!it) return;
+    const range = notesAcState.triggerRange;
+    range.deleteContents();
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    savedRange = range.cloneRange();
+    if (notesAcState.kind === '@') insertPersonChip(it);
+    else insertActionChip(it);
+    hideNotesAutocomplete();
   }
 
   function refreshNoteChips() {
@@ -7231,9 +7384,40 @@
     });
 
     const body = $('#notesBody');
-    body.addEventListener('input', scheduleNotesSave);
+    body.addEventListener('input', () => {
+      scheduleNotesSave();
+      // Update the @/# autocomplete based on what's now under the caret
+      const ctx = getMentionContext(body);
+      if (ctx) showNotesAutocomplete(ctx);
+      else hideNotesAutocomplete();
+    });
     body.addEventListener('keydown', (e) => {
-      // Shift+Cmd/Ctrl+A → insert action
+      // Autocomplete navigation takes priority when the popup is open
+      if (notesAcState) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          notesAcState.idx = (notesAcState.idx + 1) % notesAcState.items.length;
+          renderNotesAutocomplete();
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          notesAcState.idx = (notesAcState.idx - 1 + notesAcState.items.length) % notesAcState.items.length;
+          renderNotesAutocomplete();
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          selectAutocompleteItem(notesAcState.idx);
+          return;
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          hideNotesAutocomplete();
+          return;
+        }
+      }
+      // Shift+Cmd/Ctrl+A → insert (new) action
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'a') {
         e.preventDefault();
         snapshotSelection();
@@ -7244,8 +7428,53 @@
       const chip = e.target.closest('.note-chip');
       if (!chip) return;
       e.preventDefault();
-      openDrawer(chip.dataset.actionId);
+      // Person chips → filter Register to that person; action chips → drawer
+      if (chip.classList.contains('person-chip') && chip.dataset.personId) {
+        applyTopbarFilter({ owner: chip.dataset.personId, view: 'register' });
+      } else if (chip.dataset.actionId) {
+        openDrawer(chip.dataset.actionId);
+      }
     });
+    // Close the autocomplete when the body loses focus or scrolls
+    body.addEventListener('blur',   () => setTimeout(hideNotesAutocomplete, 150));
+    body.addEventListener('scroll', hideNotesAutocomplete);
+    // Click an autocomplete item → insert
+    const popup = $('#notesAutocomplete');
+    if (popup) {
+      popup.addEventListener('mousedown', (e) => {
+        e.preventDefault(); // keep selection in body
+        const btn = e.target.closest('.ac-item[data-ac-idx]');
+        if (!btn) return;
+        selectAutocompleteItem(parseInt(btn.dataset.acIdx, 10));
+      });
+      popup.addEventListener('mouseover', (e) => {
+        const btn = e.target.closest('.ac-item[data-ac-idx]');
+        if (!btn || !notesAcState) return;
+        const idx = parseInt(btn.dataset.acIdx, 10);
+        if (idx !== notesAcState.idx) {
+          notesAcState.idx = idx;
+          renderNotesAutocomplete();
+        }
+      });
+    }
+
+    // TOC navigation — click a contents entry → scroll the heading into view
+    const toc = $('#notesToc');
+    if (toc) {
+      toc.addEventListener('click', (e) => {
+        const a = e.target.closest('a[data-toc-target]');
+        if (!a) return;
+        e.preventDefault();
+        const id = a.dataset.tocTarget;
+        const target = body.querySelector('#' + (window.CSS && CSS.escape ? CSS.escape(id) : id));
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          // Subtle pulse to confirm where we landed
+          target.classList.add('nt-flash');
+          setTimeout(() => target.classList.remove('nt-flash'), 900);
+        }
+      });
+    }
   }
 
   /* --------------------------- Import/Export ------------------------- */
@@ -7617,7 +7846,11 @@
 
     // Keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName);
+      // `inField` should also be true for contenteditable regions (notes
+      // panel, open-point context, CR rich fields, action description editor)
+      // — otherwise typing characters like `/` is swallowed by the global
+      // search-focus shortcut, and Cmd+Z would undo app state instead of text.
+      const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault(); openQuickAdd('action');
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
