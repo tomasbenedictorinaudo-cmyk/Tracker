@@ -310,6 +310,7 @@
             notes: chance(0.18) ? pick(NOTES) : '',
             createdAt: createdISO,
             updatedAt: updatedISO,
+            originatorDate: createdISO,
             history,
           });
         }
@@ -1132,10 +1133,9 @@
       close();
       toast('Note saved');
     });
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', function escClose(ev) {
-      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
-    });
+    // Modal closes ONLY via the explicit × button (and Cancel where present).
+    // Backdrop click and Escape are intentionally NOT bound — losing
+    // in-progress edits to a stray click outside the modal is too easy.
   }
 
   // Rich-text description editor — opens a small modal, stores HTML in a.description
@@ -1196,10 +1196,9 @@
       close();
       toast('Description removed');
     });
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', function escClose(ev) {
-      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
-    });
+    // Modal closes ONLY via the explicit × button (and Cancel where present).
+    // Backdrop click and Escape are intentionally NOT bound — losing
+    // in-progress edits to a stray click outside the modal is too easy.
   }
 
   // Hover tooltip showing rich description
@@ -1604,6 +1603,122 @@
 
   /* --------------------------- Open Points --------------------------- */
 
+  // Wire interactions on the resolution-steps section of an open-point row.
+  // `getOp()` returns the live op object so handlers always read the current
+  // version (the row may be re-rendered after each commit).
+  function wireOpStepHandlers(itemEl, getOp) {
+    const stepsEl = itemEl.querySelector('.op-steps');
+    if (!stepsEl) return;
+    const listEl = stepsEl.querySelector('.op-steps-list');
+
+    // Toggle done
+    stepsEl.querySelectorAll('.op-step-check').forEach((cb) => {
+      cb.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const op = getOp(); if (!op) return;
+        const id = cb.closest('.op-step').dataset.stepId;
+        const s = (op.steps || []).find((x) => x.id === id);
+        if (!s) return;
+        s.done = !s.done;
+        commit('op-step-toggle');
+      });
+    });
+
+    // Inline edit — save on blur, Enter saves & blurs, Escape cancels
+    stepsEl.querySelectorAll('.op-step-text').forEach((txt) => {
+      // Empty + Backspace deletes the row
+      txt.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); txt.blur(); }
+        else if (e.key === 'Backspace' && txt.textContent === '') {
+          e.preventDefault();
+          const op = getOp(); if (!op) return;
+          const id = txt.closest('.op-step').dataset.stepId;
+          op.steps = (op.steps || []).filter((s) => s.id !== id);
+          commit('op-step-delete');
+        }
+      });
+      txt.addEventListener('blur', () => {
+        const op = getOp(); if (!op) return;
+        const id = txt.closest('.op-step').dataset.stepId;
+        const s = (op.steps || []).find((x) => x.id === id);
+        if (!s) return;
+        const v = txt.textContent.trim();
+        if (s.text !== v) { s.text = v; commit('op-step-edit'); }
+      });
+    });
+
+    // Delete
+    stepsEl.querySelectorAll('.op-step-del').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const op = getOp(); if (!op) return;
+        const id = btn.closest('.op-step').dataset.stepId;
+        op.steps = (op.steps || []).filter((s) => s.id !== id);
+        commit('op-step-delete');
+      });
+    });
+
+    // Add
+    const addBtn = stepsEl.querySelector('.op-step-add');
+    if (addBtn) {
+      addBtn.addEventListener('click', () => {
+        const op = getOp(); if (!op) return;
+        op.steps = op.steps || [];
+        const newStep = { id: uid('st'), text: '', done: false };
+        op.steps.push(newStep);
+        commit('op-step-add');
+        // After re-render, focus the new step's text
+        setTimeout(() => {
+          const newEl = document.querySelector(`.op-step[data-step-id="${newStep.id}"] .op-step-text`);
+          if (newEl) {
+            newEl.focus();
+            // Move caret to end (empty so just focus)
+            const range = document.createRange();
+            range.selectNodeContents(newEl);
+            range.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(range);
+          }
+        }, 0);
+      });
+    }
+
+    // Drag-to-reorder via the grip — custom mouse events so we can preview
+    // the move live and stay consistent with the rest of the app's drags.
+    stepsEl.querySelectorAll('.op-step-grip').forEach((grip) => {
+      grip.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const row = grip.closest('.op-step');
+        if (!row || !listEl) return;
+        row.classList.add('dragging');
+        document.body.classList.add('is-step-dragging');
+        const onMove = (em) => {
+          const siblings = [...listEl.querySelectorAll('.op-step:not(.dragging)')];
+          const after = siblings.find((sib) => {
+            const r = sib.getBoundingClientRect();
+            return em.clientY < r.top + r.height / 2;
+          });
+          if (after) listEl.insertBefore(row, after);
+          else listEl.appendChild(row);
+        };
+        const onUp = () => {
+          row.classList.remove('dragging');
+          document.body.classList.remove('is-step-dragging');
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          // Commit the new order from current DOM
+          const op = getOp(); if (!op) return;
+          const newOrderIds = [...listEl.querySelectorAll('.op-step')].map((r) => r.dataset.stepId);
+          const before = (op.steps || []).map((s) => s.id).join(',');
+          op.steps = newOrderIds.map((id) => (op.steps || []).find((s) => s.id === id)).filter(Boolean);
+          if (op.steps.map((s) => s.id).join(',') !== before) commit('op-step-reorder');
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+
   function renderOpenPoints(root) {
     const proj = curProject();
     proj.openPoints = proj.openPoints || [];
@@ -1638,6 +1753,7 @@
         // Backfill defaults for legacy items
         if (!op.criticality) op.criticality = 'med';
         if (!op.createdAt) op.createdAt = todayISO();
+        if (!Array.isArray(op.steps)) op.steps = [];
         const cmp = findComponent(proj, op.component);
         const c = cmp ? componentColor(cmp.color) : null;
         const critRgb = CRITICALITY_RGB[op.criticality] || CRITICALITY_RGB.med;
@@ -1646,6 +1762,9 @@
         const critLabel = CRITICALITY_LABEL[op.criticality] || 'Medium';
         // op.notes holds rich HTML; legacy plain-string entries render as text
         const contextHtml = op.notes && /<\w+/.test(op.notes) ? op.notes : escapeHTML(op.notes || '');
+        const stepDone = op.steps.filter((s) => s.done).length;
+        const stepTotal = op.steps.length;
+        const stepsAllDone = stepTotal > 0 && stepDone === stepTotal;
         return `
         <div class="op-item crit-${op.criticality}" data-id="${op.id}" ${tint}>
           <div class="op-content">
@@ -1668,8 +1787,31 @@
               </div>
               <div class="op-context" contenteditable="true" data-placeholder="Add rich context — bold, lists, links, colour…">${contextHtml}</div>
             </div>
+            <div class="op-steps ${stepsAllDone ? 'all-done' : ''}">
+              ${stepTotal ? `
+                <div class="op-steps-head">
+                  <span class="op-steps-lbl">Resolution steps</span>
+                  <span class="op-steps-progress" aria-hidden="true">
+                    <span class="op-steps-bar"><span class="op-steps-bar-fill" style="width:${stepTotal ? Math.round(stepDone / stepTotal * 100) : 0}%"></span></span>
+                    <span class="op-steps-count">${stepDone}/${stepTotal}</span>
+                  </span>
+                </div>
+              ` : ''}
+              <div class="op-steps-list">
+                ${op.steps.map((s) => `
+                  <div class="op-step ${s.done ? 'done' : ''}" data-step-id="${s.id}">
+                    <span class="op-step-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+                    <button type="button" class="op-step-check ${s.done ? 'on' : ''}" aria-label="${s.done ? 'Mark as not done' : 'Mark as done'}"></button>
+                    <span class="op-step-text" contenteditable="true" data-placeholder="Step…">${escapeHTML(s.text)}</span>
+                    <button type="button" class="op-step-del" title="Delete step" aria-label="Delete step">×</button>
+                  </div>
+                `).join('')}
+              </div>
+              <button type="button" class="op-step-add">+ Add step</button>
+            </div>
             <div class="op-meta">
               <span class="op-origin" title="Auto-set when this open point was originated">Originated ${fmtFull(op.createdAt)}</span>
+              ${stepTotal ? `<span class="op-meta-steps ${stepsAllDone ? 'ok' : ''}" title="Resolution steps">✓ ${stepDone}/${stepTotal} steps</span>` : ''}
               ${cmp ? `<span class="component-chip" style="background:rgba(${c.rgb},.2);color:rgb(${c.rgb})">${escapeHTML(cmp.name)}</span>` : ''}
             </div>
           </div>
@@ -1756,6 +1898,9 @@
             commit('op-criticality');
           });
         }
+        // Resolution steps — checkbox / edit / delete / add / drag-to-reorder
+        wireOpStepHandlers(el, () => proj.openPoints.find((x) => x.id === id));
+
         el.querySelector('.op-promote').addEventListener('click', () => {
           const op = proj.openPoints.find((x) => x.id === id);
           if (!op) return;
@@ -2756,6 +2901,7 @@
           startDate: date, status: 'todo', priority: 0,
           deliverable: null, milestone: null, notes: '',
           createdAt: todayISO(), updatedAt: todayISO(),
+          originatorDate: todayISO(),
           history: [{ at: todayISO(), what: 'Created from timeline' }],
         };
         proj.actions.push(a);
@@ -3636,11 +3782,22 @@
 
   /* ---------------------- Engineering side views --------------------- */
 
+  // Per-strip zoom state. Each strip stores its zoom factor (1 = fit,
+  // higher = zoomed in horizontally so labels and dates stretch out).
+  const stripState = {
+    deliverables: { zoom: 1 },
+    milestones:   { zoom: 1 },
+  };
+  const STRIP_ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8];
+
   // Shared timeline strip — renders points/markers along a horizontal date axis.
   // items: [{ id, name, date: 'YYYY-MM-DD', status?, rgb?, icon? }]
   // Uses lane-packing so labels never overlap, plus a stable per-item color
   // (passed in as `rgb`) so the row swatch matches the timeline circle.
-  function renderTimelineStrip(items) {
+  // opts.zoom: horizontal zoom factor (default 1). At zoom > 1 the SVG renders
+  // wider than the panel and scrolls horizontally inside .strip-scroll.
+  function renderTimelineStrip(items, opts = {}) {
+    const zoom = Math.max(1, Math.min(8, opts.zoom || 1));
     const dated = items.filter((i) => i.date).map((i) => ({ ...i, t: parseDate(i.date) }));
     if (!dated.length) return '<div class="empty">Add a date to any item to see it on the timeline.</div>';
 
@@ -3653,18 +3810,19 @@
     max = new Date(max.getTime() + span * 0.10);
 
     const sorted = dated.slice().sort((a, b) => a.t - b.t);
-    const W = 880;
-    const padL = 28, padR = 28;
+    const baseW = 880;
+    const W = Math.round(baseW * zoom);
+    const padL = 32, padR = 32;
     const innerW = W - padL - padR;
     const xFor = (t) => padL + (t - min) / (max - min) * innerW;
 
     // Lane packing — alternate sides, then stack into rows.
     // Each label occupies a horizontal extent at the lane's y; we pick the
     // lowest-numbered lane where the new extent doesn't overlap any prior label.
-    const CHAR_W = 6.0; // px per char (10px font, font-weight 600)
-    const PAD_X  = 6;   // gap between adjacent labels
-    const ROW_H  = 14;  // vertical pitch between lanes
-    const labelW = (s) => Math.max(28, Math.min(160, s.length * CHAR_W));
+    const CHAR_W = 6.6; // px per char (12px font, font-weight 600)
+    const PAD_X  = 8;   // gap between adjacent labels
+    const ROW_H  = 18;  // vertical pitch between lanes — bigger = clearer
+    const labelW = (s) => Math.max(36, Math.min(220, s.length * CHAR_W));
     const lanesAbove = []; // each: array of {x0, x1}
     const lanesBelow = [];
     function fit(lanes, x0, x1) {
@@ -3690,66 +3848,122 @@
 
     const lanesA = Math.max(1, lanesAbove.length);
     const lanesB = Math.max(1, lanesBelow.length);
-    const padT = 14 + lanesA * ROW_H;
-    const padB = 18 + lanesB * ROW_H + 12;
-    const H = padT + padB + 16;
-    const yLine = padT + 8;
+    const padT = 18 + lanesA * ROW_H;
+    const padB = 22 + lanesB * ROW_H + 14;
+    const H = padT + padB + 18;
+    const yLine = padT + 10;
 
-    // Monthly ticks
+    // Monthly ticks (also weekly when zoom is high enough to keep them readable)
+    const showWeeks = zoom >= 3;
     const ticks = [];
+    if (showWeeks) {
+      // Weekly ticks (Mondays) — subtle
+      let w0 = new Date(min);
+      while (w0.getDay() !== 1) w0 = new Date(w0.getTime() + dayMs);
+      let wt = w0;
+      while (wt <= max) {
+        const x = xFor(wt);
+        ticks.push(`<line class="strip-week-tick" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${(yLine - 3).toFixed(1)}" y2="${(yLine + 3).toFixed(1)}" />`);
+        wt = new Date(wt.getTime() + 7 * dayMs);
+      }
+    }
     let dt = new Date(min.getFullYear(), min.getMonth(), 1);
     if (dt < min) dt = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
     while (dt <= max) {
       const x = xFor(dt);
-      ticks.push(`<g><line class="strip-tick" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${yLine - 5}" y2="${yLine + 5}" /><text class="strip-month" x="${x.toFixed(1)}" y="${(H - 4).toFixed(1)}" text-anchor="middle">${dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</text></g>`);
+      ticks.push(`<g><line class="strip-tick" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${(yLine - 6).toFixed(1)}" y2="${(yLine + 6).toFixed(1)}" /><text class="strip-month" x="${x.toFixed(1)}" y="${(H - 4).toFixed(1)}" text-anchor="middle">${dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</text></g>`);
       dt = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
     }
 
     const todayX = xFor(today);
-    const todayLine = `<line class="strip-today" x1="${todayX.toFixed(1)}" x2="${todayX.toFixed(1)}" y1="${(padT - 6).toFixed(1)}" y2="${(H - padB + 6).toFixed(1)}" /><text class="strip-today-lbl" x="${(todayX + 4).toFixed(1)}" y="${(padT - 8).toFixed(1)}">today</text>`;
+    const todayLine = `<line class="strip-today" x1="${todayX.toFixed(1)}" x2="${todayX.toFixed(1)}" y1="${(padT - 8).toFixed(1)}" y2="${(H - padB + 8).toFixed(1)}" /><text class="strip-today-lbl" x="${(todayX + 4).toFixed(1)}" y="${(padT - 10).toFixed(1)}">today</text>`;
 
     const markers = placed.map((it) => {
       const x = it.x;
       const labelY = it.above
-        ? padT - 6 - (lanesAbove.length - 1 - it.lane) * ROW_H
-        : H - padB + 14 + it.lane * ROW_H;
-      const dateY = it.above ? labelY + 10 : labelY + 10;
+        ? padT - 8 - (lanesAbove.length - 1 - it.lane) * ROW_H
+        : H - padB + 18 + it.lane * ROW_H;
+      const dateY = it.above ? labelY + 12 : labelY + 12;
       const stemY1 = it.above
-        ? labelY - 8
-        : yLine + 6;
+        ? labelY - 9
+        : yLine + 7;
       const stemY2 = it.above
-        ? yLine - 6
-        : labelY - 12;
+        ? yLine - 7
+        : labelY - 14;
       const isDone = it.status === 'done';
       const isLate = !isDone && it.t < today;
       const cls = isDone ? 'done' : (isLate ? 'late' : '');
       const rgb = it.rgb || '129,140,248';
       const labelFill = isDone ? 'var(--text-dim)' : (isLate ? 'var(--bad)' : `rgb(${rgb})`);
       const safeName = escapeHTML(it.name);
+      const r = 7;
       // Status badge: ✓ for done, ! for late — overlay above the dot so the
       // per-item colour still tracks between row swatch and circle fill.
       const badge = isDone
-        ? `<g class="strip-badge done"><circle cx="${(x + 7).toFixed(1)}" cy="${(yLine - 7).toFixed(1)}" r="5" fill="var(--ok)" stroke="var(--bg-1)" stroke-width="1.5" /><text x="${(x + 7).toFixed(1)}" y="${(yLine - 4).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="7" font-weight="700">✓</text></g>`
+        ? `<g class="strip-badge done"><circle cx="${(x + 8).toFixed(1)}" cy="${(yLine - 8).toFixed(1)}" r="6" fill="var(--ok)" stroke="var(--bg-1)" stroke-width="1.6" /><text x="${(x + 8).toFixed(1)}" y="${(yLine - 5).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="8" font-weight="700">✓</text></g>`
         : isLate
-          ? `<g class="strip-badge late"><circle cx="${(x + 7).toFixed(1)}" cy="${(yLine - 7).toFixed(1)}" r="5" fill="var(--bad)" stroke="var(--bg-1)" stroke-width="1.5" /><text x="${(x + 7).toFixed(1)}" y="${(yLine - 4).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="8" font-weight="700">!</text></g>`
+          ? `<g class="strip-badge late"><circle cx="${(x + 8).toFixed(1)}" cy="${(yLine - 8).toFixed(1)}" r="6" fill="var(--bad)" stroke="var(--bg-1)" stroke-width="1.6" /><text x="${(x + 8).toFixed(1)}" y="${(yLine - 5).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="9" font-weight="700">!</text></g>`
           : '';
       return `
         <g class="strip-mark ${cls}" data-strip-id="${it.id}">
           <line class="strip-stem" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${stemY1.toFixed(1)}" y2="${stemY2.toFixed(1)}" stroke="rgb(${rgb})" />
-          <circle class="strip-pt" cx="${x.toFixed(1)}" cy="${yLine}" r="6" fill="rgb(${rgb})" stroke="var(--bg-1)" stroke-width="1.6" />
+          <circle class="strip-pt" cx="${x.toFixed(1)}" cy="${yLine}" r="${r}" fill="rgb(${rgb})" stroke="var(--bg-1)" stroke-width="1.8" />
           ${badge}
           <text class="strip-lbl" x="${x.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" fill="${labelFill}">${safeName}</text>
           <text class="strip-date" x="${x.toFixed(1)}" y="${dateY.toFixed(1)}" text-anchor="middle">${fmtDate(it.date)}</text>
         </g>`;
     }).join('');
 
+    // At zoom=1 the SVG fills its wrapper; at zoom>1 it gets an explicit pixel
+    // width so the wrapper scrolls horizontally.
+    const widthAttr = zoom > 1 ? `width="${W}"` : 'width="100%"';
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="strip-svg" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="strip-svg" ${widthAttr} preserveAspectRatio="xMinYMin meet">
         ${ticks.join('')}
         <line class="strip-axis" x1="${padL}" x2="${W - padR}" y1="${yLine}" y2="${yLine}" />
         ${todayLine}
         ${markers}
       </svg>`;
+  }
+
+  // Zoom-control markup + handler for a timeline strip. `id` is a unique
+  // prefix used for the data-attributes / element IDs (so multiple strips on
+  // the same view don't collide).
+  function stripZoomControlsHTML(id) {
+    return `
+      <span class="strip-zoom" role="group" aria-label="Timeline zoom">
+        <button type="button" class="icon-btn" id="${id}-zoom-out" title="Zoom out">−</button>
+        <span class="strip-zoom-val" id="${id}-zoom-val">1×</span>
+        <button type="button" class="icon-btn" id="${id}-zoom-in" title="Zoom in">+</button>
+        <button type="button" class="icon-btn" id="${id}-zoom-reset" title="Reset zoom">⟲</button>
+      </span>`;
+  }
+  function wireStripZoom(scope, id, state, redraw) {
+    const STEPS = STRIP_ZOOM_STEPS;
+    const idxOf = (z) => {
+      let best = 0, bestDiff = Infinity;
+      STEPS.forEach((s, i) => { const d = Math.abs(s - z); if (d < bestDiff) { bestDiff = d; best = i; } });
+      return best;
+    };
+    const set = (z) => { state.zoom = z; redraw(); };
+    scope.querySelector(`#${id}-zoom-in`).addEventListener('click', () => {
+      const i = idxOf(state.zoom); set(STEPS[Math.min(STEPS.length - 1, i + 1)]);
+    });
+    scope.querySelector(`#${id}-zoom-out`).addEventListener('click', () => {
+      const i = idxOf(state.zoom); set(STEPS[Math.max(0, i - 1)]);
+    });
+    scope.querySelector(`#${id}-zoom-reset`).addEventListener('click', () => set(1));
+    // Cmd/Ctrl + scroll zoom inside the strip
+    const wrap = scope.querySelector(`#${id}-scroll`);
+    if (wrap) {
+      wrap.addEventListener('wheel', (e) => {
+        if (!(e.metaKey || e.ctrlKey)) return;
+        e.preventDefault();
+        const i = idxOf(state.zoom);
+        const next = e.deltaY < 0 ? STEPS[Math.min(STEPS.length - 1, i + 1)] : STEPS[Math.max(0, i - 1)];
+        if (next !== state.zoom) set(next);
+      }, { passive: false });
+    }
   }
 
   // Shared floating tooltip + hover wiring for the deliverables / milestones strip.
@@ -3818,10 +4032,19 @@
       </div>
       <div class="row-list" id="delList"></div>
       <div class="panel chart-panel" style="margin-top:14px;">
-        <div class="panel-title">Timeline</div>
-        ${renderTimelineStrip(items)}
+        <div class="panel-title">
+          <span>Timeline</span>
+          ${stripZoomControlsHTML('strip-del')}
+        </div>
+        <div class="strip-scroll" id="strip-del-scroll">${renderTimelineStrip(items, { zoom: stripState.deliverables.zoom })}</div>
       </div>`;
     root.appendChild(view);
+    wireStripZoom(view, 'strip-del', stripState.deliverables, () => {
+      const wrap = view.querySelector('#strip-del-scroll');
+      wrap.innerHTML = renderTimelineStrip(items, { zoom: stripState.deliverables.zoom });
+      wireStripHover(view, (id) => items.find((x) => x.id === id));
+      view.querySelector('#strip-del-zoom-val').textContent = stripState.deliverables.zoom + '×';
+    });
     const list = $('#delList');
     if (!proj.deliverables?.length) list.innerHTML = '<div class="empty">No deliverables yet.</div>';
     else {
@@ -3898,10 +4121,9 @@
     const close = () => overlay.remove();
     overlay.querySelector('#dvClose').addEventListener('click', close);
     overlay.querySelector('#dvCancel').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', function escClose(ev) {
-      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
-    });
+    // Modal closes ONLY via the explicit × button (and Cancel where present).
+    // Backdrop click and Escape are intentionally NOT bound — losing
+    // in-progress edits to a stray click outside the modal is too easy.
     overlay.querySelector('#dvSave').addEventListener('click', () => {
       d.name = document.getElementById('dvName').value.trim() || d.name;
       d.dueDate = document.getElementById('dvDue').value || null;
@@ -3938,10 +4160,19 @@
       </div>
       <div class="row-list" id="mileList"></div>
       <div class="panel chart-panel" style="margin-top:14px;">
-        <div class="panel-title">Timeline</div>
-        ${renderTimelineStrip(items)}
+        <div class="panel-title">
+          <span>Timeline</span>
+          ${stripZoomControlsHTML('strip-ms')}
+        </div>
+        <div class="strip-scroll" id="strip-ms-scroll">${renderTimelineStrip(items, { zoom: stripState.milestones.zoom })}</div>
       </div>`;
     root.appendChild(view);
+    wireStripZoom(view, 'strip-ms', stripState.milestones, () => {
+      const wrap = view.querySelector('#strip-ms-scroll');
+      wrap.innerHTML = renderTimelineStrip(items, { zoom: stripState.milestones.zoom });
+      wireStripHover(view, (id) => items.find((x) => x.id === id));
+      view.querySelector('#strip-ms-zoom-val').textContent = stripState.milestones.zoom + '×';
+    });
     const list = $('#mileList');
     if (!proj.milestones?.length) list.innerHTML = '<div class="empty">No milestones yet.</div>';
     else {
@@ -4018,10 +4249,9 @@
     const close = () => overlay.remove();
     overlay.querySelector('#msClose').addEventListener('click', close);
     overlay.querySelector('#msCancel').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', function escClose(ev) {
-      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
-    });
+    // Modal closes ONLY via the explicit × button (and Cancel where present).
+    // Backdrop click and Escape are intentionally NOT bound — losing
+    // in-progress edits to a stray click outside the modal is too easy.
     overlay.querySelector('#msSave').addEventListener('click', () => {
       m.name = document.getElementById('msName').value.trim() || m.name;
       m.date = document.getElementById('msDate').value || null;
@@ -4186,10 +4416,9 @@
     const close = () => overlay.remove();
     overlay.querySelector('#reClose').addEventListener('click', close);
     overlay.querySelector('#reCancel').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', function escClose(ev) {
-      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
-    });
+    // Modal closes ONLY via the explicit × button (and Cancel where present).
+    // Backdrop click and Escape are intentionally NOT bound — losing
+    // in-progress edits to a stray click outside the modal is too easy.
 
     overlay.querySelector('#reSave').addEventListener('click', () => {
       r.kind = kind;
@@ -4497,10 +4726,9 @@
     const close = () => overlay.remove();
     overlay.querySelector('#deClose').addEventListener('click', close);
     overlay.querySelector('#deCancel').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', function escClose(ev) {
-      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
-    });
+    // Modal closes ONLY via the explicit × button (and Cancel where present).
+    // Backdrop click and Escape are intentionally NOT bound — losing
+    // in-progress edits to a stray click outside the modal is too easy.
     overlay.querySelector('#deSave').addEventListener('click', () => {
       d.title = document.getElementById('deTitle').value.trim() || d.title;
       d.rationale = document.getElementById('deRat').value;
@@ -4633,10 +4861,11 @@
           costSum  += (c.impact?.cost || 0);
         }
       });
-      // Donut SVG — cumulative arcs by status
+      // Donut SVG — cumulative arcs by status (each arc is clickable to filter)
       const R = 32, CX = 36, CY = 36, IR = 22;
       const C = 2 * Math.PI * R;
       let cum = 0;
+      const activeFilter = crFilterState.status;
       const arcs = CR_STATUSES.map((s) => {
         const n = counts[s.id] || 0;
         if (n === 0) return '';
@@ -4645,7 +4874,9 @@
         const gap = C - dash;
         const off = -cum * C + C / 4; // start at 12 o'clock
         cum += frac;
-        return `<circle cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="rgb(${s.rgb})" stroke-width="${R - IR}" stroke-dasharray="${dash.toFixed(2)} ${gap.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 ${CX} ${CY})"><title>${s.label}: ${n}</title></circle>`;
+        const dimmed = activeFilter !== 'all' && activeFilter !== s.id;
+        const isActive = activeFilter === s.id;
+        return `<circle class="cr-donut-slice ${isActive ? 'active' : ''} ${dimmed ? 'dimmed' : ''}" data-cr-status="${s.id}" cx="${CX}" cy="${CY}" r="${R}" fill="none" stroke="rgb(${s.rgb})" stroke-width="${R - IR}" stroke-dasharray="${dash.toFixed(2)} ${gap.toFixed(2)}" stroke-dashoffset="${off.toFixed(2)}" transform="rotate(-90 ${CX} ${CY})"><title>${s.label}: ${n} — click to filter</title></circle>`;
       }).join('');
       const fmtSchedKpi = (n) => n === 0 ? '0 d' : `${n > 0 ? '+' : ''}${n} d`;
       const fmtCostKpi  = (n) => {
@@ -4670,12 +4901,16 @@
             </svg>
           </div>
           <div class="cr-kpi-mix-list">
-            ${CR_STATUSES.map((s) => `
-              <div class="cr-kpi-mix-row">
-                <span class="cr-kpi-pip" style="background:rgb(${s.rgb})"></span>
-                <span class="cr-kpi-mix-lbl">${s.label}</span>
-                <span class="cr-kpi-mix-n">${counts[s.id] || 0}</span>
-              </div>`).join('')}
+            ${CR_STATUSES.map((s) => {
+              const isActive = activeFilter === s.id;
+              const dimmed = activeFilter !== 'all' && !isActive;
+              return `
+                <div class="cr-kpi-mix-row clickable ${isActive ? 'active' : ''} ${dimmed ? 'dimmed' : ''}" data-cr-status="${s.id}" title="Click to filter">
+                  <span class="cr-kpi-pip" style="background:rgb(${s.rgb})"></span>
+                  <span class="cr-kpi-mix-lbl">${s.label}</span>
+                  <span class="cr-kpi-mix-n">${counts[s.id] || 0}</span>
+                </div>`;
+            }).join('')}
           </div>
         </div>
         <div class="cr-kpi">
@@ -4694,6 +4929,23 @@
           <div class="cr-kpi-sub">${approvedLike} of ${decided || 0} decided</div>
           <div class="cr-kpi-bar"><div class="cr-kpi-bar-fill ${approvalRate >= 60 ? 'ok' : approvalRate < 30 ? 'bad' : 'warn'}" style="width:${decided ? approvalRate : 0}%"></div></div>
         </div>`;
+
+      // Wire click-to-filter on donut arcs and on the legend rows. Clicking the
+      // currently-active filter clears it back to "all" (toggle behavior).
+      const setFilter = (st) => {
+        const next = (crFilterState.status === st) ? 'all' : st;
+        crFilterState.status = next;
+        // Sync the segmented filter buttons in the page-head
+        $$('.seg-btn[data-cr-filter]', view).forEach((x) =>
+          x.classList.toggle('active', x.dataset.crFilter === next));
+        draw();
+      };
+      kpis.querySelectorAll('.cr-donut-slice[data-cr-status]').forEach((el) => {
+        el.addEventListener('click', () => setFilter(el.dataset.crStatus));
+      });
+      kpis.querySelectorAll('.cr-kpi-mix-row[data-cr-status]').forEach((el) => {
+        el.addEventListener('click', () => setFilter(el.dataset.crStatus));
+      });
     }
 
     function draw() {
@@ -4905,10 +5157,9 @@
     const close = () => overlay.remove();
     overlay.querySelector('#crClose').addEventListener('click', close);
     overlay.querySelector('#crCancel').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', function escClose(ev) {
-      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
-    });
+    // Modal closes ONLY via the explicit × button (and Cancel where present).
+    // Backdrop click and Escape are intentionally NOT bound — losing
+    // in-progress edits to a stray click outside the modal is too easy.
     overlay.querySelector('#crSave').addEventListener('click', () => {
       const title = document.getElementById('crTitle').value.trim();
       if (!title) return toast('Title required');
@@ -5054,10 +5305,9 @@
     const close = () => overlay.remove();
     overlay.querySelector('#lnClose').addEventListener('click', close);
     overlay.querySelector('#lnCancel').addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    document.addEventListener('keydown', function escClose(ev) {
-      if (ev.key === 'Escape') { close(); document.removeEventListener('keydown', escClose); }
-    });
+    // Modal closes ONLY via the explicit × button (and Cancel where present).
+    // Backdrop click and Escape are intentionally NOT bound — losing
+    // in-progress edits to a stray click outside the modal is too easy.
     overlay.querySelector('#lnSave').addEventListener('click', () => {
       const url = document.getElementById('lnUrl').value.trim();
       if (!url) return toast('URL required');
@@ -6000,12 +6250,15 @@
     const body = $('#drawerBody');
     body.innerHTML = `
       <div class="field"><label>Title</label><input id="dTitle" value="${escapeHTML(a.title)}" /></div>
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+      <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
         <div class="field"><label>Owner</label>
           <select id="dOwner">${state.people.map((p) => `<option value="${p.id}" ${p.id === a.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
         </div>
         <div class="field"><label>Originator</label>
           <select id="dOriginator"><option value="">— same as owner</option>${state.people.map((p) => `<option value="${p.id}" ${p.id === a.originator ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+        </div>
+        <div class="field"><label>Originator date</label>
+          <input id="dOriginatorDate" type="date" value="${a.originatorDate || a.createdAt || ''}" title="When this action was originated" />
         </div>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
@@ -6052,6 +6305,9 @@
       a.milestone = $('#dMile').value || null;
       a.component = $('#dComponent').value || null;
       a.originator = $('#dOriginator')?.value || null;
+      const oldOrigDate = a.originatorDate;
+      a.originatorDate = $('#dOriginatorDate')?.value || a.originatorDate || a.createdAt || todayISO();
+      if (oldOrigDate !== a.originatorDate) a.history.push({ at: todayISO(), what: `Originator date: ${oldOrigDate || '—'} → ${a.originatorDate || '—'}` });
       a.commitment = clamp(parseInt($('#dCmt').value, 10) || 100, 5, 100);
       if (oldCmt !== a.commitment) a.history.push({ at: todayISO(), what: `Commitment: ${oldCmt}% → ${a.commitment}%` });
       a.notes = $('#dNotes').value;
@@ -6116,6 +6372,9 @@
           </div>
           <div class="field"><label>Originator</label>
             <select id="qOriginator"><option value="">— same as owner</option>${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
+          </div>
+          <div class="field"><label>Originator date</label>
+            <input id="qOriginatorDate" type="date" value="${todayISO()}" title="Auto-set to today; editable" />
           </div>
         </div>
         <div class="qa-row">
@@ -6294,6 +6553,7 @@
         id: uid('a'), title,
         owner: $('#qOwner').value,
         originator: $('#qOriginator')?.value || null,
+        originatorDate: $('#qOriginatorDate')?.value || todayISO(),
         due: $('#qDue').value || null,
         status: $('#qStatus').value,
         priority: typeof qaInit.priority === 'number' ? qaInit.priority : 0,
@@ -6733,6 +6993,10 @@
         a.notes = a.notes || '';
         a.createdAt = a.createdAt || todayISO();
         a.updatedAt = a.updatedAt || a.createdAt || todayISO();
+        // originatorDate — when the action was originated. Added in a later
+        // schema version; for older exports without this field, default to the
+        // existing createdAt so legacy data behaves as if it were already set.
+        a.originatorDate = a.originatorDate || a.createdAt || todayISO();
         a.history = Array.isArray(a.history) ? a.history : [];
         // a.deletedAt is null for live, ISO string for archived — preserve as-is
       });
@@ -6815,6 +7079,14 @@
         op.component = op.component || null;
         op.criticality = op.criticality || 'med';
         op.createdAt = op.createdAt || todayISO();
+        // Resolution steps — added in a later schema version; default to []
+        // for full retrocompat with older exports that never had this field.
+        op.steps = Array.isArray(op.steps) ? op.steps : [];
+        op.steps.forEach((s) => {
+          s.id = s.id || uid('st');
+          s.text = s.text || '';
+          s.done = !!s.done;
+        });
       });
 
       p.links.forEach((l) => {
@@ -6964,12 +7236,14 @@
     // Quick add controls
     $$('.qa-tab').forEach((t) => t.addEventListener('click', () => openQuickAdd(t.dataset.qa)));
     $('#qaCancel').addEventListener('click', closeQuickAdd);
+    // Quick Add closes only via Cancel / Save / × — backdrop clicks ignored.
     $('#qaSave').addEventListener('click', saveQA);
-    $('#quickAdd').addEventListener('click', (e) => { if (e.target.id === 'quickAdd') closeQuickAdd(); });
+    // Backdrop click does NOT close Quick Add — user must use Cancel / Save / ×.
 
     // Drawer
     $('#drawerClose').addEventListener('click', closeDrawer);
-    $('#drawer').addEventListener('click', (e) => { if (e.target.id === 'drawer') closeDrawer(); });
+    // Backdrop click does NOT close the action drawer — user must use × so
+    // mid-edit fields aren't dismissed by an accidental click outside.
 
     // Inline edits in review
     document.addEventListener('change', (e) => {
@@ -7018,9 +7292,8 @@
         if (!inField) { e.preventDefault(); undo(); }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && e.shiftKey) {
         if (!inField) { e.preventDefault(); redo(); }
-      } else if (e.key === 'Escape') {
-        if (!$('#quickAdd').hidden) closeQuickAdd();
-        else if (!$('#drawer').hidden) closeDrawer();
+      // Escape no longer closes Quick Add / drawer / editor modals — losing
+      // an in-progress edit to a stray Escape was too easy. Use × or Cancel.
       } else if (e.key === '/' && !inField) {
         e.preventDefault(); $('#search').focus();
       } else if ((e.metaKey || e.ctrlKey) && e.key === '\\') {
