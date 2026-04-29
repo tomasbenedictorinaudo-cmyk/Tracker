@@ -256,7 +256,7 @@ input, select, textarea { font: inherit; color: inherit; }
 /* Kanban board */
 .board {
   display: grid;
-  grid-template-columns: repeat(4, minmax(220px, 1fr));
+  grid-template-columns: repeat(5, minmax(180px, 1fr));
   gap: 12px;
   height: calc(100% - 30px);
 }
@@ -279,6 +279,7 @@ input, select, textarea { font: inherit; color: inherit; }
 .col-dot.doing { background: var(--status-doing); }
 .col-dot.blocked { background: var(--status-blocked); }
 .col-dot.done { background: var(--status-done); }
+.col-dot.cancelled { background: rgb(107,114,128); }
 .col-name { font-weight: 600; }
 .col-count {
   margin-left: auto;
@@ -376,6 +377,19 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .card.soon { border-left-color: var(--warn); }
 /* `late` last so it wins over `doing` — overdue should always show red */
 .card.late { border-left-color: var(--bad); }
+/* Cancelled — withdrawn from scope; greyed-out, strikethrough title */
+.card.cancelled {
+  border-left-color: rgb(107,114,128);
+  opacity: .55;
+}
+.card.cancelled .card-title { text-decoration: line-through; }
+.tl-bar.cancelled {
+  background: rgba(107,114,128,.16);
+  border-color: rgb(107,114,128);
+  color: #cbd5e1;
+  opacity: .55;
+}
+.tl-bar-overflow.cancelled { color: var(--text-faint); text-decoration: line-through; }
 
 /* Component-tinted background */
 .card.has-component {

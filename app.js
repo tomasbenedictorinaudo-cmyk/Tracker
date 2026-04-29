@@ -62,11 +62,15 @@
   const HISTORY_LIMIT = 60;
 
   const STATUSES = [
-    { id: 'todo', name: 'Not started', dot: 'todo' },
-    { id: 'doing', name: 'In progress', dot: 'doing' },
-    { id: 'blocked', name: 'Blocked', dot: 'blocked' },
-    { id: 'done', name: 'Done', dot: 'done' },
+    { id: 'todo',      name: 'Not started', dot: 'todo' },
+    { id: 'doing',     name: 'In progress', dot: 'doing' },
+    { id: 'blocked',   name: 'Blocked',     dot: 'blocked' },
+    { id: 'done',      name: 'Done',        dot: 'done' },
+    { id: 'cancelled', name: 'Cancelled',   dot: 'cancelled' },
   ];
+  // A "closed" status — done or cancelled. Used by capacity / utilisation /
+  // late-detection / staleness / KPIs so cancelled actions stop counting as open.
+  const isClosedStatus = (s) => s === 'done' || s === 'cancelled';
 
   // Project components (sub-systems / work packages). Each component has
   // an id, a name, and a color from this palette.
@@ -91,6 +95,7 @@
     { id: 'approved',     label: 'Approved',     rgb: '74,222,128'  }, // green
     { id: 'rejected',     label: 'Rejected',     rgb: '248,113,133' }, // rose
     { id: 'implemented',  label: 'Implemented',  rgb: '167,139,250' }, // violet
+    { id: 'cancelled',    label: 'Cancelled',    rgb: '107,114,128' }, // gray
   ];
   const crStatus = (id) => CR_STATUSES.find((s) => s.id === id) || CR_STATUSES[0];
 
@@ -657,8 +662,8 @@
     const done = acts.filter((a) => a.status === 'done').length;
     const blocked = acts.filter((a) => a.status === 'blocked').length;
     const doing = acts.filter((a) => a.status === 'doing').length;
-    const late = acts.filter((a) => a.due && a.status !== 'done' && dayDiff(a.due, today) < 0).length;
-    const upcoming = acts.filter((a) => a.due && a.status !== 'done' && dayDiff(a.due, today) >= 0 && dayDiff(a.due, today) <= 7).length;
+    const late = acts.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, today) < 0).length;
+    const upcoming = acts.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, today) >= 0 && dayDiff(a.due, today) <= 7).length;
     const completionRate = total ? Math.round((done / total) * 100) : 0;
     const lateRate = total ? Math.round((late / total) * 100) : 0;
     const blockedRatio = total ? Math.round((blocked / total) * 100) : 0;
@@ -666,9 +671,9 @@
     const since = fmtISO(new Date(Date.now() - 14 * dayMs));
     const throughput = acts.filter((a) => a.status === 'done' && a.updatedAt >= since).length;
 
-    // Workload by person
+    // Workload by person — closed actions (done or cancelled) don't load capacity
     const workload = state.people.map((p) => {
-      const open = acts.filter((a) => a.owner === p.id && a.status !== 'done').length;
+      const open = acts.filter((a) => a.owner === p.id && !isClosedStatus(a.status)).length;
       return { id: p.id, name: p.name, open, capacity: p.capacity || 5 };
     });
 
@@ -834,7 +839,7 @@
     const due = a.due;
     const dueClass = statusOfDue(due, a.status);
     const card = document.createElement('div');
-    card.className = `card ${a.status === 'doing' ? 'doing' : ''} ${dueClass}`;
+    card.className = `card ${a.status === 'doing' ? 'doing' : ''} ${a.status === 'cancelled' ? 'cancelled' : ''} ${dueClass}`;
     card.dataset.id = a.id;
     const owner = state.people.find((p) => p.id === a.owner);
     const component = findComponent(curProject(), a.component);
@@ -2047,12 +2052,12 @@
       const filtered = (proj.actions || []).filter(actionMatchesFilters);
       const total = filtered.length;
       const today = todayISO();
-      const cnt = { todo: 0, doing: 0, blocked: 0, done: 0 };
+      const cnt = { todo: 0, doing: 0, blocked: 0, done: 0, cancelled: 0 };
       let overdue = 0, soon = 0, openCmtSum = 0, openCount = 0;
       const byComp = new Map();
       filtered.forEach((a) => {
         cnt[a.status] = (cnt[a.status] || 0) + 1;
-        if (a.status !== 'done') {
+        if (!isClosedStatus(a.status)) {
           if (a.due) {
             const dd = dayDiff(a.due, today);
             if (dd < 0) overdue++;
@@ -3163,7 +3168,7 @@
 
     // 3. Stale actions — open and not updated in ≥ 14 days
     const STALE_DAYS = 14;
-    const open = (proj.actions || []).filter((a) => !a.deletedAt && a.status !== 'done');
+    const open = (proj.actions || []).filter((a) => !a.deletedAt && !isClosedStatus(a.status));
     const stale = open.filter((a) => {
       if (!a.updatedAt) return true;
       return dayDiff(todayISO_, a.updatedAt) >= STALE_DAYS;
@@ -3195,7 +3200,7 @@
 
     // 5. CR governance — median turnaround + count of pending > 14 d
     const changes = proj.changes || [];
-    const decided = changes.filter((c) => c.status === 'approved' || c.status === 'rejected' || c.status === 'implemented');
+    const decided = changes.filter((c) => c.status === 'approved' || c.status === 'rejected' || c.status === 'implemented' || c.status === 'cancelled');
     const turnarounds = decided
       .filter((c) => c.originatedDate && c.decisionDate)
       .map((c) => Math.max(0, dayDiff(c.decisionDate, c.originatedDate)));
@@ -5083,7 +5088,7 @@
       all.forEach((c) => { counts[c.status] = (counts[c.status] || 0) + 1; });
       const total = all.length;
       const open = (counts.proposed || 0) + (counts.under_review || 0);
-      const decided = (counts.approved || 0) + (counts.rejected || 0) + (counts.implemented || 0);
+      const decided = (counts.approved || 0) + (counts.rejected || 0) + (counts.implemented || 0) + (counts.cancelled || 0);
       const approvedLike = (counts.approved || 0) + (counts.implemented || 0);
       const approvalRate = decided > 0 ? Math.round((approvedLike / decided) * 100) : 0;
       // Sum schedule + cost impact for approved + implemented (those that "land")
@@ -5205,8 +5210,8 @@
         const costTxt  = cost  ? `${cost > 0 ? '+' : ''}${cost} €` : '—';
         const linkUrl = c.linkUrl || '';
         const linkLbl = linkUrl ? (() => { try { return new URL(linkUrl).hostname.replace(/^www\./, ''); } catch (e) { return 'link'; } })() : '';
-        const decisionInfo = (c.status === 'approved' || c.status === 'rejected' || c.status === 'implemented')
-          ? `<span class="cr-decision">${c.status === 'rejected' ? '✗' : '✓'} ${escapeHTML(personName(c.decisionBy))}${c.decisionDate ? ' · ' + fmtDate(c.decisionDate) : ''}</span>` : '';
+        const decisionInfo = (c.status === 'approved' || c.status === 'rejected' || c.status === 'implemented' || c.status === 'cancelled')
+          ? `<span class="cr-decision">${c.status === 'rejected' || c.status === 'cancelled' ? '✗' : '✓'} ${escapeHTML(personName(c.decisionBy))}${c.decisionDate ? ' · ' + fmtDate(c.decisionDate) : ''}</span>` : '';
         // Rationale supports rich HTML; legacy plain entries render as text
         const rationaleHtml = c.rationale && /<\w+/.test(c.rationale) ? c.rationale : escapeHTML(c.rationale || '');
         const analysisHtml  = c.analysis  && /<\w+/.test(c.analysis)  ? c.analysis  : escapeHTML(c.analysis  || '');
@@ -5251,7 +5256,7 @@
                   const cr = (proj.changes || []).find((x) => x.id === id);
                   if (!cr) return;
                   cr.status = s.id;
-                  if (s.id === 'approved' || s.id === 'rejected' || s.id === 'implemented') {
+                  if (s.id === 'approved' || s.id === 'rejected' || s.id === 'implemented' || s.id === 'cancelled') {
                     cr.decisionDate = todayISO();
                   }
                   commit('cr-status');
@@ -5407,7 +5412,7 @@
       if (!title) return toast('Title required');
       c.title = title;
       const newStatus = document.getElementById('crStatus').value;
-      const decisional = (s) => s === 'approved' || s === 'rejected' || s === 'implemented';
+      const decisional = (s) => s === 'approved' || s === 'rejected' || s === 'implemented' || s === 'cancelled';
       const wasDecisional = decisional(c.status);
       c.status = newStatus;
       c.originator = document.getElementById('crOriginator').value || null;
@@ -6408,7 +6413,8 @@
       state.projects.forEach((proj) => {
         (proj.actions || []).forEach((a) => {
           if (a.deletedAt) return;
-          if (a.owner !== personId || a.status === 'done') return;
+          // Closed actions (done OR cancelled) don't consume capacity
+          if (a.owner !== personId || isClosedStatus(a.status)) return;
           if (!a.due) return;
           const due = parseDate(a.due);
           const start = a.startDate ? parseDate(a.startDate) :
