@@ -84,25 +84,31 @@ body {
 button { font: inherit; color: inherit; cursor: pointer; }
 input, select, textarea { font: inherit; color: inherit; }
 
-/* Layout grid */
+/* Layout grid
+ * `minmax(0, 1fr)` lets the main column shrink below its content's intrinsic
+ * min-width — without this, a wide chart / table forces the entire grid wider
+ * than the viewport and the right-most column (notes panel) gets clipped on
+ * full-screen layouts. The notes column itself is driven by a CSS variable so
+ * it's user-resizable. */
 .app {
+  --notes-w: 340px;
   display: grid;
-  grid-template-columns: 220px 1fr;
+  grid-template-columns: 220px minmax(0, 1fr);
   grid-template-rows: 48px 1fr;
   grid-template-areas:
     "sidebar topbar"
     "sidebar main";
   height: 100vh;
 }
-.app.sidebar-collapsed { grid-template-columns: 0 1fr; }
+.app.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
 .app.sidebar-collapsed .sidebar { transform: translateX(-220px); }
 .app.notes-open {
-  grid-template-columns: 220px 1fr 400px;
+  grid-template-columns: 220px minmax(0, 1fr) var(--notes-w);
   grid-template-areas:
     "sidebar topbar notes"
     "sidebar main notes";
 }
-.app.sidebar-collapsed.notes-open { grid-template-columns: 0 1fr 400px; }
+.app.sidebar-collapsed.notes-open { grid-template-columns: 0 minmax(0, 1fr) var(--notes-w); }
 
 /* Sidebar */
 .sidebar {
@@ -2837,8 +2843,28 @@ kbd {
   flex-direction: column;
   min-width: 0;
   overflow: hidden;
+  position: relative;
 }
 .notes-panel[hidden] { display: none; }
+
+/* Drag handle on the panel's left edge — invisible at rest, accent strip on hover/drag */
+.notes-resize {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 5;
+  background: transparent;
+  transition: background var(--transition);
+}
+.notes-resize:hover,
+.notes-resize.dragging {
+  background: linear-gradient(to right, transparent, rgba(110,168,255,.55));
+}
+body.is-notes-resizing,
+body.is-notes-resizing * { cursor: ew-resize !important; user-select: none !important; }
 .notes-head {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px;

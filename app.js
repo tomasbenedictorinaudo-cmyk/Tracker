@@ -2029,7 +2029,10 @@
           <div class="page-title">${escapeHTML(proj.name)} — Register</div>
           <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters.</div>
         </div>
-        <div class="page-actions"><button class="ghost" id="btnAddAction">+ Action</button></div>
+        <div class="page-actions">
+          <button class="ghost" id="btnArchiveDone" title="Move all currently visible done actions to Archive">⌫ Archive done</button>
+          <button class="ghost" id="btnAddAction">+ Action</button>
+        </div>
       </div>
       <div class="reg-kpis" id="regKpis"></div>
       <div class="register">
@@ -2448,6 +2451,24 @@
     });
 
     $('#btnAddAction').addEventListener('click', () => openQuickAdd('action'));
+
+    // Archive every currently-visible done action (respecting active filters)
+    // → they disappear from the register, remain visible in the Archive panel.
+    $('#btnArchiveDone').addEventListener('click', () => {
+      const proj2 = curProject();
+      const candidates = (proj2.actions || []).filter((a) => !a.deletedAt && a.status === 'done' && actionMatchesFilters(a));
+      if (!candidates.length) { toast('No done actions match the current filters'); return; }
+      if (!confirm(`Archive ${candidates.length} done action${candidates.length === 1 ? '' : 's'}? They will move to the Archive panel and disappear from the register.`)) return;
+      const today = todayISO();
+      candidates.forEach((a) => {
+        a.deletedAt = today;
+        a.history = a.history || [];
+        a.history.push({ at: today, what: 'Moved to Archive (bulk-archive done from Register)' });
+        a.updatedAt = today;
+      });
+      commit('archive-done-bulk');
+      toast(`${candidates.length} archived`);
+    });
 
     drawKpis();
     drawTable();
@@ -7107,11 +7128,30 @@
 
   function notesIsOpen() { return !$('#notesPanel').hidden; }
 
+  // Notes panel width (px) — clamped to keep the panel usable on small screens
+  // and to leave room for the main view.
+  const NOTES_W_MIN = 240;
+  const NOTES_W_MAX = 720;
+  const NOTES_W_DEFAULT = 340;
+  function clampNotesWidth(w) {
+    const max = Math.min(NOTES_W_MAX, Math.max(NOTES_W_MIN, innerWidth - 360));
+    return Math.max(NOTES_W_MIN, Math.min(max, w));
+  }
+  function applyNotesWidth(w) {
+    const px = clampNotesWidth(w);
+    document.documentElement.style.setProperty('--notes-w', px + 'px');
+    const app = $('#app');
+    if (app) app.style.setProperty('--notes-w', px + 'px');
+    return px;
+  }
+
   function applyNotesPanel() {
     const open = state.notesOpen === true;
     const panel = $('#notesPanel');
     const app = $('#app');
     if (!panel || !app) return;
+    state.settings = state.settings || {};
+    applyNotesWidth(state.settings.notesWidth || NOTES_W_DEFAULT);
     if (open) {
       panel.hidden = false;
       app.classList.add('notes-open');
@@ -7370,6 +7410,51 @@
       applyNotesPanel();
     });
 
+    // Drag-to-resize on the panel's left edge
+    const handle = $('#notesResize');
+    if (handle) {
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const startX = e.clientX;
+        const startW = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--notes-w')) || NOTES_W_DEFAULT;
+        handle.classList.add('dragging');
+        document.body.classList.add('is-notes-resizing');
+        const onMove = (em) => {
+          // Dragging right shrinks the panel (cursor moves toward main content);
+          // dragging left expands it.
+          const delta = startX - em.clientX;
+          applyNotesWidth(startW + delta);
+        };
+        const onUp = () => {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          handle.classList.remove('dragging');
+          document.body.classList.remove('is-notes-resizing');
+          // Persist the final width
+          const px = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--notes-w')) || NOTES_W_DEFAULT;
+          state.settings = state.settings || {};
+          state.settings.notesWidth = Math.round(px);
+          saveState();
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+      // Double-click to reset to the default width
+      handle.addEventListener('dblclick', () => {
+        applyNotesWidth(NOTES_W_DEFAULT);
+        state.settings = state.settings || {};
+        state.settings.notesWidth = NOTES_W_DEFAULT;
+        saveState();
+      });
+    }
+    // Re-clamp when the window resizes (keeps the panel usable if the user
+    // shrinks the viewport while the panel is wide).
+    window.addEventListener('resize', () => {
+      if (state.notesOpen) {
+        applyNotesWidth(state.settings?.notesWidth || NOTES_W_DEFAULT);
+      }
+    });
+
     // Toolbar formatting
     panel.querySelectorAll('.notes-toolbar [data-cmd]').forEach((btn) => {
       // mousedown to preserve selection in contenteditable
@@ -7500,6 +7585,10 @@
     s.settings.holidayCountries = s.settings.holidayCountries || [];
     if (s.settings.budgetView !== 'hours' && s.settings.budgetView !== 'cost') s.settings.budgetView = 'cost';
     if (s.settings.budgetGroupBy !== 'component' && s.settings.budgetGroupBy !== 'person') s.settings.budgetGroupBy = 'component';
+    // Notes panel width in pixels — added later; default keeps full-screen layouts breathing.
+    if (typeof s.settings.notesWidth !== 'number' || s.settings.notesWidth < 200 || s.settings.notesWidth > 800) {
+      s.settings.notesWidth = 340;
+    }
     s.budgets = s.budgets || {};
     s.notes = s.notes || {};
     s.notesOpen = !!s.notesOpen;
