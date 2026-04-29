@@ -2865,6 +2865,48 @@ kbd {
 }
 body.is-notes-resizing,
 body.is-notes-resizing * { cursor: ew-resize !important; user-select: none !important; }
+
+/* Generic drag-to-reorder grip + dragging state for any list row */
+.row-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  flex-shrink: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+  letter-spacing: -2px;
+  cursor: grab;
+  opacity: 0;
+  user-select: none;
+  transition: opacity var(--transition);
+  margin-right: 4px;
+}
+.row:hover > .row-grip,
+.person-row:hover > .row-grip,
+.kpi:hover > .row-grip,
+.reg-row:hover > .row-grip,
+.cr-card:hover > .row-grip,
+.link-card:hover > .row-grip,
+.ro-row:hover > .row-grip {
+  opacity: .55;
+}
+.row-grip:hover { opacity: 1 !important; color: var(--text-dim); }
+.row.dragging,
+.person-row.dragging,
+.kpi.dragging,
+.reg-row.dragging,
+.cr-card.dragging,
+.link-card.dragging,
+.ro-row.dragging {
+  background: var(--bg-3);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  opacity: .92;
+}
+body.is-row-dragging,
+body.is-row-dragging .row-grip { cursor: grabbing !important; }
+body.is-row-dragging *        { user-select: none !important; }
 .notes-head {
   display: flex; align-items: center; gap: 10px;
   padding: 10px 12px;

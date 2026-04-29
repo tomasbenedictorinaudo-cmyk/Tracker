@@ -2261,6 +2261,7 @@
       return `
         <div class="reg-row ${isOverdue ? 'is-overdue' : ''}" data-id="${a.id}" ${tint}>
           <div class="reg-cell title-cell">
+            ${ROW_GRIP_HTML}
             ${overdueBadge}
             <input type="text" class="reg-inp title-inp" data-field="title" value="${escapeHTML(a.title)}" />
             ${a.notes ? '<span class="tag" title="Has notes">note</span>' : ''}
@@ -2304,14 +2305,17 @@
     }
 
     function drawTable() {
-      const acts = (proj.actions || []).filter(actionMatchesFilters).slice();
-      acts.sort((a, b) => {
-        const av = regSortValue(a, regState.sortBy, proj);
-        const bv = regSortValue(b, regState.sortBy, proj);
-        if (av < bv) return regState.sortDir === 'asc' ? -1 : 1;
-        if (av > bv) return regState.sortDir === 'asc' ? 1 : -1;
-        return 0;
-      });
+      let acts = (proj.actions || []).filter(actionMatchesFilters).slice();
+      // 'manual' sort = preserve project array order (set by drag-reorder)
+      if (regState.sortBy !== 'manual') {
+        acts.sort((a, b) => {
+          const av = regSortValue(a, regState.sortBy, proj);
+          const bv = regSortValue(b, regState.sortBy, proj);
+          if (av < bv) return regState.sortDir === 'asc' ? -1 : 1;
+          if (av > bv) return regState.sortDir === 'asc' ? 1 : -1;
+          return 0;
+        });
+      }
       const body = $('#regBody');
       if (!acts.length) {
         body.innerHTML = '<div class="empty">No actions match the current filters.</div>';
@@ -2321,6 +2325,34 @@
       $$('.reg-col', view).forEach((b) => b.classList.remove('asc', 'desc'));
       const active = view.querySelector(`.reg-col[data-col="${regState.sortBy}"]`);
       if (active) active.classList.add(regState.sortDir);
+      // Wire drag-to-reorder on the rendered rows
+      wireListReorder(body, {
+        rowSelector: '.reg-row[data-id]',
+        idAttr: 'id',
+        getArray: () => proj.actions,
+        setOrder: (visibleIds) => {
+          // The visibleIds are only currently-displayed rows; rebuild proj.actions
+          // by interleaving the new order back into the full array (preserving
+          // the relative order of off-screen / filtered-out actions).
+          const visibleSet = new Set(visibleIds);
+          const queue = visibleIds.slice();
+          const next = [];
+          (proj.actions || []).forEach((a) => {
+            if (visibleSet.has(a.id)) {
+              const id = queue.shift();
+              const item = (proj.actions || []).find((x) => x.id === id);
+              if (item) next.push(item);
+            } else {
+              next.push(a);
+            }
+          });
+          proj.actions = next;
+          // Switch to manual sort so the new order is preserved across re-renders
+          regState.sortBy = 'manual';
+          regState.sortDir = 'asc';
+        },
+        commitName: 'register-reorder',
+      });
     }
 
     // Snapshot + lightweight save: don't full-render the view (would lose
@@ -4313,11 +4345,19 @@
         const rgb = colorById[d.id] || '129,140,248';
         return `
           <div class="row ${dueCls}" data-deliverable-id="${d.id}">
+            ${ROW_GRIP_HTML}
             <span class="row-swatch" style="background:rgb(${rgb})" aria-hidden="true"></span>
             <span>◆ ${escapeHTML(d.name)}</span>
             <span class="row-meta">${d.dueDate ? fmtFull(d.dueDate) : '—'} • ${escapeHTML(d.status || 'todo')}</span>
           </div>`;
       }).join('');
+      wireListReorder(list, {
+        rowSelector: '.row[data-deliverable-id]',
+        idAttr: 'deliverableId',
+        getArray: () => proj.deliverables,
+        setOrder: (ids) => { proj.deliverables = ids.map((id) => proj.deliverables.find((x) => x.id === id)).filter(Boolean); },
+        commitName: 'deliverables-reorder',
+      });
       wireStripHover(view, (id) => items.find((x) => x.id === id));
       $$('.row[data-deliverable-id]', list).forEach((row) => {
         row.addEventListener('contextmenu', (e) => {
@@ -4441,11 +4481,19 @@
         const rgb = colorById[m.id] || '129,140,248';
         return `
           <div class="row ${dueCls}" data-milestone-id="${m.id}">
+            ${ROW_GRIP_HTML}
             <span class="row-swatch" style="background:rgb(${rgb})" aria-hidden="true"></span>
             <span>◇ ${escapeHTML(m.name)}</span>
             <span class="row-meta">${m.date ? fmtFull(m.date) : '—'} • ${escapeHTML(m.status || 'todo')}</span>
           </div>`;
       }).join('');
+      wireListReorder(list, {
+        rowSelector: '.row[data-milestone-id]',
+        idAttr: 'milestoneId',
+        getArray: () => proj.milestones,
+        setOrder: (ids) => { proj.milestones = ids.map((id) => proj.milestones.find((x) => x.id === id)).filter(Boolean); },
+        commitName: 'milestones-reorder',
+      });
       wireStripHover(view, (id) => items.find((x) => x.id === id));
       $$('.row[data-milestone-id]', list).forEach((row) => {
         row.addEventListener('contextmenu', (e) => {
@@ -4834,12 +4882,9 @@
         wireRiskMatrixHover(body);
         return;
       }
-      // List view
-      const sorted = items.slice().sort((a, b) => {
-        const sa = getInherent(a), sb = getInherent(b);
-        return (sb.probability * sb.impact) - (sa.probability * sa.impact);
-      });
-      body.innerHTML = `<div class="row-list">${sorted.map((r) => {
+      // List view — preserve project array order so drag-reorder is meaningful.
+      const sorted = items.slice();
+      body.innerHTML = `<div class="row-list" id="roList">${sorted.map((r) => {
         const kind = r.kind || 'rule';
         const inh = getInherent(r);
         const res = getResidual(r);
@@ -4852,6 +4897,7 @@
         const linkedAction = r.actionId ? state.projects.flatMap((p) => p.actions || []).find((a) => a.id === r.actionId) : null;
         return `
           <div class="row ro-row kind-${kind === 'opportunity' ? 'opportunity' : 'risk'} sev-${sevCls}" data-risk-id="${r.id}">
+            ${ROW_GRIP_HTML}
             <span class="ro-icon" title="${kind}">${icon}</span>
             <span class="ro-title">${escapeHTML(r.title)}</span>
             <span class="ro-score">
@@ -4864,6 +4910,17 @@
             </span>
           </div>`;
       }).join('')}</div>`;
+      // Drag-reorder list rows
+      const roListEl = body.querySelector('#roList');
+      if (roListEl) {
+        wireListReorder(roListEl, {
+          rowSelector: '.ro-row[data-risk-id]',
+          idAttr: 'riskId',
+          getArray: () => proj.risks,
+          setOrder: (ids) => { proj.risks = ids.map((id) => proj.risks.find((x) => x.id === id)).filter(Boolean); },
+          commitName: 'risks-reorder',
+        });
+      }
       // Click linked action → drawer
       $$('.ro-link[data-open-action]', body).forEach((el) =>
         el.addEventListener('click', () => openDrawer(el.dataset.openAction)));
@@ -4926,9 +4983,17 @@
     else {
       list.innerHTML = proj.decisions.map((d) => `
         <div class="row" data-decision-id="${d.id}">
+          ${ROW_GRIP_HTML}
           <span>⬡ ${escapeHTML(d.title)}</span>
           <span class="row-meta">${escapeHTML(personName(d.owner))} • ${d.date || ''}</span>
         </div>`).join('');
+      wireListReorder(list, {
+        rowSelector: '.row[data-decision-id]',
+        idAttr: 'decisionId',
+        getArray: () => proj.decisions,
+        setOrder: (ids) => { proj.decisions = ids.map((id) => proj.decisions.find((x) => x.id === id)).filter(Boolean); },
+        commitName: 'decisions-reorder',
+      });
       $$('.row[data-decision-id]', list).forEach((row) => {
         row.addEventListener('contextmenu', (e) => {
           e.preventDefault();
@@ -5505,12 +5570,20 @@
         const host = (() => { try { return new URL(l.url).hostname.replace(/^www\./, ''); } catch (e) { return l.url; } })();
         return `
           <div class="link-card" data-link-id="${l.id}">
+            ${ROW_GRIP_HTML}
             <a class="link-title" href="${escapeHTML(l.url)}" target="_blank" rel="noopener noreferrer">↗ ${escapeHTML(l.title || host || l.url)}</a>
             <div class="link-host">${escapeHTML(host)}</div>
             ${l.description ? `<div class="link-desc">${escapeHTML(l.description)}</div>` : ''}
             ${comp ? `<div class="link-comp"><span class="link-comp-swatch" style="background:rgb(${compRgb})"></span>${escapeHTML(comp.name)}</div>` : ''}
           </div>`;
       }).join('');
+      wireListReorder(list, {
+        rowSelector: '.link-card[data-link-id]',
+        idAttr: 'linkId',
+        getArray: () => proj.links,
+        setOrder: (ids) => { proj.links = ids.map((id) => proj.links.find((x) => x.id === id)).filter(Boolean); },
+        commitName: 'links-reorder',
+      });
       $$('.link-card[data-link-id]', list).forEach((card) => {
         card.addEventListener('contextmenu', (e) => {
           e.preventDefault();
@@ -5620,6 +5693,7 @@
         const ccOptions = [...new Set([...knownCCs, ...(pt.costCenter ? [pt.costCenter] : [])])];
         return `
           <div class="row" data-component-id="${pt.id}">
+            ${ROW_GRIP_HTML}
             <span class="component-swatch" style="background: rgba(${c.rgb},.9);"></span>
             <input class="inline component-name" value="${escapeHTML(pt.name)}" />
             <select class="inline component-color">
@@ -5634,6 +5708,13 @@
             <button class="icon-btn component-del" title="Delete">×</button>
           </div>`;
       }).join('');
+      wireListReorder(list, {
+        rowSelector: '.row[data-component-id]',
+        idAttr: 'componentId',
+        getArray: () => proj.components,
+        setOrder: (ids) => { proj.components = ids.map((id) => proj.components.find((x) => x.id === id)).filter(Boolean); },
+        commitName: 'components-reorder',
+      });
       $$('.component-name', list).forEach((inp) => {
         inp.addEventListener('change', () => {
           const id = inp.closest('[data-component-id]').dataset.componentId;
@@ -6323,7 +6404,7 @@
         <div><div class="page-title">Portfolio</div><div class="page-sub">${state.projects.length} projects</div></div>
         <div class="page-actions"><button class="ghost" id="btnNewProj2">+ Project</button></div>
       </div>
-      <div class="dashboard">
+      <div class="dashboard" id="portfolioGrid">
         ${state.projects.map((p) => {
           const acts = p.actions || [];
           const total = acts.length;
@@ -6332,6 +6413,7 @@
           const pct = total ? Math.round((done / total) * 100) : 0;
           return `
             <div class="kpi clickable" data-pid="${p.id}" style="grid-column: span 2; cursor:pointer;">
+              ${ROW_GRIP_HTML}
               <div class="kpi-label">${escapeHTML(p.name)}</div>
               <div class="kpi-value">${pct}%</div>
               <div class="kpi-sub">${total} actions • ${late} late • ${done} done</div>
@@ -6339,6 +6421,13 @@
         }).join('')}
       </div>`;
     root.appendChild(view);
+    wireListReorder(view.querySelector('#portfolioGrid'), {
+      rowSelector: '.kpi.clickable[data-pid]',
+      idAttr: 'pid',
+      getArray: () => state.projects,
+      setOrder: (ids) => { state.projects = ids.map((id) => state.projects.find((x) => x.id === id)).filter(Boolean); },
+      commitName: 'portfolio-reorder',
+    });
     $$('.kpi.clickable', view).forEach((el) => {
       el.addEventListener('click', () => {
         state.currentProjectId = el.dataset.pid;
@@ -6530,6 +6619,7 @@
             const peakCls = peakWeek.count > cap ? 'over' : peakWeek.count > cap * 0.8 ? 'warn' : 'ok';
             return `
               <div class="person-row clickable" data-owner-id="${p.id}" title="Click to filter Register to ${escapeHTML(p.name)}">
+                ${ROW_GRIP_HTML}
                 <div class="name-cell">
                   <span class="avatar">${initials(p.name)}</span>
                   <span class="who">
@@ -6551,6 +6641,13 @@
       </div>`;
     root.appendChild(view);
     $('#btnNewPerson').addEventListener('click', () => openQuickAdd('person'));
+    wireListReorder(view.querySelector('#peopleWl'), {
+      rowSelector: '.person-row[data-owner-id]',
+      idAttr: 'ownerId',
+      getArray: () => state.people,
+      setOrder: (ids) => { state.people = ids.map((id) => state.people.find((x) => x.id === id)).filter(Boolean); },
+      commitName: 'people-reorder',
+    });
     $$('.person-row.clickable', view).forEach((row) => {
       row.addEventListener('click', () => {
         applyTopbarFilter({ owner: row.dataset.ownerId, view: 'register' });
@@ -7133,6 +7230,58 @@
   const NOTES_W_MIN = 240;
   const NOTES_W_MAX = 720;
   const NOTES_W_DEFAULT = 340;
+  /**
+   * Generic drag-to-reorder for any list. Each row needs a `.row-grip`
+   * element (the drag handle) and a data attribute carrying the item's id.
+   * @param {Element} listEl       container that holds the rows directly
+   * @param {object}  opts
+   *   - rowSelector  CSS selector that matches the rows (e.g. '.row[data-component-id]')
+   *   - idAttr       dataset key on each row (e.g. 'componentId')
+   *   - getArray     () => array of items in current order (live reference)
+   *   - setOrder     (idsInOrder: string[]) => void; mutate the source array
+   *   - commitName   action name passed to commit() after a real reorder
+   */
+  function wireListReorder(listEl, opts) {
+    if (!listEl) return;
+    const rows = listEl.querySelectorAll(opts.rowSelector);
+    rows.forEach((row) => {
+      const grip = row.querySelector('.row-grip');
+      if (!grip) return;
+      grip.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        row.classList.add('dragging');
+        document.body.classList.add('is-row-dragging');
+        const onMove = (em) => {
+          const siblings = [...listEl.querySelectorAll(opts.rowSelector + ':not(.dragging)')];
+          const after = siblings.find((sib) => {
+            const r = sib.getBoundingClientRect();
+            return em.clientY < r.top + r.height / 2;
+          });
+          if (after) listEl.insertBefore(row, after);
+          else listEl.appendChild(row);
+        };
+        const onUp = () => {
+          row.classList.remove('dragging');
+          document.body.classList.remove('is-row-dragging');
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          const newOrder = [...listEl.querySelectorAll(opts.rowSelector)].map((r) => r.dataset[opts.idAttr]);
+          const arr = opts.getArray();
+          const before = arr.map((x) => x.id).join(',');
+          if (newOrder.join(',') === before) return; // no-op
+          opts.setOrder(newOrder);
+          commit(opts.commitName || 'reorder');
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+
+  // Tiny inline grip glyph used by every reorderable list row
+  const ROW_GRIP_HTML = '<span class="row-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>';
+
   function clampNotesWidth(w) {
     const max = Math.min(NOTES_W_MAX, Math.max(NOTES_W_MIN, innerWidth - 360));
     return Math.max(NOTES_W_MIN, Math.min(max, w));
