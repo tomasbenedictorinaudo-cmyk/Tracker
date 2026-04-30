@@ -2053,6 +2053,18 @@
           rowGrip.addEventListener('mousedown', (e) => {
             if (curProjectIsMerged()) { toast('Pick a single project to reorder.'); return; }
             e.preventDefault();
+            // Manual reorder implies manual sort — flip the dropdown so the new
+            // order isn't immediately re-sorted away after the next render.
+            if (opFilterState.sort !== 'manual') {
+              opFilterState.sort = 'manual';
+              const sortSel = $('#opSort');
+              if (sortSel) sortSel.value = 'manual';
+            }
+            // Snapshot the set of currently-visible (filtered) ids so we can
+            // preserve hidden items in their original slots after the drop.
+            const visibleIds = new Set(
+              [...list.querySelectorAll('.op-item[data-id]')].map((r) => r.dataset.id)
+            );
             const listEl = list;
             el.classList.add('dragging');
             document.body.classList.add('is-op-dragging');
@@ -2070,9 +2082,21 @@
               document.body.classList.remove('is-op-dragging');
               window.removeEventListener('mousemove', onMove);
               window.removeEventListener('mouseup', onUp);
-              const newOrder = [...listEl.querySelectorAll('.op-item[data-id]')].map((r) => r.dataset.id);
+              // The new visual order of the visible (filtered) rows
+              const newVisibleOrder = [...listEl.querySelectorAll('.op-item[data-id]')].map((r) => r.dataset.id);
+              // Walk the original openPoints array; replace each slot whose
+              // item was visible with the next id from newVisibleOrder. Hidden
+              // items keep their position untouched.
               const before = (proj.openPoints || []).map((o) => o.id).join(',');
-              proj.openPoints = newOrder.map((oid) => (proj.openPoints || []).find((o) => o.id === oid)).filter(Boolean);
+              const byId = Object.fromEntries((proj.openPoints || []).map((o) => [o.id, o]));
+              let visIdx = 0;
+              const result = (proj.openPoints || []).map((op) => {
+                if (visibleIds.has(op.id)) {
+                  return byId[newVisibleOrder[visIdx++]] || op;
+                }
+                return op;
+              });
+              proj.openPoints = result;
               if (proj.openPoints.map((o) => o.id).join(',') !== before) commit('op-reorder');
             };
             window.addEventListener('mousemove', onMove);
