@@ -8273,6 +8273,14 @@
       t.text = t.text || '';
       t.done = !!t.done;
     });
+    // Auto-backup configuration (folder handle lives in IndexedDB).
+    s.settings.autoBackup = s.settings.autoBackup || {};
+    const ab = s.settings.autoBackup;
+    if (typeof ab.enabled !== 'boolean') ab.enabled = false;
+    const allowedMins = [5, 15, 30, 60, 360, 1440];
+    if (!allowedMins.includes(ab.intervalMinutes)) ab.intervalMinutes = 60;
+    if (typeof ab.dirName !== 'string') ab.dirName = '';
+    if (typeof ab.lastBackupAt !== 'string') ab.lastBackupAt = null;
     s.currentView = s.currentView || 'board';
     if (s.currentView === 'teams') s.currentView = 'people';
     if (!s.currentProjectId || (s.currentProjectId !== '__all__' && !s.projects.some((p) => p.id === s.currentProjectId))) {
@@ -8479,6 +8487,245 @@
       try { saveNotesNow(); } catch (e) { /* notes panel may not be open */ }
     }
     try { saveState(); } catch (e) { /* quota */ }
+  }
+
+  /* --------------------------- Auto-backup ---------------------------- */
+  // Persists a FileSystemDirectoryHandle in IndexedDB so the user grants
+  // folder access once and the app keeps writing backup JSONs there at the
+  // chosen cadence. Browsers without showDirectoryPicker (Safari/Firefox)
+  // fall back to a "Download backup now" button only.
+  const IDB_NAME = 'cockpit-meta';
+  const IDB_STORE = 'kv';
+  function idbOpen() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(IDB_STORE);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  async function idbSet(key, value) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).put(value, key);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+  }
+  async function idbGet(key) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readonly');
+      const req = tx.objectStore(IDB_STORE).get(key);
+      req.onsuccess = () => { db.close(); resolve(req.result); };
+      req.onerror = () => { db.close(); reject(req.error); };
+    });
+  }
+  async function idbDelete(key) {
+    const db = await idbOpen();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(IDB_STORE, 'readwrite');
+      tx.objectStore(IDB_STORE).delete(key);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    });
+  }
+
+  let _backupDirHandle = null;       // FileSystemDirectoryHandle once granted
+  let _autoBackupTimer = null;       // setInterval id
+  const supportsDirPicker = typeof window.showDirectoryPicker === 'function';
+
+  async function loadBackupDirHandle() {
+    if (!supportsDirPicker) return null;
+    try {
+      const h = await idbGet('autoBackupDir');
+      if (!h) return null;
+      // Verify we still have permission without prompting
+      const perm = await h.queryPermission?.({ mode: 'readwrite' });
+      if (perm === 'granted') {
+        _backupDirHandle = h;
+        return h;
+      }
+      // Need user gesture to re-prompt; leave for user to re-pick
+      return null;
+    } catch (e) { return null; }
+  }
+
+  async function requestBackupDir() {
+    if (!supportsDirPicker) {
+      toast('Folder backup requires Chrome / Edge — use Export instead.');
+      return null;
+    }
+    try {
+      const h = await window.showDirectoryPicker({ mode: 'readwrite', id: 'cockpit-backup' });
+      const perm = await h.requestPermission({ mode: 'readwrite' });
+      if (perm !== 'granted') { toast('Permission denied'); return null; }
+      _backupDirHandle = h;
+      await idbSet('autoBackupDir', h);
+      state.settings.autoBackup.dirName = h.name || 'Selected folder';
+      saveState();
+      return h;
+    } catch (e) {
+      // User cancelled the picker
+      return null;
+    }
+  }
+
+  async function writeBackupNow() {
+    if (!_backupDirHandle) {
+      toast('Pick a backup folder first');
+      return false;
+    }
+    try {
+      // Ensure permission still granted (some browsers revoke on idle)
+      const perm = await _backupDirHandle.queryPermission?.({ mode: 'readwrite' });
+      if (perm !== 'granted') {
+        const next = await _backupDirHandle.requestPermission?.({ mode: 'readwrite' });
+        if (next !== 'granted') { toast('Folder permission expired — pick again'); return false; }
+      }
+      flushPendingSaves();
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+      const fname = `cockpit-${stamp}.json`;
+      const payload = {
+        __schemaVersion: EXPORT_SCHEMA_VERSION,
+        __exportedAt: new Date().toISOString(),
+        __app: 'cockpit',
+        ...state,
+      };
+      const fh = await _backupDirHandle.getFileHandle(fname, { create: true });
+      const w  = await fh.createWritable();
+      await w.write(JSON.stringify(payload, null, 2));
+      await w.close();
+      state.settings.autoBackup.lastBackupAt = new Date().toISOString();
+      saveState();
+      refreshAutoBackupUI();
+      return true;
+    } catch (e) {
+      toast('Backup failed: ' + (e?.message || e));
+      return false;
+    }
+  }
+
+  function scheduleAutoBackup() {
+    // Always start clean
+    if (_autoBackupTimer) { clearInterval(_autoBackupTimer); _autoBackupTimer = null; }
+    const ab = state.settings.autoBackup;
+    if (!ab.enabled || !_backupDirHandle) return;
+    const ms = ab.intervalMinutes * 60 * 1000;
+    _autoBackupTimer = setInterval(() => { writeBackupNow(); }, ms);
+  }
+
+  function refreshAutoBackupUI() {
+    const panel = $('#autoBackupPanel');
+    if (!panel || panel.hidden) return;
+    renderAutoBackupPanel();
+  }
+
+  function renderAutoBackupPanel() {
+    const panel = $('#autoBackupPanel');
+    if (!panel) return;
+    const ab = state.settings.autoBackup;
+    const supported = supportsDirPicker;
+    const hasHandle = !!_backupDirHandle;
+    const lastTxt = ab.lastBackupAt ? new Date(ab.lastBackupAt).toLocaleString() : 'never';
+    panel.innerHTML = `
+      <div class="ab-head">
+        <span class="ab-title">Auto-backup</span>
+        <button class="icon-btn" id="abClose" title="Close" aria-label="Close">×</button>
+      </div>
+      <div class="ab-body">
+        ${supported ? '' : '<div class="ab-warn">Folder backup requires Chrome / Edge. The "Download now" button below works in any browser.</div>'}
+        <div class="ab-row">
+          <span class="ab-lbl">Folder</span>
+          <span class="ab-val">${ab.dirName ? escapeHTML(ab.dirName) + (hasHandle ? '' : ' <span class="ab-muted">(reconnect needed)</span>') : '<span class="ab-muted">— none —</span>'}</span>
+          ${supported ? '<button class="ghost" id="abPick">Choose folder…</button>' : ''}
+        </div>
+        <div class="ab-row">
+          <span class="ab-lbl">Frequency</span>
+          <select id="abInterval">
+            <option value="5"    ${ab.intervalMinutes === 5    ? 'selected' : ''}>Every 5 minutes</option>
+            <option value="15"   ${ab.intervalMinutes === 15   ? 'selected' : ''}>Every 15 minutes</option>
+            <option value="30"   ${ab.intervalMinutes === 30   ? 'selected' : ''}>Every 30 minutes</option>
+            <option value="60"   ${ab.intervalMinutes === 60   ? 'selected' : ''}>Every hour</option>
+            <option value="360"  ${ab.intervalMinutes === 360  ? 'selected' : ''}>Every 6 hours</option>
+            <option value="1440" ${ab.intervalMinutes === 1440 ? 'selected' : ''}>Once a day</option>
+          </select>
+        </div>
+        <div class="ab-row">
+          <label class="ab-toggle">
+            <input type="checkbox" id="abEnabled" ${ab.enabled && hasHandle ? 'checked' : ''} ${(!supported || !hasHandle) ? 'disabled' : ''} />
+            <span>Enable auto-backup</span>
+          </label>
+        </div>
+        <div class="ab-row ab-status">
+          <span class="ab-lbl">Last backup</span>
+          <span class="ab-val">${lastTxt}</span>
+        </div>
+        <div class="ab-actions">
+          <button class="ghost" id="abDownload" title="Download a backup JSON to your default Downloads folder">Download now</button>
+          ${supported ? `<button class="primary" id="abBackupNow" ${hasHandle ? '' : 'disabled'}>Back up to folder now</button>` : ''}
+        </div>
+      </div>`;
+
+    // Wire
+    panel.querySelector('#abClose')?.addEventListener('click', closeAutoBackupPanel);
+    panel.querySelector('#abPick')?.addEventListener('click', async () => {
+      await requestBackupDir();
+      // After picking, refresh UI; auto-backup stays as the user set it
+      renderAutoBackupPanel();
+      scheduleAutoBackup();
+    });
+    panel.querySelector('#abInterval')?.addEventListener('change', (e) => {
+      const v = parseInt(e.target.value, 10);
+      state.settings.autoBackup.intervalMinutes = v;
+      saveState();
+      scheduleAutoBackup();
+    });
+    panel.querySelector('#abEnabled')?.addEventListener('change', (e) => {
+      state.settings.autoBackup.enabled = !!e.target.checked;
+      saveState();
+      scheduleAutoBackup();
+      if (e.target.checked) toast('Auto-backup enabled');
+      else toast('Auto-backup disabled');
+    });
+    panel.querySelector('#abBackupNow')?.addEventListener('click', async () => {
+      const ok = await writeBackupNow();
+      if (ok) toast('Backed up');
+    });
+    panel.querySelector('#abDownload')?.addEventListener('click', () => {
+      exportJSON();
+    });
+  }
+
+  function openAutoBackupPanel() {
+    const panel = $('#autoBackupPanel');
+    if (!panel) return;
+    panel.hidden = false;
+    renderAutoBackupPanel();
+  }
+  function closeAutoBackupPanel() {
+    const panel = $('#autoBackupPanel');
+    if (panel) panel.hidden = true;
+  }
+  function wireAutoBackup() {
+    const btn = $('#btnAutoBackup');
+    const panel = $('#autoBackupPanel');
+    if (!btn || !panel) return;
+    btn.addEventListener('click', () => {
+      panel.hidden ? openAutoBackupPanel() : closeAutoBackupPanel();
+    });
+    // Click outside the panel and the button → close
+    document.addEventListener('mousedown', (e) => {
+      if (panel.hidden) return;
+      if (e.target.closest('#autoBackupPanel') || e.target.closest('#btnAutoBackup')) return;
+      closeAutoBackupPanel();
+    });
+  }
+  async function initAutoBackup() {
+    if (!supportsDirPicker) return;
+    await loadBackupDirHandle();
+    scheduleAutoBackup();
   }
   function importJSON() {
     const input = document.createElement('input');
@@ -8697,6 +8944,8 @@
     wireHoverDescOnce();
     wireEvmTooltipsOnce();
     wireTodoWidget();
+    wireAutoBackup();
+    initAutoBackup();
 
     $('#btnExport').addEventListener('click', exportJSON);
     $('#btnImport').addEventListener('click', importJSON);
