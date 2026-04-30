@@ -2047,11 +2047,12 @@
           proj.openPoints = proj.openPoints.filter((x) => x.id !== id);
           commit('op-discard');
         });
-        // Drag the row by its grip to reorder open points up or down
+        // Drag the row by its grip to reorder open points up or down. Works
+        // in both single-project and merged All-Projects views — for merged,
+        // each item's source project is reordered independently.
         const rowGrip = el.querySelector('.op-row-grip');
         if (rowGrip) {
           rowGrip.addEventListener('mousedown', (e) => {
-            if (curProjectIsMerged()) { toast('Pick a single project to reorder.'); return; }
             e.preventDefault();
             // Manual reorder implies manual sort — flip the dropdown so the new
             // order isn't immediately re-sorted away after the next render.
@@ -2069,6 +2070,7 @@
             el.classList.add('dragging');
             document.body.classList.add('is-op-dragging');
             const onMove = (em) => {
+              em.preventDefault();
               const sibs = [...listEl.querySelectorAll('.op-item:not(.dragging)')];
               const after = sibs.find((sib) => {
                 const r = sib.getBoundingClientRect();
@@ -2077,16 +2079,44 @@
               if (after) listEl.insertBefore(el, after);
               else listEl.appendChild(el);
             };
+            // Suppress fresh selections that the browser tries to start when
+            // the cursor sweeps over a contenteditable mid-drag.
+            const onSelectStart = (ev) => ev.preventDefault();
             const onUp = () => {
               el.classList.remove('dragging');
               document.body.classList.remove('is-op-dragging');
               window.removeEventListener('mousemove', onMove);
               window.removeEventListener('mouseup', onUp);
+              document.removeEventListener('selectstart', onSelectStart);
+              // Clear any selection the browser still managed to start
+              try { window.getSelection()?.removeAllRanges(); } catch (_) {}
               // The new visual order of the visible (filtered) rows
               const newVisibleOrder = [...listEl.querySelectorAll('.op-item[data-id]')].map((r) => r.dataset.id);
-              // Walk the original openPoints array; replace each slot whose
-              // item was visible with the next id from newVisibleOrder. Hidden
-              // items keep their position untouched.
+              const merged = curProjectIsMerged();
+              if (merged) {
+                // Reorder each source project independently. Items are placed
+                // in the order they appear among the visible rows; hidden
+                // items in each project keep their original slots.
+                let changed = false;
+                state.projects.forEach((sourceProj) => {
+                  const ops = sourceProj.openPoints || [];
+                  if (!ops.length) return;
+                  const idsHere = new Set(ops.map((o) => o.id));
+                  const visibleHere = new Set([...visibleIds].filter((id) => idsHere.has(id)));
+                  const newOrderHere = newVisibleOrder.filter((id) => idsHere.has(id));
+                  const byId = Object.fromEntries(ops.map((o) => [o.id, o]));
+                  const before = ops.map((o) => o.id).join(',');
+                  let vi = 0;
+                  const next = ops.map((op) => visibleHere.has(op.id) ? (byId[newOrderHere[vi++]] || op) : op);
+                  if (next.map((o) => o.id).join(',') !== before) {
+                    sourceProj.openPoints = next;
+                    changed = true;
+                  }
+                });
+                if (changed) commit('op-reorder');
+                return;
+              }
+              // Single-project: walk the original array and substitute visible slots
               const before = (proj.openPoints || []).map((o) => o.id).join(',');
               const byId = Object.fromEntries((proj.openPoints || []).map((o) => [o.id, o]));
               let visIdx = 0;
@@ -2101,6 +2131,7 @@
             };
             window.addEventListener('mousemove', onMove);
             window.addEventListener('mouseup', onUp);
+            document.addEventListener('selectstart', onSelectStart);
           });
         }
       });

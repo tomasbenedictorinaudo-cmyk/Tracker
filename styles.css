@@ -1433,6 +1433,11 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 body.is-op-dragging,
 body.is-op-dragging .op-row-grip { cursor: grabbing !important; }
+/* While dragging an open-point row, suppress every text selection so that
+   sweeping the cursor over titles / contenteditable areas doesn't highlight
+   text instead of moving the row. */
+body.is-op-dragging,
+body.is-op-dragging * { user-select: none !important; -webkit-user-select: none !important; }
 .op-content { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .op-title {
   font-weight: 500;
