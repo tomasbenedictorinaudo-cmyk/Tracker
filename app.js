@@ -582,6 +582,9 @@
       components: flat('components'),
       meetings: flat('meetings'),
       links: flat('links'),
+      openPoints: flat('openPoints'),
+      changes: flat('changes'),
+      costCenters: flat('costCenters'),
     };
   }
   // Find the source project for an action by id (works in merged mode too)
@@ -1743,6 +1746,9 @@
     });
   }
 
+  // Persistent filter / sort state for the Open Points page (volatile; not
+  // in state because it's pure UI).
+  const opFilterState = { q: '', component: '', criticality: '', priority: '', progress: '', sort: 'manual' };
   function renderOpenPoints(root) {
     const proj = curProject();
     proj.openPoints = proj.openPoints || [];
@@ -1763,14 +1769,91 @@
         </select>
         <button class="ghost" id="opAdd">Add</button>
       </div>
+      <div class="op-filterbar">
+        <input id="opFilterQ" type="search" placeholder="Filter by text…" value="${escapeHTML(opFilterState.q)}" />
+        <select id="opFilterComp" title="Filter by component">
+          <option value="">All components</option>
+          <option value="__none">— No component</option>
+          ${(proj.components || []).map((pt) => `<option value="${pt.id}" ${pt.id === opFilterState.component ? 'selected' : ''}>${escapeHTML(pt.name)}</option>`).join('')}
+        </select>
+        <select id="opFilterCrit" title="Filter by criticality">
+          <option value="">All criticality</option>
+          ${['low','med','high','critical'].map((k) => `<option value="${k}" ${k === opFilterState.criticality ? 'selected' : ''}>${CRITICALITY_LABEL[k]}</option>`).join('')}
+        </select>
+        <select id="opFilterPrio" title="Filter by priority">
+          <option value="">All priority</option>
+          ${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === opFilterState.priority ? 'selected' : ''}>${p.label}</option>`).join('')}
+        </select>
+        <select id="opFilterProg" title="Filter by step progress">
+          <option value="">All progress</option>
+          <option value="none"      ${opFilterState.progress === 'none' ? 'selected' : ''}>No steps</option>
+          <option value="some"      ${opFilterState.progress === 'some' ? 'selected' : ''}>In progress</option>
+          <option value="all-done"  ${opFilterState.progress === 'all-done' ? 'selected' : ''}>All steps done</option>
+        </select>
+        <select id="opSort" title="Sort">
+          <option value="manual"    ${opFilterState.sort === 'manual' ? 'selected' : ''}>Manual order</option>
+          <option value="newest"    ${opFilterState.sort === 'newest' ? 'selected' : ''}>Newest first</option>
+          <option value="oldest"    ${opFilterState.sort === 'oldest' ? 'selected' : ''}>Oldest first</option>
+          <option value="crit-desc" ${opFilterState.sort === 'crit-desc' ? 'selected' : ''}>Criticality ↓</option>
+          <option value="prio-desc" ${opFilterState.sort === 'prio-desc' ? 'selected' : ''}>Priority ↓</option>
+          <option value="title-asc" ${opFilterState.sort === 'title-asc' ? 'selected' : ''}>Title A–Z</option>
+          <option value="progress"  ${opFilterState.sort === 'progress' ? 'selected' : ''}>Step progress</option>
+        </select>
+        <button class="ghost" id="opFilterReset" title="Clear filters">Reset</button>
+      </div>
       <div class="op-list" id="opList"></div>`;
     root.appendChild(view);
 
+    // Helpers — sortable rank (Critical → Low) and matcher
+    const CRIT_RANK = { critical: 0, high: 1, med: 2, low: 3 };
+    function matchesFilters(op) {
+      if (opFilterState.q) {
+        const q = opFilterState.q.toLowerCase();
+        const hay = (op.title + ' ' + (op.notes || '') + ' ' + (op.steps || []).map((s) => s.text).join(' ')).toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (opFilterState.component) {
+        if (opFilterState.component === '__none') { if (op.component) return false; }
+        else if (op.component !== opFilterState.component) return false;
+      }
+      if (opFilterState.criticality && (op.criticality || 'med') !== opFilterState.criticality) return false;
+      if (opFilterState.priority    && (op.priorityLevel || 'med') !== opFilterState.priority) return false;
+      if (opFilterState.progress) {
+        const total = (op.steps || []).length;
+        const done  = (op.steps || []).filter((s) => s.done).length;
+        if (opFilterState.progress === 'none' && total > 0) return false;
+        if (opFilterState.progress === 'some' && (total === 0 || done === total)) return false;
+        if (opFilterState.progress === 'all-done' && (total === 0 || done < total)) return false;
+      }
+      return true;
+    }
+    function compareForSort(a, b) {
+      switch (opFilterState.sort) {
+        case 'newest':    return (b.createdAt || '').localeCompare(a.createdAt || '');
+        case 'oldest':    return (a.createdAt || '').localeCompare(b.createdAt || '');
+        case 'crit-desc': return (CRIT_RANK[a.criticality || 'med'] - CRIT_RANK[b.criticality || 'med']);
+        case 'prio-desc': return (CRIT_RANK[a.priorityLevel || 'med'] - CRIT_RANK[b.priorityLevel || 'med']);
+        case 'title-asc': return (a.title || '').localeCompare(b.title || '');
+        case 'progress': {
+          const pa = ((a.steps || []).filter((s) => s.done).length) / Math.max(1, (a.steps || []).length);
+          const pb = ((b.steps || []).filter((s) => s.done).length) / Math.max(1, (b.steps || []).length);
+          return pa - pb;
+        }
+        default: return 0; // manual — preserve array order
+      }
+    }
+
     function draw() {
       const list = $('#opList');
-      const items = proj.openPoints || [];
-      if (!items.length) {
+      const all = proj.openPoints || [];
+      const filtered = all.filter(matchesFilters);
+      const items = opFilterState.sort === 'manual' ? filtered : filtered.slice().sort(compareForSort);
+      if (!all.length) {
         list.innerHTML = '<div class="empty">No open points yet — capture something above.</div>';
+        return;
+      }
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">No open points match the current filters.</div>';
         return;
       }
       list.innerHTML = items.map((op) => {
@@ -1793,6 +1876,7 @@
         const showOpPrioChip = op.priorityLevel && op.priorityLevel !== 'med';
         return `
         <div class="op-item crit-${op.criticality}" data-id="${op.id}" ${tint}>
+          <span class="op-row-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
           <div class="op-content">
             <div class="op-title-row">
               <span class="op-crit-chip" title="Criticality" style="background:rgba(${critRgb},.18);color:rgb(${critRgb});border:1px solid rgb(${critRgb})">${critLabel}</span>
@@ -1963,10 +2047,43 @@
           proj.openPoints = proj.openPoints.filter((x) => x.id !== id);
           commit('op-discard');
         });
+        // Drag the row by its grip to reorder open points up or down
+        const rowGrip = el.querySelector('.op-row-grip');
+        if (rowGrip) {
+          rowGrip.addEventListener('mousedown', (e) => {
+            if (curProjectIsMerged()) { toast('Pick a single project to reorder.'); return; }
+            e.preventDefault();
+            const listEl = list;
+            el.classList.add('dragging');
+            document.body.classList.add('is-op-dragging');
+            const onMove = (em) => {
+              const sibs = [...listEl.querySelectorAll('.op-item:not(.dragging)')];
+              const after = sibs.find((sib) => {
+                const r = sib.getBoundingClientRect();
+                return em.clientY < r.top + r.height / 2;
+              });
+              if (after) listEl.insertBefore(el, after);
+              else listEl.appendChild(el);
+            };
+            const onUp = () => {
+              el.classList.remove('dragging');
+              document.body.classList.remove('is-op-dragging');
+              window.removeEventListener('mousemove', onMove);
+              window.removeEventListener('mouseup', onUp);
+              const newOrder = [...listEl.querySelectorAll('.op-item[data-id]')].map((r) => r.dataset.id);
+              const before = (proj.openPoints || []).map((o) => o.id).join(',');
+              proj.openPoints = newOrder.map((oid) => (proj.openPoints || []).find((o) => o.id === oid)).filter(Boolean);
+              if (proj.openPoints.map((o) => o.id).join(',') !== before) commit('op-reorder');
+            };
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', onUp);
+          });
+        }
       });
     }
 
     const addPoint = () => {
+      if (curProjectIsMerged()) { toast('Pick a single project to add open points.'); return; }
       const v = $('#opInput').value.trim();
       if (!v) return;
       const comp = $('#opQuickComp')?.value || null;
@@ -1980,6 +2097,30 @@
     $('#opInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); addPoint(); }
     });
+
+    // Filter / sort wiring
+    const fq = $('#opFilterQ');
+    if (fq) fq.addEventListener('input', () => { opFilterState.q = fq.value; draw(); });
+    const fc = $('#opFilterComp');
+    if (fc) fc.addEventListener('change', () => { opFilterState.component = fc.value; draw(); });
+    const fcrit = $('#opFilterCrit');
+    if (fcrit) fcrit.addEventListener('change', () => { opFilterState.criticality = fcrit.value; draw(); });
+    const fprio = $('#opFilterPrio');
+    if (fprio) fprio.addEventListener('change', () => { opFilterState.priority = fprio.value; draw(); });
+    const fprog = $('#opFilterProg');
+    if (fprog) fprog.addEventListener('change', () => { opFilterState.progress = fprog.value; draw(); });
+    const fsort = $('#opSort');
+    if (fsort) fsort.addEventListener('change', () => { opFilterState.sort = fsort.value; draw(); });
+    const fres = $('#opFilterReset');
+    if (fres) fres.addEventListener('click', () => {
+      opFilterState.q = ''; opFilterState.component = ''; opFilterState.criticality = '';
+      opFilterState.priority = ''; opFilterState.progress = ''; opFilterState.sort = 'manual';
+      if (fq) fq.value = '';
+      [fc, fcrit, fprio, fprog].forEach((el) => { if (el) el.value = ''; });
+      if (fsort) fsort.value = 'manual';
+      draw();
+    });
+
     draw();
   }
 

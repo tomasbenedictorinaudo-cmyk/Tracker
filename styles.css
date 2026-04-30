@@ -1359,6 +1359,34 @@ body.is-card-dragging * { cursor: grabbing !important; }
   outline: none;
 }
 .op-quick input:focus { border-color: var(--accent-2); }
+/* Filter / sort bar above the open-points list */
+.op-filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  align-items: center;
+}
+.op-filterbar input,
+.op-filterbar select {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 5px 8px;
+  font-size: 11.5px;
+  color: var(--text);
+  outline: none;
+  height: 28px;
+}
+.op-filterbar input { min-width: 180px; flex: 1; }
+.op-filterbar select { min-width: 110px; }
+.op-filterbar input:focus,
+.op-filterbar select:focus { border-color: var(--accent); }
+.op-filterbar .ghost { font-size: 11.5px; padding: 4px 10px; height: 28px; }
 .op-list {
   display: flex;
   flex-direction: column;
@@ -1366,14 +1394,39 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .op-item {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  padding: 10px 14px;
+  grid-template-columns: 14px 1fr auto;
+  gap: 10px;
+  padding: 10px 14px 10px 8px;
   background: var(--bg-1);
   border: 1px solid var(--line);
   border-left: 3px solid var(--accent-2);
   border-radius: var(--radius-sm);
+  align-items: start;
+  position: relative;
 }
+.op-row-grip {
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  letter-spacing: -2px;
+  color: var(--text-faint);
+  cursor: grab;
+  user-select: none;
+  opacity: 0;
+  transition: opacity var(--transition);
+}
+.op-item:hover .op-row-grip { opacity: .55; }
+.op-row-grip:hover { opacity: 1 !important; color: var(--text-dim); }
+.op-item.dragging {
+  background: var(--bg-3);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  opacity: .92;
+}
+body.is-op-dragging,
+body.is-op-dragging .op-row-grip { cursor: grabbing !important; }
 .op-content { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .op-title {
   font-weight: 500;
