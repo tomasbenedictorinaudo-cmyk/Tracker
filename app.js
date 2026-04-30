@@ -4127,6 +4127,15 @@
       return lanes.length - 1;
     }
 
+    // Group items by date so multiple events on the same day get a small
+    // vertical stagger on the axis (otherwise their circles overlap and the
+    // user can't tell two events occupy the same date).
+    const dateGroups = {};
+    sorted.forEach((it) => {
+      (dateGroups[it.date] = dateGroups[it.date] || []).push(it);
+    });
+    const STACK_PITCH = 7; // px between stacked dots on the axis
+
     const placed = sorted.map((it, i) => {
       const x = xFor(it.t);
       const w = labelW(it.name);
@@ -4134,13 +4143,22 @@
       // Alternate above/below for a balanced look, then pack into the first free lane.
       const above = i % 2 === 0;
       const lane = above ? fit(lanesAbove, x0, x1) : fit(lanesBelow, x0, x1);
-      return { ...it, x, above, lane };
+      // Vertical offset along the axis when this item shares its date with others
+      const grp = dateGroups[it.date];
+      const grpIdx = grp.indexOf(it);
+      const dotOffset = grp.length > 1
+        ? (grpIdx - (grp.length - 1) / 2) * STACK_PITCH
+        : 0;
+      return { ...it, x, above, lane, dotOffset, stackSize: grp.length };
     });
 
     const lanesA = Math.max(1, lanesAbove.length);
     const lanesB = Math.max(1, lanesBelow.length);
-    const padT = 18 + lanesA * ROW_H;
-    const padB = 22 + lanesB * ROW_H + 14;
+    // Allow vertical headroom for stacked-date dots ((max stack - 1)/2 px each side)
+    const maxStack = placed.reduce((m, p) => Math.max(m, p.stackSize || 1), 1);
+    const stackHalfPx = ((maxStack - 1) / 2) * STACK_PITCH;
+    const padT = 18 + lanesA * ROW_H + stackHalfPx;
+    const padB = 22 + lanesB * ROW_H + 14 + stackHalfPx;
     const H = padT + padB + 18;
     const yLine = padT + 10;
 
@@ -4171,15 +4189,18 @@
 
     const markers = placed.map((it) => {
       const x = it.x;
+      // Same-date stacking shifts this item's circle vertically along the axis
+      const cy = yLine + (it.dotOffset || 0);
       const labelY = it.above
         ? padT - 8 - (lanesAbove.length - 1 - it.lane) * ROW_H
         : H - padB + 18 + it.lane * ROW_H;
       const dateY = it.above ? labelY + 12 : labelY + 12;
+      // Stems run between the actual circle position (cy) and the label line
       const stemY1 = it.above
         ? labelY - 9
-        : yLine + 7;
+        : cy + 7;
       const stemY2 = it.above
-        ? yLine - 7
+        ? cy - 7
         : labelY - 14;
       const isDone = it.status === 'done';
       const isLate = !isDone && it.t < today;
@@ -4188,17 +4209,17 @@
       const labelFill = isDone ? 'var(--text-dim)' : (isLate ? 'var(--bad)' : `rgb(${rgb})`);
       const safeName = escapeHTML(it.name);
       const r = 7;
-      // Status badge: ✓ for done, ! for late — overlay above the dot so the
-      // per-item colour still tracks between row swatch and circle fill.
+      // Status badge: ✓ for done, ! for late — anchored to the actual circle
+      // position so it still hugs each stacked dot when same-date events split.
       const badge = isDone
-        ? `<g class="strip-badge done"><circle cx="${(x + 8).toFixed(1)}" cy="${(yLine - 8).toFixed(1)}" r="6" fill="var(--ok)" stroke="var(--bg-1)" stroke-width="1.6" /><text x="${(x + 8).toFixed(1)}" y="${(yLine - 5).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="8" font-weight="700">✓</text></g>`
+        ? `<g class="strip-badge done"><circle cx="${(x + 8).toFixed(1)}" cy="${(cy - 8).toFixed(1)}" r="6" fill="var(--ok)" stroke="var(--bg-1)" stroke-width="1.6" /><text x="${(x + 8).toFixed(1)}" y="${(cy - 5).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="8" font-weight="700">✓</text></g>`
         : isLate
-          ? `<g class="strip-badge late"><circle cx="${(x + 8).toFixed(1)}" cy="${(yLine - 8).toFixed(1)}" r="6" fill="var(--bad)" stroke="var(--bg-1)" stroke-width="1.6" /><text x="${(x + 8).toFixed(1)}" y="${(yLine - 5).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="9" font-weight="700">!</text></g>`
+          ? `<g class="strip-badge late"><circle cx="${(x + 8).toFixed(1)}" cy="${(cy - 8).toFixed(1)}" r="6" fill="var(--bad)" stroke="var(--bg-1)" stroke-width="1.6" /><text x="${(x + 8).toFixed(1)}" y="${(cy - 5).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="9" font-weight="700">!</text></g>`
           : '';
       return `
         <g class="strip-mark ${cls}" data-strip-id="${it.id}">
           <line class="strip-stem" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${stemY1.toFixed(1)}" y2="${stemY2.toFixed(1)}" stroke="rgb(${rgb})" />
-          <circle class="strip-pt" cx="${x.toFixed(1)}" cy="${yLine}" r="${r}" fill="rgb(${rgb})" stroke="var(--bg-1)" stroke-width="1.8" />
+          <circle class="strip-pt" cx="${x.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="rgb(${rgb})" stroke="var(--bg-1)" stroke-width="1.8" />
           ${badge}
           <text class="strip-lbl" x="${x.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" fill="${labelFill}">${safeName}</text>
           <text class="strip-date" x="${x.toFixed(1)}" y="${dateY.toFixed(1)}" text-anchor="middle">${fmtDate(it.date)}</text>
