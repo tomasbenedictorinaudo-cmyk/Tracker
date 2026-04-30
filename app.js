@@ -7614,6 +7614,27 @@
         scheduleNotesSave();
       });
     });
+    // Font-colour picker — applies foreColor to current selection. The bar
+    // beneath the "A" glyph previews the most recently chosen colour.
+    const ntColor    = $('#ntColorInput');
+    const ntColorBar = $('#ntColorBar');
+    if (ntColor) {
+      // Restore last-used colour from settings
+      const last = (state.settings && state.settings.notesColor) || '#6ea8ff';
+      ntColor.value = last;
+      if (ntColorBar) ntColorBar.style.background = last;
+      ntColor.addEventListener('input', (e) => {
+        const c = e.target.value;
+        $('#notesBody').focus();
+        document.execCommand('foreColor', false, c);
+        if (ntColorBar) ntColorBar.style.background = c;
+        state.settings = state.settings || {};
+        state.settings.notesColor = c;
+        scheduleNotesSave();
+      });
+      // Keep the swatch from stealing focus from the editor on click
+      ntColor.parentElement.addEventListener('mousedown', (e) => { if (e.target === ntColor.parentElement) e.preventDefault(); });
+    }
 
     $('#btnNotesAction').addEventListener('mousedown', (e) => {
       e.preventDefault();

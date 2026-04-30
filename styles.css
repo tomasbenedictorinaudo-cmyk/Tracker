@@ -2946,6 +2946,58 @@ body.is-row-dragging *        { user-select: none !important; }
   font-weight: 600;
 }
 .notes-toolbar .notes-action-btn:hover { background: var(--accent); color: white; }
+/* Compact H1–H5 group — distinct from word-style buttons */
+.notes-toolbar button.nt-h {
+  padding: 3px 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  font-variant-numeric: tabular-nums;
+  min-width: 26px;
+}
+/* Font-colour picker — "A" glyph above a coloured underline */
+.notes-toolbar .nt-color {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background var(--transition), border-color var(--transition);
+}
+.notes-toolbar .nt-color:hover { background: var(--bg-3); border-color: var(--line-2); }
+.notes-toolbar .nt-color-glyph {
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 13px;
+  color: var(--text);
+  pointer-events: none;
+}
+.notes-toolbar .nt-color-bar {
+  display: block;
+  width: 16px;
+  height: 3px;
+  border-radius: 1px;
+  margin-top: 1px;
+  background: var(--accent);
+  pointer-events: none;
+}
+.notes-toolbar .nt-color input[type="color"] {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+}
 .notes-body {
   flex: 1;
   overflow-y: auto;
@@ -2957,11 +3009,49 @@ body.is-row-dragging *        { user-select: none !important; }
 }
 .notes-body:focus { outline: none; }
 .notes-body p { margin: 0 0 10px; }
-.notes-body h1 { font-size: 16px; margin: 16px 0 6px; color: var(--text); font-weight: 700; }
-.notes-body h2 { font-size: 14.5px; margin: 14px 0 6px; color: var(--text); font-weight: 700; }
-.notes-body h3 { font-size: 14px; margin: 14px 0 6px; color: var(--text); }
-.notes-body h4, .notes-body h5, .notes-body h6 {
-  font-size: 13px; margin: 10px 0 4px; color: var(--text-dim); font-weight: 700;
+/* Five distinct heading levels for meeting notes — each visually clearer than
+   the next. H1 carries an underline accent so titles stand out. */
+.notes-body h1 {
+  font-size: 18px; line-height: 1.25;
+  margin: 18px 0 8px;
+  color: var(--text);
+  font-weight: 800;
+  letter-spacing: -.01em;
+  border-bottom: 1px solid var(--line-2);
+  padding-bottom: 4px;
+}
+.notes-body h2 {
+  font-size: 16px; line-height: 1.3;
+  margin: 16px 0 6px;
+  color: var(--text);
+  font-weight: 700;
+}
+.notes-body h3 {
+  font-size: 14.5px; line-height: 1.35;
+  margin: 14px 0 5px;
+  color: var(--text);
+  font-weight: 700;
+}
+.notes-body h4 {
+  font-size: 13.5px;
+  margin: 12px 0 4px;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.notes-body h5 {
+  font-size: 12.5px;
+  margin: 10px 0 4px;
+  color: var(--text-faint);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.notes-body h6 {
+  font-size: 12px;
+  margin: 10px 0 4px;
+  color: var(--text-faint);
+  font-weight: 600;
+  font-style: italic;
 }
 .notes-body ul, .notes-body ol { padding-left: 22px; margin: 6px 0 10px; }
 .notes-body li { margin-bottom: 3px; }
