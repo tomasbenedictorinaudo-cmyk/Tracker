@@ -5769,65 +5769,315 @@
   function renderLinks(root) {
     const proj = curProject();
     proj.links = proj.links || [];
+    proj.linkFolders = proj.linkFolders || [];
     const view = document.createElement('div');
     view.className = 'view';
     view.innerHTML = `
       <div class="page-head">
-        <div><div class="page-title">Links</div><div class="page-sub">Important references — websites, drives, files. Optionally tag with a component.</div></div>
-        <div class="page-actions"><button class="ghost" id="btnAddLink">+ Link</button></div>
+        <div><div class="page-title">Links</div><div class="page-sub">Important references — websites, drives, files. Group into folders by drag &amp; drop; reorder anything by its grip.</div></div>
+        <div class="page-actions">
+          <button class="ghost" id="btnNewLinkFolder">+ Folder</button>
+          <button class="ghost" id="btnAddLink">+ Link</button>
+        </div>
       </div>
-      <div class="links-list" id="linksList"></div>`;
+      <div class="link-tree" id="linkTree"></div>`;
     root.appendChild(view);
-    const list = $('#linksList');
-    if (!proj.links.length) {
-      list.innerHTML = '<div class="empty">No links yet — add one to keep your team\'s key references in one place.</div>';
-    } else {
-      list.innerHTML = proj.links.map((l) => {
-        const comp = l.component ? findComponent(proj, l.component) : null;
-        const compRgb = comp ? componentColor(comp.color).rgb : null;
-        const host = (() => { try { return new URL(l.url).hostname.replace(/^www\./, ''); } catch (e) { return l.url; } })();
-        return `
-          <div class="link-card" data-link-id="${l.id}">
-            ${ROW_GRIP_HTML}
-            <a class="link-title" href="${escapeHTML(l.url)}" target="_blank" rel="noopener noreferrer">↗ ${escapeHTML(l.title || host || l.url)}</a>
-            <div class="link-host">${escapeHTML(host)}</div>
-            ${l.description ? `<div class="link-desc">${escapeHTML(l.description)}</div>` : ''}
-            ${comp ? `<div class="link-comp"><span class="link-comp-swatch" style="background:rgb(${compRgb})"></span>${escapeHTML(comp.name)}</div>` : ''}
-          </div>`;
-      }).join('');
-      wireListReorder(list, {
-        rowSelector: '.link-card[data-link-id]',
-        idAttr: 'linkId',
-        getArray: () => proj.links,
-        setOrder: (ids) => { proj.links = ids.map((id) => proj.links.find((x) => x.id === id)).filter(Boolean); },
-        commitName: 'links-reorder',
+    const tree = $('#linkTree');
+
+    function linksFor(folderId) {
+      return proj.links.filter((l) => (l.folderId || null) === folderId);
+    }
+
+    function linkCardHTML(l) {
+      const comp = l.component ? findComponent(proj, l.component) : null;
+      const compRgb = comp ? componentColor(comp.color).rgb : null;
+      const host = (() => { try { return new URL(l.url).hostname.replace(/^www\./, ''); } catch (e) { return l.url; } })();
+      return `
+        <div class="link-card" data-link-id="${l.id}">
+          <span class="row-grip link-grip" title="Drag to reorder or move into a folder" aria-hidden="true">⋮⋮</span>
+          <a class="link-title" href="${escapeHTML(l.url)}" target="_blank" rel="noopener noreferrer">↗ ${escapeHTML(l.title || host || l.url)}</a>
+          <div class="link-host">${escapeHTML(host)}</div>
+          ${l.description ? `<div class="link-desc">${escapeHTML(l.description)}</div>` : ''}
+          ${comp ? `<div class="link-comp"><span class="link-comp-swatch" style="background:rgb(${compRgb})"></span>${escapeHTML(comp.name)}</div>` : ''}
+        </div>`;
+    }
+
+    function folderHTML(folder) {
+      const items = linksFor(folder.id);
+      const collapsed = !!folder.collapsed;
+      return `
+        <div class="link-folder ${collapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}">
+          <div class="folder-head">
+            <span class="row-grip folder-grip" title="Drag to reorder folders" aria-hidden="true">⋮⋮</span>
+            <button type="button" class="folder-caret" title="Toggle">${collapsed ? '▸' : '▾'}</button>
+            <span class="folder-name" contenteditable="true" data-placeholder="Folder name…">${escapeHTML(folder.name)}</span>
+            <span class="folder-count">${items.length}</span>
+            <button type="button" class="folder-add" title="Add link to this folder">+ Link</button>
+            <button type="button" class="folder-del" title="Delete folder">×</button>
+          </div>
+          <div class="folder-body" data-folder-id="${folder.id}">
+            ${items.length ? items.map(linkCardHTML).join('') : '<div class="folder-empty">Empty — drag a link here.</div>'}
+          </div>
+        </div>`;
+    }
+
+    function ungroupedHTML() {
+      const items = linksFor(null);
+      return `
+        <div class="link-folder loose" data-folder-id="">
+          <div class="folder-head loose-head">
+            <span class="folder-caret-spacer" aria-hidden="true"></span>
+            <span class="folder-name loose-name">Loose links</span>
+            <span class="folder-count">${items.length}</span>
+          </div>
+          <div class="folder-body" data-folder-id="">
+            ${items.length ? items.map(linkCardHTML).join('') : '<div class="folder-empty">No loose links — drag any link here to ungroup it.</div>'}
+          </div>
+        </div>`;
+    }
+
+    function drawTree() {
+      const total = proj.links.length;
+      if (!total && !proj.linkFolders.length) {
+        tree.innerHTML = '<div class="empty">No links yet — add one or create a folder to start.</div>';
+        return;
+      }
+      tree.innerHTML = ungroupedHTML() + proj.linkFolders.map(folderHTML).join('');
+      wireTree();
+    }
+
+    function wireTree() {
+      // Folder header interactions
+      $$('.link-folder', tree).forEach((folderEl) => {
+        const fid = folderEl.dataset.folderId;
+        if (fid) {
+          // Caret toggle
+          folderEl.querySelector('.folder-caret')?.addEventListener('click', () => {
+            const f = proj.linkFolders.find((x) => x.id === fid);
+            if (!f) return;
+            f.collapsed = !f.collapsed;
+            saveState();
+            drawTree();
+          });
+          // Edit name on blur
+          const nameEl = folderEl.querySelector('.folder-name');
+          if (nameEl) {
+            nameEl.addEventListener('keydown', (e) => {
+              if (e.key === 'Enter') { e.preventDefault(); nameEl.blur(); }
+            });
+            nameEl.addEventListener('blur', () => {
+              const f = proj.linkFolders.find((x) => x.id === fid);
+              if (!f) return;
+              const v = nameEl.textContent.trim() || 'Folder';
+              if (f.name !== v) { f.name = v; commit('folder-rename'); }
+            });
+          }
+          // Add link to this folder
+          folderEl.querySelector('.folder-add')?.addEventListener('click', () => {
+            openQuickAdd('link', { folderId: fid });
+          });
+          // Delete folder (links inside become loose)
+          folderEl.querySelector('.folder-del')?.addEventListener('click', () => {
+            const f = proj.linkFolders.find((x) => x.id === fid);
+            if (!f) return;
+            const childCount = linksFor(fid).length;
+            if (!confirm(`Delete folder "${f.name}"?` + (childCount ? `\n\nThe ${childCount} link${childCount === 1 ? '' : 's'} inside will become loose.` : ''))) return;
+            proj.links.forEach((l) => { if (l.folderId === fid) l.folderId = null; });
+            proj.linkFolders = proj.linkFolders.filter((x) => x.id !== fid);
+            commit('folder-delete');
+            toast('Folder deleted');
+          });
+          // Folder reorder drag (via folder-grip)
+          const fgrip = folderEl.querySelector('.folder-grip');
+          if (fgrip) wireFolderDrag(fgrip, folderEl);
+        }
       });
-      $$('.link-card[data-link-id]', list).forEach((card) => {
+      // Link cards
+      $$('.link-card[data-link-id]', tree).forEach((card) => {
+        const lid = card.dataset.linkId;
+        // Context menu
         card.addEventListener('contextmenu', (e) => {
           e.preventDefault();
-          const id = card.dataset.linkId;
-          const l = (proj.links || []).find((x) => x.id === id);
+          const l = proj.links.find((x) => x.id === lid);
           if (!l) return;
+          const moveItems = [];
+          // Build move-to-folder submenu items
+          if (l.folderId) moveItems.push({ icon: '↩', label: 'Move out (loose)', onClick: () => {
+            l.folderId = null; commit('link-move'); toast('Moved out');
+          }});
+          proj.linkFolders.forEach((f) => {
+            if (f.id !== l.folderId) moveItems.push({
+              icon: '↪', label: `Move to "${f.name}"`,
+              onClick: () => { l.folderId = f.id; commit('link-move'); toast(`Moved to ${f.name}`); },
+            });
+          });
           showContextMenu(e.clientX, e.clientY, [
-            { icon: '✎', label: 'Edit…', onClick: () => openLinkEditor(id) },
+            { icon: '✎', label: 'Edit…', onClick: () => openLinkEditor(lid) },
             { icon: '⧉', label: 'Copy URL', onClick: () => {
               navigator.clipboard?.writeText(l.url).then(() => toast('Copied')).catch(() => toast('Copy failed'));
             }},
+            ...(moveItems.length ? [{ divider: true }, ...moveItems] : []),
             { divider: true },
             { icon: '×', label: 'Delete link', danger: true, onClick: () => {
               if (!confirm(`Delete "${l.title || l.url}"?`)) return;
-              proj.links = (proj.links || []).filter((x) => x.id !== id);
+              proj.links = proj.links.filter((x) => x.id !== lid);
               commit('link-delete');
               toast('Deleted');
             }},
           ]);
         });
         card.addEventListener('dblclick', (e) => {
-          if (e.target.closest('a')) return; // let the link click handle itself
-          openLinkEditor(card.dataset.linkId);
+          if (e.target.closest('a')) return;
+          openLinkEditor(lid);
         });
+        // Drag to reorder / move between folders
+        const grip = card.querySelector('.link-grip');
+        if (grip) wireLinkDrag(grip, card);
       });
     }
+
+    // ----------- DRAG: link cards (reorder within + across folders) -----------
+    function wireLinkDrag(grip, card) {
+      grip.addEventListener('mousedown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        const lid = card.dataset.linkId;
+        card.classList.add('dragging');
+        document.body.classList.add('is-link-dragging');
+        let dropTargetFolderId = null;
+        let dropAfterLinkId = null; // null means "append to end of target folder"
+
+        const clearIndicators = () => {
+          tree.querySelectorAll('.link-folder.drop-target, .link-card.drop-before, .link-card.drop-after, .folder-empty.drop-target')
+            .forEach((el) => el.classList.remove('drop-target', 'drop-before', 'drop-after'));
+        };
+
+        const onMove = (em) => {
+          em.preventDefault();
+          clearIndicators();
+          // Find what's under the cursor
+          const elAt = document.elementFromPoint(em.clientX, em.clientY);
+          if (!elAt) return;
+          // Drop on another link card → reorder before/after
+          const overCard = elAt.closest('.link-card[data-link-id]');
+          if (overCard && overCard !== card) {
+            const r = overCard.getBoundingClientRect();
+            const above = em.clientY < r.top + r.height / 2;
+            overCard.classList.add(above ? 'drop-before' : 'drop-after');
+            const folderEl = overCard.closest('.link-folder');
+            dropTargetFolderId = folderEl ? (folderEl.dataset.folderId || null) : null;
+            const overId = overCard.dataset.linkId;
+            // dropAfterLinkId is the link directly preceding the new position
+            // For "above": position is before overCard → dropAfterLinkId = link before overCard in same folder, or null if overCard is first
+            const sameFolderLinks = proj.links.filter((l) => (l.folderId || null) === dropTargetFolderId);
+            const overIdx = sameFolderLinks.findIndex((l) => l.id === overId);
+            if (above) {
+              dropAfterLinkId = overIdx > 0 ? sameFolderLinks[overIdx - 1].id : '__START__';
+              if (dropAfterLinkId === lid) dropAfterLinkId = '__SELF_NOOP__';
+            } else {
+              dropAfterLinkId = overId === lid ? '__SELF_NOOP__' : overId;
+            }
+            return;
+          }
+          // Drop on a folder body / header / empty area
+          const folderEl = elAt.closest('.link-folder');
+          if (folderEl) {
+            folderEl.classList.add('drop-target');
+            const emptyEl = folderEl.querySelector('.folder-empty');
+            if (emptyEl) emptyEl.classList.add('drop-target');
+            dropTargetFolderId = folderEl.dataset.folderId || null;
+            dropAfterLinkId = null; // append to end
+          }
+        };
+
+        const onUp = () => {
+          card.classList.remove('dragging');
+          document.body.classList.remove('is-link-dragging');
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          document.removeEventListener('selectstart', onSelectStart);
+          try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+          clearIndicators();
+
+          if (dropAfterLinkId === '__SELF_NOOP__') return;
+
+          const link = proj.links.find((l) => l.id === lid);
+          if (!link) return;
+          const targetFolderId = dropTargetFolderId; // null means loose
+
+          // Update folder membership
+          link.folderId = targetFolderId;
+          // Reorder proj.links: remove the link, then insert at the right place
+          const without = proj.links.filter((l) => l.id !== lid);
+          let newIdx;
+          if (dropAfterLinkId == null) {
+            // Append to the end of the target folder's slice
+            // Find last index of any link in target folder
+            let lastIdx = -1;
+            without.forEach((l, i) => { if ((l.folderId || null) === targetFolderId) lastIdx = i; });
+            newIdx = lastIdx + 1;
+          } else if (dropAfterLinkId === '__START__') {
+            // Insert before the first link of the target folder
+            const firstIdx = without.findIndex((l) => (l.folderId || null) === targetFolderId);
+            newIdx = firstIdx === -1 ? without.length : firstIdx;
+          } else {
+            const afterIdx = without.findIndex((l) => l.id === dropAfterLinkId);
+            newIdx = afterIdx === -1 ? without.length : afterIdx + 1;
+          }
+          without.splice(newIdx, 0, link);
+          proj.links = without;
+          commit('link-reorder');
+        };
+        const onSelectStart = (ev) => ev.preventDefault();
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        document.addEventListener('selectstart', onSelectStart);
+      });
+    }
+
+    // ----------- DRAG: folder reorder (folders only, not into other folders) -----------
+    function wireFolderDrag(grip, folderEl) {
+      grip.addEventListener('mousedown', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        folderEl.classList.add('dragging');
+        document.body.classList.add('is-folder-dragging');
+
+        const onMove = (em) => {
+          em.preventDefault();
+          // Reorder among siblings of the same parent
+          const sibs = [...tree.querySelectorAll('.link-folder:not(.loose):not(.dragging)')];
+          const after = sibs.find((sib) => {
+            const r = sib.getBoundingClientRect();
+            return em.clientY < r.top + r.height / 2;
+          });
+          if (after) tree.insertBefore(folderEl, after);
+          else tree.appendChild(folderEl);
+        };
+        const onUp = () => {
+          folderEl.classList.remove('dragging');
+          document.body.classList.remove('is-folder-dragging');
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          document.removeEventListener('selectstart', onSelectStart);
+          try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+          const newOrder = [...tree.querySelectorAll('.link-folder:not(.loose)')].map((el) => el.dataset.folderId);
+          const before = proj.linkFolders.map((f) => f.id).join(',');
+          proj.linkFolders = newOrder.map((fid) => proj.linkFolders.find((f) => f.id === fid)).filter(Boolean);
+          if (proj.linkFolders.map((f) => f.id).join(',') !== before) commit('folder-reorder');
+        };
+        const onSelectStart = (ev) => ev.preventDefault();
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+        document.addEventListener('selectstart', onSelectStart);
+      });
+    }
+
+    drawTree();
+
+    $('#btnNewLinkFolder').addEventListener('click', () => {
+      proj.linkFolders.push({ id: uid('lf'), name: 'New folder', collapsed: false });
+      commit('folder-create');
+      toast('Folder added');
+    });
     $('#btnAddLink').addEventListener('click', () => openQuickAdd('link'));
   }
 
@@ -5847,11 +6097,19 @@
           <div class="field"><label>Title</label><input id="lnTitle" value="${escapeHTML(l.title || '')}" /></div>
           <div class="field"><label>URL or path</label><input id="lnUrl" value="${escapeHTML(l.url || '')}" placeholder="https://… or file:///…" /></div>
           <div class="field"><label>Description</label><textarea id="lnDesc" style="min-height:80px;">${escapeHTML(l.description || '')}</textarea></div>
-          <div class="field"><label>Component (optional)</label>
-            <select id="lnComp">
-              <option value="">— none —</option>
-              ${(proj.components || []).map((c) => `<option value="${c.id}" ${c.id === l.component ? 'selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}
-            </select>
+          <div class="qa-row">
+            <div class="field"><label>Component (optional)</label>
+              <select id="lnComp">
+                <option value="">— none —</option>
+                ${(proj.components || []).map((c) => `<option value="${c.id}" ${c.id === l.component ? 'selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field"><label>Folder</label>
+              <select id="lnFolder">
+                <option value="">— Loose —</option>
+                ${(proj.linkFolders || []).map((f) => `<option value="${f.id}" ${f.id === l.folderId ? 'selected' : ''}>${escapeHTML(f.name)}</option>`).join('')}
+              </select>
+            </div>
           </div>
         </div>
         <div class="desc-foot">
@@ -5875,6 +6133,7 @@
       l.url = url;
       l.description = document.getElementById('lnDesc').value;
       l.component = document.getElementById('lnComp').value || null;
+      l.folderId = document.getElementById('lnFolder')?.value || null;
       commit('link-edit');
       close();
       toast('Saved');
@@ -7196,11 +7455,19 @@
         <div class="field"><label>Title</label><input id="qTitle" placeholder="Display name" /></div>
         <div class="field"><label>URL or path</label><input id="qUrl" placeholder="https://… or file:///…" /></div>
         <div class="field"><label>Description</label><textarea id="qDesc" placeholder="What this is and when to use it"></textarea></div>
-        <div class="field"><label>Component (optional)</label>
-          <select id="qComp">
-            <option value="">— none —</option>
-            ${(proj.components || []).map((c) => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join('')}
-          </select>
+        <div class="qa-row">
+          <div class="field"><label>Component (optional)</label>
+            <select id="qComp">
+              <option value="">— none —</option>
+              ${(proj.components || []).map((c) => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="field"><label>Folder</label>
+            <select id="qFolder">
+              <option value="">— Loose —</option>
+              ${(proj.linkFolders || []).map((f) => `<option value="${f.id}" ${f.id === qaInit.folderId ? 'selected' : ''}>${escapeHTML(f.name)}</option>`).join('')}
+            </select>
+          </div>
         </div>`;
     }
   }
@@ -7335,6 +7602,7 @@
         id: uid('lk'), title, url,
         description: $('#qDesc').value || '',
         component: $('#qComp').value || null,
+        folderId: $('#qFolder')?.value || qaInit.folderId || null,
       });
     }
     // Capture the just-pushed action for callback consumers (e.g. notes panel).
@@ -8147,7 +8415,20 @@
         l.url = l.url || '';
         l.description = l.description || '';
         l.component = l.component || null;
+        // folderId — added later for the folder-organized links view. Default
+        // to null (= "Loose links" / no folder) for retrocompat.
+        if (l.folderId === undefined) l.folderId = null;
       });
+      // Link folders — added later. Each: { id, name, collapsed }
+      p.linkFolders = Array.isArray(p.linkFolders) ? p.linkFolders : [];
+      p.linkFolders.forEach((f) => {
+        f.id = f.id || uid('lf');
+        f.name = f.name || 'Folder';
+        f.collapsed = !!f.collapsed;
+      });
+      // Drop any link.folderId that no longer points to an existing folder
+      const folderIds = new Set(p.linkFolders.map((f) => f.id));
+      p.links.forEach((l) => { if (l.folderId && !folderIds.has(l.folderId)) l.folderId = null; });
     });
     return s;
   }
