@@ -2979,7 +2979,8 @@ body.is-todo-dragging .todo-grip { cursor: grabbing !important; }
   box-shadow: 0 2px 0 0 var(--accent) inset;
   border-bottom: 2px solid var(--accent);
 }
-.link-card .link-title { padding-left: 14px; }
+/* Title leaves room for the grip when one is rendered */
+.link-card:has(.link-grip) .link-title { padding-left: 14px; }
 body.is-link-dragging,
 body.is-folder-dragging,
 body.is-link-dragging *,

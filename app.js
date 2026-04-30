@@ -582,6 +582,7 @@
       components: flat('components'),
       meetings: flat('meetings'),
       links: flat('links'),
+      linkFolders: flat('linkFolders'),
       openPoints: flat('openPoints'),
       changes: flat('changes'),
       costCenters: flat('costCenters'),
@@ -5768,19 +5769,23 @@
 
   function renderLinks(root) {
     const proj = curProject();
+    const isMerged = curProjectIsMerged();
     proj.links = proj.links || [];
     proj.linkFolders = proj.linkFolders || [];
     const view = document.createElement('div');
     view.className = 'view';
+    const sub = isMerged
+      ? 'All links across every project (read-only — switch to a single project to add or rearrange).'
+      : 'Important references — websites, drives, files. Group into folders by drag & drop; reorder anything by its grip.';
     view.innerHTML = `
       <div class="page-head">
-        <div><div class="page-title">Links</div><div class="page-sub">Important references — websites, drives, files. Group into folders by drag &amp; drop; reorder anything by its grip.</div></div>
+        <div><div class="page-title">Links</div><div class="page-sub">${escapeHTML(sub)}</div></div>
         <div class="page-actions">
-          <button class="ghost" id="btnNewLinkFolder">+ Folder</button>
-          <button class="ghost" id="btnAddLink">+ Link</button>
+          ${isMerged ? '' : '<button class="ghost" id="btnNewLinkFolder">+ Folder</button>'}
+          ${isMerged ? '' : '<button class="ghost" id="btnAddLink">+ Link</button>'}
         </div>
       </div>
-      <div class="link-tree" id="linkTree"></div>`;
+      <div class="link-tree ${isMerged ? 'read-only' : ''}" id="linkTree"></div>`;
     root.appendChild(view);
     const tree = $('#linkTree');
 
@@ -5794,7 +5799,7 @@
       const host = (() => { try { return new URL(l.url).hostname.replace(/^www\./, ''); } catch (e) { return l.url; } })();
       return `
         <div class="link-card" data-link-id="${l.id}">
-          <span class="row-grip link-grip" title="Drag to reorder or move into a folder" aria-hidden="true">⋮⋮</span>
+          ${isMerged ? '' : '<span class="row-grip link-grip" title="Drag to reorder or move into a folder" aria-hidden="true">⋮⋮</span>'}
           <a class="link-title" href="${escapeHTML(l.url)}" target="_blank" rel="noopener noreferrer">↗ ${escapeHTML(l.title || host || l.url)}</a>
           <div class="link-host">${escapeHTML(host)}</div>
           ${l.description ? `<div class="link-desc">${escapeHTML(l.description)}</div>` : ''}
@@ -5805,18 +5810,19 @@
     function folderHTML(folder) {
       const items = linksFor(folder.id);
       const collapsed = !!folder.collapsed;
+      const emptyMsg = isMerged ? 'No links in this folder.' : 'Empty — drag a link here.';
       return `
         <div class="link-folder ${collapsed ? 'collapsed' : ''}" data-folder-id="${folder.id}">
           <div class="folder-head">
-            <span class="row-grip folder-grip" title="Drag to reorder folders" aria-hidden="true">⋮⋮</span>
+            ${isMerged ? '<span class="folder-caret-spacer" aria-hidden="true"></span>' : '<span class="row-grip folder-grip" title="Drag to reorder folders" aria-hidden="true">⋮⋮</span>'}
             <button type="button" class="folder-caret" title="Toggle">${collapsed ? '▸' : '▾'}</button>
-            <span class="folder-name" contenteditable="true" data-placeholder="Folder name…">${escapeHTML(folder.name)}</span>
+            <span class="folder-name" ${isMerged ? '' : 'contenteditable="true"'} data-placeholder="Folder name…">${escapeHTML(folder.name)}</span>
             <span class="folder-count">${items.length}</span>
-            <button type="button" class="folder-add" title="Add link to this folder">+ Link</button>
-            <button type="button" class="folder-del" title="Delete folder">×</button>
+            ${isMerged ? '' : '<button type="button" class="folder-add" title="Add link to this folder">+ Link</button>'}
+            ${isMerged ? '' : '<button type="button" class="folder-del" title="Delete folder">×</button>'}
           </div>
           <div class="folder-body" data-folder-id="${folder.id}">
-            ${items.length ? items.map(linkCardHTML).join('') : '<div class="folder-empty">Empty — drag a link here.</div>'}
+            ${items.length ? items.map(linkCardHTML).join('') : `<div class="folder-empty">${emptyMsg}</div>`}
           </div>
         </div>`;
     }
@@ -5851,7 +5857,7 @@
       $$('.link-folder', tree).forEach((folderEl) => {
         const fid = folderEl.dataset.folderId;
         if (fid) {
-          // Caret toggle
+          // Caret toggle (works in merged mode too — local UI state)
           folderEl.querySelector('.folder-caret')?.addEventListener('click', () => {
             const f = proj.linkFolders.find((x) => x.id === fid);
             if (!f) return;
@@ -5859,6 +5865,7 @@
             saveState();
             drawTree();
           });
+          if (isMerged) return; // skip rename / delete / drag in merged mode
           // Edit name on blur
           const nameEl = folderEl.querySelector('.folder-name');
           if (nameEl) {
@@ -5900,8 +5907,16 @@
           e.preventDefault();
           const l = proj.links.find((x) => x.id === lid);
           if (!l) return;
+          if (isMerged) {
+            // In All Projects view, only allow read-only actions
+            showContextMenu(e.clientX, e.clientY, [
+              { icon: '⧉', label: 'Copy URL', onClick: () => {
+                navigator.clipboard?.writeText(l.url).then(() => toast('Copied')).catch(() => toast('Copy failed'));
+              }},
+            ]);
+            return;
+          }
           const moveItems = [];
-          // Build move-to-folder submenu items
           if (l.folderId) moveItems.push({ icon: '↩', label: 'Move out (loose)', onClick: () => {
             l.folderId = null; commit('link-move'); toast('Moved out');
           }});
@@ -5926,13 +5941,15 @@
             }},
           ]);
         });
-        card.addEventListener('dblclick', (e) => {
-          if (e.target.closest('a')) return;
-          openLinkEditor(lid);
-        });
-        // Drag to reorder / move between folders
-        const grip = card.querySelector('.link-grip');
-        if (grip) wireLinkDrag(grip, card);
+        if (!isMerged) {
+          card.addEventListener('dblclick', (e) => {
+            if (e.target.closest('a')) return;
+            openLinkEditor(lid);
+          });
+          // Drag to reorder / move between folders
+          const grip = card.querySelector('.link-grip');
+          if (grip) wireLinkDrag(grip, card);
+        }
       });
     }
 
@@ -6073,12 +6090,12 @@
 
     drawTree();
 
-    $('#btnNewLinkFolder').addEventListener('click', () => {
+    $('#btnNewLinkFolder')?.addEventListener('click', () => {
       proj.linkFolders.push({ id: uid('lf'), name: 'New folder', collapsed: false });
       commit('folder-create');
       toast('Folder added');
     });
-    $('#btnAddLink').addEventListener('click', () => openQuickAdd('link'));
+    $('#btnAddLink')?.addEventListener('click', () => openQuickAdd('link'));
   }
 
   function openLinkEditor(linkId) {
