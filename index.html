@@ -208,6 +208,24 @@
     </div>
   </div>
 
+  <!-- Floating personal to-do — project-independent quick list -->
+  <button id="todoFab" class="todo-fab" type="button" title="My to-do list" aria-label="Open to-do list">
+    <span class="todo-fab-icon" aria-hidden="true">✓</span>
+    <span class="todo-fab-badge" id="todoFabBadge" hidden></span>
+  </button>
+  <div id="todoPanel" class="todo-panel" hidden>
+    <div class="todo-head">
+      <span class="todo-title">My to-do</span>
+      <span class="todo-meta" id="todoMeta"></span>
+      <button class="icon-btn" id="todoClose" title="Close" aria-label="Close">×</button>
+    </div>
+    <div class="todo-add">
+      <input id="todoInput" type="text" placeholder="Add a personal to-do…" />
+      <button class="ghost" id="todoAdd" type="button" title="Add">+</button>
+    </div>
+    <div class="todo-list" id="todoList"></div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>

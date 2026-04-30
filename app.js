@@ -687,6 +687,7 @@
     renderSidebar();
     renderView();
     refreshNoteChips();
+    refreshTodoFab();
   }
 
   function renderTopbar() {
@@ -7783,6 +7784,14 @@
     s.budgets = s.budgets || {};
     s.notes = s.notes || {};
     s.notesOpen = !!s.notesOpen;
+    // Personal to-do list — project-independent, lives at the state level.
+    // Each item: { id, text, done }. Defaulted to [] for retrocompat.
+    s.todos = Array.isArray(s.todos) ? s.todos : [];
+    s.todos.forEach((t) => {
+      t.id = t.id || uid('td');
+      t.text = t.text || '';
+      t.done = !!t.done;
+    });
     s.currentView = s.currentView || 'board';
     if (s.currentView === 'teams') s.currentView = 'people';
     if (!s.currentProjectId || (s.currentProjectId !== '__all__' && !s.projects.some((p) => p.id === s.currentProjectId))) {
@@ -8005,6 +8014,149 @@
     input.click();
   }
 
+  /* ------------------- Personal to-do (floating widget) ------------------ */
+
+  // The widget lives at the state level (project-independent), so changes only
+  // need a saveState() — no commit() (we don't want personal todos showing up
+  // in the global undo stack, and we want quick local-only redraws).
+  function refreshTodoFab() {
+    const fab = $('#todoFab');
+    const badge = $('#todoFabBadge');
+    if (!fab) return;
+    const todos = state.todos || [];
+    const open = todos.filter((t) => !t.done).length;
+    const total = todos.length;
+    fab.classList.toggle('empty',  total === 0);
+    fab.classList.toggle('all-done', total > 0 && open === 0);
+    fab.classList.toggle('has-open', open > 0);
+    if (badge) {
+      if (open > 0) { badge.textContent = String(open); badge.hidden = false; }
+      else { badge.hidden = true; }
+    }
+    fab.title = total === 0
+      ? 'My to-do — empty'
+      : (open === 0 ? `My to-do — ${total} done` : `My to-do — ${open} open of ${total}`);
+  }
+
+  function renderTodoList() {
+    const list = $('#todoList');
+    const meta = $('#todoMeta');
+    if (!list) return;
+    const todos = state.todos || [];
+    const open = todos.filter((t) => !t.done).length;
+    if (meta) meta.textContent = todos.length ? `${open}/${todos.length}` : '';
+    if (!todos.length) {
+      list.innerHTML = '<div class="todo-empty">No personal to-dos yet — add one above.</div>';
+      return;
+    }
+    list.innerHTML = todos.map((t) => `
+      <div class="todo-item ${t.done ? 'done' : ''}" data-todo-id="${t.id}">
+        <span class="todo-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+        <button type="button" class="todo-check ${t.done ? 'on' : ''}" aria-label="${t.done ? 'Mark not done' : 'Mark done'}"></button>
+        <span class="todo-text" contenteditable="true" data-placeholder="To-do…">${escapeHTML(t.text)}</span>
+        <button type="button" class="todo-del" aria-label="Delete" title="Delete">×</button>
+      </div>`).join('');
+
+    // Wire each row
+    list.querySelectorAll('.todo-item').forEach((row) => {
+      const id = row.dataset.todoId;
+      row.querySelector('.todo-check').addEventListener('click', () => {
+        const t = (state.todos || []).find((x) => x.id === id);
+        if (!t) return;
+        t.done = !t.done;
+        saveState();
+        renderTodoList(); refreshTodoFab();
+      });
+      const text = row.querySelector('.todo-text');
+      text.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); text.blur(); }
+        else if (e.key === 'Escape') { e.preventDefault(); text.blur(); }
+        else if (e.key === 'Backspace' && text.textContent === '') {
+          e.preventDefault();
+          state.todos = (state.todos || []).filter((x) => x.id !== id);
+          saveState(); renderTodoList(); refreshTodoFab();
+        }
+      });
+      text.addEventListener('blur', () => {
+        const t = (state.todos || []).find((x) => x.id === id);
+        if (!t) return;
+        const v = text.textContent.trim();
+        if (t.text !== v) { t.text = v; saveState(); refreshTodoFab(); }
+      });
+      row.querySelector('.todo-del').addEventListener('click', (e) => {
+        e.stopPropagation();
+        state.todos = (state.todos || []).filter((x) => x.id !== id);
+        saveState(); renderTodoList(); refreshTodoFab();
+      });
+      // Drag-to-reorder via the grip — same custom-mouse pattern as op-steps
+      row.querySelector('.todo-grip').addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const listEl = $('#todoList');
+        row.classList.add('dragging');
+        document.body.classList.add('is-todo-dragging');
+        const onMove = (em) => {
+          const sibs = [...listEl.querySelectorAll('.todo-item:not(.dragging)')];
+          const after = sibs.find((sib) => {
+            const r = sib.getBoundingClientRect();
+            return em.clientY < r.top + r.height / 2;
+          });
+          if (after) listEl.insertBefore(row, after);
+          else listEl.appendChild(row);
+        };
+        const onUp = () => {
+          row.classList.remove('dragging');
+          document.body.classList.remove('is-todo-dragging');
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          const newOrder = [...listEl.querySelectorAll('.todo-item')].map((r) => r.dataset.todoId);
+          const before = (state.todos || []).map((t) => t.id).join(',');
+          state.todos = newOrder.map((tid) => (state.todos || []).find((x) => x.id === tid)).filter(Boolean);
+          if (state.todos.map((t) => t.id).join(',') !== before) { saveState(); }
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+    });
+  }
+
+  function wireTodoWidget() {
+    const fab = $('#todoFab');
+    const panel = $('#todoPanel');
+    const input = $('#todoInput');
+    if (!fab || !panel) return;
+    const open = () => {
+      panel.hidden = false;
+      renderTodoList();
+      setTimeout(() => input?.focus(), 30);
+    };
+    const close = () => { panel.hidden = true; };
+    const toggle = () => panel.hidden ? open() : close();
+    fab.addEventListener('click', toggle);
+    $('#todoClose').addEventListener('click', close);
+    // Add via Enter in the input or click of +
+    const addItem = () => {
+      const v = (input.value || '').trim();
+      if (!v) return;
+      state.todos = state.todos || [];
+      state.todos.push({ id: uid('td'), text: v, done: false });
+      input.value = '';
+      saveState();
+      renderTodoList(); refreshTodoFab();
+    };
+    $('#todoAdd').addEventListener('click', addItem);
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addItem(); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(); }
+    });
+    // Click outside to close — but ignore clicks inside the panel or the FAB
+    document.addEventListener('mousedown', (e) => {
+      if (panel.hidden) return;
+      if (e.target.closest('#todoPanel') || e.target.closest('#todoFab')) return;
+      close();
+    });
+    refreshTodoFab();
+  }
+
   /* ----------------------------- wire-up ----------------------------- */
 
   function init() {
@@ -8050,6 +8202,7 @@
     applyNotesPanel();
     wireHoverDescOnce();
     wireEvmTooltipsOnce();
+    wireTodoWidget();
 
     $('#btnExport').addEventListener('click', exportJSON);
     $('#btnImport').addEventListener('click', importJSON);
