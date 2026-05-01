@@ -1960,14 +1960,26 @@
         const stepTotal = op.steps.length;
         const stepsAllDone = stepTotal > 0 && stepDone === stepTotal;
         const prio = priorityLevel(op.priorityLevel);
-        const showOpPrioChip = op.priorityLevel && op.priorityLevel !== 'med';
+        // Both chips ALWAYS render so the user can click them to change
+        // values. The "med" (default) state uses a quieter visual treatment
+        // so the title row stays calm at rest and chips only "light up"
+        // when they carry a non-default signal.
+        const prioId = op.priorityLevel || 'med';
+        const prioQuiet = prioId === 'med';
+        const critQuiet = (op.criticality || 'med') === 'med';
+        const critChipStyle = critQuiet
+          ? `background:transparent;color:rgb(${critRgb});border:1px dashed rgba(${critRgb},.55)`
+          : `background:rgba(${critRgb},.18);color:rgb(${critRgb});border:1px solid rgb(${critRgb})`;
+        const prioChipStyle = prioQuiet
+          ? `background:transparent;color:rgba(${prio.rgb},.85);border:1px dashed rgba(${prio.rgb},.55)`
+          : `background:rgba(${prio.rgb},.18);color:rgb(${prio.rgb});border:1px solid rgb(${prio.rgb})`;
         return `
         <div class="op-item crit-${op.criticality}" data-id="${op.id}" ${tint}>
           <span class="op-row-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
           <div class="op-content">
             <div class="op-title-row">
-              <span class="op-crit-chip" title="Criticality" style="background:rgba(${critRgb},.18);color:rgb(${critRgb});border:1px solid rgb(${critRgb})">${critLabel}</span>
-              ${showOpPrioChip ? `<span class="prio-chip prio-${prio.id}" title="Priority: ${prio.label}" style="background:rgba(${prio.rgb},.18);color:rgb(${prio.rgb});border:1px solid rgb(${prio.rgb})">${prio.label}</span>` : ''}
+              <button type="button" class="op-level-chip op-crit-chip ${critQuiet ? 'is-default' : ''}" data-kind="criticality" title="Click to set criticality (severity if not addressed)" style="${critChipStyle}">${critLabel}</button>
+              <button type="button" class="op-level-chip prio-chip prio-${prio.id} ${prioQuiet ? 'is-default' : ''}" data-kind="priority" title="Click to set priority (urgency to act)" style="${prioChipStyle}">${prio.label}</button>
               <div class="op-title" contenteditable="true" data-field="title">${escapeHTML(op.title)}</div>
             </div>
             <div class="op-context-wrap">
@@ -2014,15 +2026,6 @@
             </div>
           </div>
           <div class="op-actions">
-            <select class="op-criticality" title="Criticality (severity if not addressed)">
-              <option value="low" ${op.criticality === 'low' ? 'selected' : ''}>Crit · Low</option>
-              <option value="med" ${op.criticality === 'med' ? 'selected' : ''}>Crit · Medium</option>
-              <option value="high" ${op.criticality === 'high' ? 'selected' : ''}>Crit · High</option>
-              <option value="critical" ${op.criticality === 'critical' ? 'selected' : ''}>Crit · Critical</option>
-            </select>
-            <select class="op-priority" title="Priority (urgency to address)">
-              ${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (op.priorityLevel || 'med') ? 'selected' : ''}>Prio · ${p.label}</option>`).join('')}
-            </select>
             <select class="op-component" title="Link to a component">
               <option value="">— component</option>
               ${(proj.components || []).map((pt) => `<option value="${pt.id}" ${pt.id === op.component ? 'selected' : ''}>${escapeHTML(pt.name)}</option>`).join('')}
@@ -2090,24 +2093,23 @@
             commit('op-component');
           });
         }
-        const critSel = el.querySelector('.op-criticality');
-        if (critSel) {
-          critSel.addEventListener('change', () => {
+        // Chip-driven criticality + priority — click the chip on the title
+        // row to open a colour-swatch popover, pick a level, commit. The
+        // <select> dropdowns these used to live in were removed: the chips
+        // now own the mutation, declutters the right-side actions row.
+        el.querySelectorAll('.op-level-chip').forEach((chip) => {
+          chip.addEventListener('click', (e) => {
+            e.stopPropagation();
             const op = proj.openPoints.find((x) => x.id === id);
             if (!op) return;
-            op.criticality = critSel.value;
-            commit('op-criticality');
+            const kind = chip.dataset.kind; // 'criticality' | 'priority'
+            const current = (kind === 'criticality') ? (op.criticality || 'med') : (op.priorityLevel || 'med');
+            showLevelPopover(chip, kind, current, (val) => {
+              if (kind === 'criticality') { op.criticality = val; commit('op-criticality'); }
+              else                        { op.priorityLevel = val; commit('op-priority'); }
+            });
           });
-        }
-        const prioSel = el.querySelector('.op-priority');
-        if (prioSel) {
-          prioSel.addEventListener('change', () => {
-            const op = proj.openPoints.find((x) => x.id === id);
-            if (!op) return;
-            op.priorityLevel = prioSel.value;
-            commit('op-priority');
-          });
-        }
+        });
         // Resolution steps — checkbox / edit / delete / add / drag-to-reorder
         wireOpStepHandlers(el, () => proj.openPoints.find((x) => x.id === id));
 
@@ -8308,6 +8310,83 @@
   /* -------------------------- Context menu --------------------------- */
 
   let _ctxOutsideHandler = null;
+  // Small floating picker anchored under a chip. Used by open-point
+  // criticality + priority chips so they replace the old <select>s
+  // without losing the all-options-visible affordance.
+  let _levelPopOutsideHandler = null;
+  function closeLevelPopover() {
+    document.querySelectorAll('.level-pop').forEach((m) => m.remove());
+    if (_levelPopOutsideHandler) {
+      document.removeEventListener('mousedown', _levelPopOutsideHandler);
+      document.removeEventListener('keydown', _levelPopOutsideHandler);
+      _levelPopOutsideHandler = null;
+    }
+  }
+  function showLevelPopover(anchorEl, kind, currentValue, onPick) {
+    closeLevelPopover();
+    closeContextMenu();
+    const opts = (kind === 'criticality')
+      ? ['low', 'med', 'high', 'critical'].map((id) => ({ id, label: CRITICALITY_LABEL[id], rgb: CRITICALITY_RGB[id] }))
+      : PRIORITY_LEVELS.map((p) => ({ id: p.id, label: p.label, rgb: p.rgb }));
+    const subtitle = kind === 'criticality'
+      ? 'Severity if not addressed'
+      : 'Urgency to act';
+    const heading = kind === 'criticality' ? 'Criticality' : 'Priority';
+
+    const pop = document.createElement('div');
+    pop.className = 'level-pop';
+    pop.innerHTML = `
+      <div class="level-pop-head">
+        <div class="level-pop-title">${escapeHTML(heading)}</div>
+        <div class="level-pop-sub">${escapeHTML(subtitle)}</div>
+      </div>
+      <div class="level-pop-list">
+        ${opts.map((o) => `
+          <button type="button" class="level-pop-item ${o.id === currentValue ? 'sel' : ''}" data-val="${escapeHTML(o.id)}">
+            <span class="level-pop-dot" style="background:rgb(${o.rgb})"></span>
+            <span class="level-pop-label">${escapeHTML(o.label)}</span>
+            ${o.id === currentValue ? '<span class="level-pop-check">✓</span>' : ''}
+          </button>`).join('')}
+      </div>`;
+    document.body.appendChild(pop);
+
+    // Anchor below the chip; clamp to viewport so right-edge chips don't
+    // push the popover off-screen
+    const r = anchorEl.getBoundingClientRect();
+    const w = pop.getBoundingClientRect().width;
+    const h = pop.getBoundingClientRect().height;
+    let x = r.left;
+    let y = r.bottom + 6;
+    if (x + w > innerWidth - 8)  x = innerWidth - w - 8;
+    if (y + h > innerHeight - 8) y = r.top - h - 6; // flip above
+    pop.style.left = Math.max(8, x) + 'px';
+    pop.style.top  = Math.max(8, y) + 'px';
+
+    pop.querySelectorAll('.level-pop-item').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const val = btn.dataset.val;
+        closeLevelPopover();
+        try { onPick(val); } catch (err) { console.error(err); }
+      });
+    });
+
+    // Outside-click + Escape close (popover is transient — same rule as
+    // the existing ctx-menu / palette).
+    _levelPopOutsideHandler = (e) => {
+      if (e.type === 'keydown') {
+        if (e.key === 'Escape') closeLevelPopover();
+        return;
+      }
+      if (pop.contains(e.target)) return;
+      closeLevelPopover();
+    };
+    setTimeout(() => {
+      document.addEventListener('mousedown', _levelPopOutsideHandler);
+      document.addEventListener('keydown', _levelPopOutsideHandler);
+    }, 0);
+  }
+
   function showContextMenu(x, y, items) {
     closeContextMenu();
     const menu = document.createElement('div');
