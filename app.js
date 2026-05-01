@@ -7157,6 +7157,7 @@
             state.currentView = 'board';
             saveState(); render();
           }},
+          { icon: '⊕', label: 'Save as template…', onClick: () => saveProjectAsTemplate(pid) },
           { divider: true },
           { icon: '×', label: 'Delete project', danger: true, onClick: () => {
             if (state.projects.length <= 1) { toast('Cannot delete the only project'); return; }
@@ -7180,6 +7181,69 @@
       });
     });
     $('#btnNewProj2').addEventListener('click', () => openQuickAdd('project'));
+  }
+
+  /* --------------------- Phase J: project templates -------------------- */
+  // Build a structural skeleton from a project — strip ids, action data,
+  // decisions, notes, history, comments. Keep components, deliverable
+  // stubs, milestone stubs, risk skeletons (title + inherent matrix).
+  function projectToTemplate(p, name) {
+    const t = {
+      id: uid('tpl'),
+      name: (name || p.name + ' (template)'),
+      createdAt: todayISO(),
+      sourceProjectId: p.id,
+      shape: {
+        description: p.description || '',
+        components: (p.components || []).map((c) => ({
+          name: c.name, color: c.color, costCenter: c.costCenter || null,
+        })),
+        deliverables: (p.deliverables || []).map((d) => ({
+          name: d.name, status: 'todo',
+          // intentionally drop dates — instantiation should re-plan
+        })),
+        milestones: (p.milestones || []).map((m) => ({
+          name: m.name, status: 'planned',
+        })),
+        risks: (p.risks || []).map((r) => ({
+          title: r.title,
+          kind: r.kind || 'risk',
+          inherent: r.inherent ? { ...r.inherent } : { probability: 0, impact: 0 },
+          mitigation: r.mitigation || '',
+        })),
+        tags: (p.tags || []).map((tg) => ({ name: tg.name, rgb: tg.rgb })),
+        // Intentionally NOT cloned: actions, decisions, change requests,
+        // notes, links, meetings, history. The shape is the skeleton, not
+        // the in-flight work.
+      },
+    };
+    return t;
+  }
+  function applyTemplateToProject(np, tpl) {
+    const shape = tpl.shape || {};
+    if (shape.description && !np.description) np.description = shape.description;
+    np.components   = (shape.components   || []).map((c) => ({ id: uid('cm'), ...c }));
+    np.deliverables = (shape.deliverables || []).map((d) => ({ id: uid('d'), ...d }));
+    np.milestones   = (shape.milestones   || []).map((m) => ({ id: uid('m'), ...m }));
+    np.risks        = (shape.risks        || []).map((r) => ({
+      id: uid('rk'), ...r,
+      residual: r.inherent ? { ...r.inherent } : { probability: 0, impact: 0 },
+      owner: null,
+      actionId: null,
+    }));
+    np.tags         = (shape.tags         || []).map((t) => ({ id: uid('tg'), ...t }));
+  }
+  function saveProjectAsTemplate(projectId) {
+    const p = state.projects.find((x) => x.id === projectId);
+    if (!p) return;
+    const suggested = p.name + ' template';
+    const name = prompt('Template name:', suggested);
+    if (!name) return;
+    const tpl = projectToTemplate(p, name.trim());
+    state.templates = state.templates || [];
+    state.templates.push(tpl);
+    commit('template-create');
+    toast(`Saved as template: ${tpl.name}`);
   }
 
   function openProjectEditor(projectId) {
@@ -8053,9 +8117,17 @@
           <div class="field"><label>Capacity</label><input id="qCap" type="number" min="1" max="20" value="5" /></div>
         </div>`;
     } else if (qaType === 'project') {
+      const tpls = state.templates || [];
       body.innerHTML = `
         <div class="field"><label>Name</label><input id="qName" /></div>
-        <div class="field"><label>Description</label><textarea id="qDesc"></textarea></div>`;
+        <div class="field"><label>Description</label><textarea id="qDesc"></textarea></div>
+        ${tpls.length ? `
+        <div class="field"><label>Start from <span class="muted">— template, or empty</span></label>
+          <select id="qFrom">
+            <option value="">Empty project</option>
+            ${tpls.map((t) => `<option value="${escapeHTML(t.id)}">From template — ${escapeHTML(t.name)}</option>`).join('')}
+          </select>
+        </div>` : ''}`;
     } else if (qaType === 'link') {
       body.innerHTML = `
         <div class="field"><label>Title</label><input id="qTitle" placeholder="Display name" /></div>
@@ -8197,6 +8269,14 @@
         description: $('#qDesc').value || '',
         actions: [], deliverables: [], milestones: [], risks: [], decisions: [], changes: [], components: [], links: [],
       };
+      const fromId = $('#qFrom')?.value;
+      if (fromId) {
+        const tpl = (state.templates || []).find((t) => t.id === fromId);
+        if (tpl) {
+          applyTemplateToProject(np, tpl);
+          np.templateOf = tpl.id;
+        }
+      }
       state.projects.push(np);
       state.currentProjectId = np.id;
     } else if (qaType === 'link') {
@@ -10309,6 +10389,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     sc('+ New meeting',         'Open Quick Add',    () => openQuickAdd('meeting'));
     sc('+ New person',          'Open Quick Add',    () => openQuickAdd('person'));
     sc('+ New project',         'Open Quick Add',    () => openQuickAdd('project'));
+    sc('Save current project as template', 'Project skeleton',
+      () => { const p = curProject(); if (!p || curProjectIsMerged()) { toast('Pick a single project'); return; } saveProjectAsTemplate(p.id); });
     sc('Open Inbox',            'Reminders + alerts',() => { state.currentView = 'inbox'; render(); });
     sc('Open Calendar',         'Month view',        () => { state.currentView = 'calendar'; render(); });
     sc('Open Reports',          'Status report',     () => { state.currentView = 'reports'; render(); });
