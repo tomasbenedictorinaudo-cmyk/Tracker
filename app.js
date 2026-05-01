@@ -2546,19 +2546,30 @@
       const cmp = findComponent(proj, a.component);
       const c = cmp ? componentColor(cmp.color) : null;
       const dueCls = statusOfDue(a.due, a.status);
-      const tint = c ? `style="--row-tint: rgba(${c.rgb},.10);"` : '';
       const stat = STATUSES.find((s) => s.id === a.status);
-      const isOverdue = a.status !== 'done' && a.due && dayDiff(a.due, todayISO()) < 0;
-      const overdueBadge = isOverdue
-        ? `<span class="overdue-badge" title="Overdue by ${Math.abs(dayDiff(a.due, todayISO()))} day(s)">⏰</span>`
-        : '';
       const lvl = priorityLevel(a.priorityLevel);
+      // Left edge of the row now reflects priority (not the binary
+      // overdue state). The dedicated priority pip column is dropped —
+      // the left edge encodes the same signal more scannably.
+      const tintProps = [
+        c ? `--row-tint: rgba(${c.rgb},.10);` : '',
+        `--prio-rgb: ${lvl.rgb};`,
+      ].filter(Boolean).join(' ');
+      const tint = ` style="${tintProps}"`;
+      // Lateness as a 'drag tail' — a thin red trail whose width grows
+      // with days late, capped at 30 days so a 90-d-late item doesn't
+      // bully the title cell. Replaces the old ⏰ emoji.
+      const isOverdue = a.status !== 'done' && a.due && dayDiff(a.due, todayISO()) < 0;
+      const lateDays = isOverdue ? Math.abs(dayDiff(a.due, todayISO())) : 0;
+      const dragTail = isOverdue
+        ? `<span class="reg-late-tail" style="--days:${Math.min(lateDays, 30)};" title="Late by ${lateDays} day${lateDays === 1 ? '' : 's'} · was due ${escapeHTML(fmtDate(a.due))}">+${lateDays}d</span>`
+        : '';
       return `
-        <div class="reg-row ${isOverdue ? 'is-overdue' : ''}" data-id="${a.id}" ${tint}>
+        <div class="reg-row prio-${lvl.id} ${isOverdue ? 'is-overdue' : ''}" data-id="${a.id}"${tint}>
           <div class="reg-cell title-cell">
             ${ROW_GRIP_HTML}
-            ${overdueBadge}
             <input type="text" class="reg-inp title-inp" data-field="title" value="${escapeHTML(a.title)}" />
+            ${dragTail}
             ${a.notes ? '<span class="tag" title="Has notes">note</span>' : ''}
           </div>
           <div class="reg-cell">
@@ -2579,7 +2590,6 @@
             </select>
           </div>
           <div class="reg-cell priority-cell">
-            <span class="reg-prio-pip" style="background:rgb(${lvl.rgb})" title="${lvl.label}"></span>
             <select class="reg-inp" data-field="priorityLevel" style="color:rgb(${lvl.rgb});">
               ${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (a.priorityLevel || 'med') ? 'selected' : ''}>${p.label}</option>`).join('')}
             </select>
