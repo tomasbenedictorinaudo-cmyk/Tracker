@@ -9197,20 +9197,325 @@
     } catch (e) { /* ignore */ }
   }
 
-  /* --- Phase E / H stubs (filled in later phases) --- */
+  /* ----------------------- Phase E: Status Report ---------------------- */
+  // Compose a period-bounded status report from existing data, render as
+  // a live HTML preview, then export as Markdown / Markdown file / Print.
+  // Period state lives outside the rendered view so re-renders preserve it.
+  const reportState = {
+    period: '7d',          // '7d' | '30d' | '90d' | 'custom'
+    customSince: '',
+    customUntil: '',
+  };
+  function reportPeriodRange() {
+    const today = todayISO();
+    if (reportState.period === 'custom' && reportState.customSince && reportState.customUntil) {
+      return { since: reportState.customSince, until: reportState.customUntil };
+    }
+    const days = reportState.period === '30d' ? 30 : reportState.period === '90d' ? 90 : 7;
+    const since = fmtISO(new Date(Date.now() - days * dayMs));
+    return { since, until: today };
+  }
+  function buildReportData(proj, since, until) {
+    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    const today = todayISO();
+    const horizon = fmtISO(new Date(parseDate(today).getTime() + 14 * dayMs));
+    const inRange = (d) => d && d >= since && d <= until;
+
+    const changed = acts.filter((a) => a.updatedAt && inRange(a.updatedAt))
+      .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    const lateOrBlocked = acts.filter((a) =>
+      !isClosedStatus(a.status) && ((a.due && dayDiff(a.due, today) < 0) || a.status === 'blocked'));
+    const doneInPeriod = acts.filter((a) => a.status === 'done' && inRange(a.updatedAt));
+    const decisions = (proj.decisions || []).filter((d) => inRange(d.date))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const crsDecided = (proj.changes || []).filter((c) =>
+      ['approved', 'rejected', 'implemented', 'cancelled'].includes(c.status) && inRange(c.decisionDate))
+      .sort((a, b) => (b.decisionDate || '').localeCompare(a.decisionDate || ''));
+    const topRisks = (proj.risks || [])
+      .filter((r) => (r.kind || 'risk') === 'risk')
+      .map((r) => {
+        const res = r.residual || r.inherent || { probability: 0, impact: 0 };
+        return { ...r, _score: (res.probability || 0) * (res.impact || 0) };
+      })
+      .filter((r) => r._score > 0)
+      .sort((a, b) => b._score - a._score)
+      .slice(0, 5);
+    const upcomingMilestones = (proj.milestones || []).filter((m) =>
+      !m.done && m.date && m.date >= today && m.date <= horizon)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const upcomingDeliverables = (proj.deliverables || []).filter((d) =>
+      !d.done && d.date && d.date >= today && d.date <= horizon)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const upcomingDue = acts.filter((a) =>
+      !isClosedStatus(a.status) && a.due && a.due >= today && a.due <= horizon)
+      .sort((a, b) => (a.due || '').localeCompare(b.due || ''));
+
+    const k = {
+      done: doneInPeriod.length,
+      changed: changed.length,
+      late: lateOrBlocked.filter((a) => a.due && dayDiff(a.due, today) < 0).length,
+      blocked: lateOrBlocked.filter((a) => a.status === 'blocked').length,
+      decisions: decisions.length,
+      crs: crsDecided.length,
+    };
+    return {
+      proj, since, until, today,
+      kpis: k, changed, lateOrBlocked, doneInPeriod,
+      decisions, crsDecided, topRisks,
+      next: { milestones: upcomingMilestones, deliverables: upcomingDeliverables, actions: upcomingDue },
+    };
+  }
+  function reportPeriodLabel() {
+    const r = reportPeriodRange();
+    return `${fmtFull(r.since)} – ${fmtFull(r.until)}`;
+  }
+  function reportToMarkdown(data) {
+    const lines = [];
+    const proj = data.proj;
+    lines.push(`# ${proj.name} — Status report`);
+    lines.push('');
+    lines.push(`_${fmtFull(data.since)} – ${fmtFull(data.until)}_`);
+    lines.push('');
+    lines.push('## KPIs');
+    lines.push('');
+    lines.push(`| Done | Changed | Late | Blocked | Decisions | CRs decided |`);
+    lines.push(`|---:|---:|---:|---:|---:|---:|`);
+    lines.push(`| ${data.kpis.done} | ${data.kpis.changed} | ${data.kpis.late} | ${data.kpis.blocked} | ${data.kpis.decisions} | ${data.kpis.crs} |`);
+    lines.push('');
+    const section = (title, items, fmt) => {
+      lines.push(`## ${title}`);
+      lines.push('');
+      if (!items.length) { lines.push('_None._'); lines.push(''); return; }
+      items.forEach((it) => lines.push('- ' + fmt(it)));
+      lines.push('');
+    };
+    section('What changed', data.changed.slice(0, 30), (a) =>
+      `**${mdEscape(a.title)}** — ${mdEscape(personName(a.owner))} · ${a.status}${a.updatedAt ? ' · ' + a.updatedAt : ''}`);
+    section('Late & blocked', data.lateOrBlocked, (a) => {
+      const reason = a.status === 'blocked'
+        ? 'blocked'
+        : `${Math.abs(dayDiff(a.due, data.today))}d late`;
+      return `**${mdEscape(a.title)}** — ${mdEscape(personName(a.owner))} · ${reason}`;
+    });
+    section('Decisions made', data.decisions, (d) =>
+      `**${mdEscape(d.title)}** — ${mdEscape(personName(d.owner))} · ${d.date || '—'}${d.rationale ? '\n  > ' + mdEscape(d.rationale) : ''}`);
+    section('Change requests decided', data.crsDecided, (c) =>
+      `**${mdEscape(c.title)}** — ${c.status}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + mdEscape(personName(c.decisionBy)) : ''}`);
+    section('Top risks (by residual)', data.topRisks, (r) =>
+      `**${mdEscape(r.title)}** — residual ${r._score}${r.mitigation ? ' · ' + mdEscape(r.mitigation) : ''}`);
+    lines.push(`## What's next (next 14 days)`);
+    lines.push('');
+    if (!data.next.milestones.length && !data.next.deliverables.length && !data.next.actions.length) {
+      lines.push('_Nothing scheduled in the next 14 days._');
+    } else {
+      if (data.next.milestones.length) {
+        lines.push('**Milestones**');
+        data.next.milestones.forEach((m) => lines.push(`- ${mdEscape(m.name || m.title || '')} · ${m.date}`));
+        lines.push('');
+      }
+      if (data.next.deliverables.length) {
+        lines.push('**Deliverables**');
+        data.next.deliverables.forEach((d) => lines.push(`- ${mdEscape(d.name || d.title || '')} · ${d.date}`));
+        lines.push('');
+      }
+      if (data.next.actions.length) {
+        lines.push('**Due actions**');
+        data.next.actions.slice(0, 30).forEach((a) =>
+          lines.push(`- ${mdEscape(a.title)} — ${mdEscape(personName(a.owner))} · ${a.due}`));
+      }
+    }
+    return lines.join('\n');
+  }
+  function reportToPrintHTML(data) {
+    const k = data.kpis;
+    const proj = data.proj;
+    const list = (arr, fmt, empty) => arr.length
+      ? '<ul>' + arr.map(fmt).join('') + '</ul>'
+      : `<p class="empty">${empty}</p>`;
+    const li = (a) => `<li><b>${escapeHTML(a.title)}</b> — ${escapeHTML(personName(a.owner))} · ${escapeHTML(a.status)}${a.updatedAt ? ' · ' + a.updatedAt : ''}</li>`;
+    const liDue = (a) => {
+      const reason = a.status === 'blocked' ? 'blocked' : `${Math.abs(dayDiff(a.due, data.today))}d late`;
+      return `<li><b>${escapeHTML(a.title)}</b> — ${escapeHTML(personName(a.owner))} · ${reason}</li>`;
+    };
+    const liDec = (d) => `<li><b>${escapeHTML(d.title)}</b> — ${escapeHTML(personName(d.owner))} · ${d.date || '—'}${d.rationale ? '<br/><i>' + escapeHTML(d.rationale) + '</i>' : ''}</li>`;
+    const liCR = (c) => `<li><b>${escapeHTML(c.title)}</b> — ${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + escapeHTML(personName(c.decisionBy)) : ''}</li>`;
+    const liRisk = (r) => `<li><b>${escapeHTML(r.title)}</b> — residual ${r._score}${r.mitigation ? '<br/><i>' + escapeHTML(r.mitigation) + '</i>' : ''}</li>`;
+    const liNext = (it, dateField) => `<li><b>${escapeHTML(it.name || it.title || '')}</b> · ${escapeHTML(it[dateField] || '—')}</li>`;
+    const liActDue = (a) => `<li><b>${escapeHTML(a.title)}</b> — ${escapeHTML(personName(a.owner))} · due ${a.due}</li>`;
+
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHTML(proj.name)} — Status report</title>
+<style>
+  body{font:14px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1c24;max-width:820px;margin:30px auto;padding:0 20px;}
+  h1{font-size:22px;margin:0 0 4px;} h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #ddd;padding-bottom:4px;letter-spacing:.04em;text-transform:uppercase;color:#444;}
+  .meta{color:#666;font-size:12px;margin-bottom:18px;}
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:14px 0;}
+  .kpi{background:#f6f7fb;border:1px solid #e5e7ee;border-radius:8px;padding:10px;text-align:center;}
+  .kpi b{font-size:22px;display:block;font-weight:700;}
+  .kpi span{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;}
+  ul{padding-left:18px;margin:6px 0;} li{margin:5px 0;} .empty{color:#888;font-style:italic;margin:6px 0;}
+  @media print { body { margin: 0 auto; } }
+</style></head><body>
+<h1>${escapeHTML(proj.name)} — Status report</h1>
+<div class="meta">${fmtFull(data.since)} – ${fmtFull(data.until)} · generated ${fmtFull(data.today)}</div>
+<div class="kpis">
+  <div class="kpi"><b>${k.done}</b><span>Done</span></div>
+  <div class="kpi"><b>${k.changed}</b><span>Changed</span></div>
+  <div class="kpi"><b>${k.late}</b><span>Late</span></div>
+  <div class="kpi"><b>${k.blocked}</b><span>Blocked</span></div>
+  <div class="kpi"><b>${k.decisions}</b><span>Decisions</span></div>
+  <div class="kpi"><b>${k.crs}</b><span>CRs decided</span></div>
+</div>
+<h2>What changed</h2>${list(data.changed.slice(0, 30), li, 'No updates in this period.')}
+<h2>Late &amp; blocked</h2>${list(data.lateOrBlocked, liDue, 'Nothing late or blocked — nice work.')}
+<h2>Decisions made</h2>${list(data.decisions, liDec, 'No decisions logged in this period.')}
+<h2>Change requests decided</h2>${list(data.crsDecided, liCR, 'No CRs decided in this period.')}
+<h2>Top risks (by residual)</h2>${list(data.topRisks, liRisk, 'No risks logged.')}
+<h2>What's next (next 14 days)</h2>
+${data.next.milestones.length ? '<p><b>Milestones</b></p>' + list(data.next.milestones, (m) => liNext(m, 'date'), '') : ''}
+${data.next.deliverables.length ? '<p><b>Deliverables</b></p>' + list(data.next.deliverables, (d) => liNext(d, 'date'), '') : ''}
+${data.next.actions.length ? '<p><b>Due actions</b></p>' + list(data.next.actions.slice(0, 30), liActDue, '') : ''}
+${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.actions.length) ? '<p class="empty">Nothing scheduled in the next 14 days.</p>' : ''}
+</body></html>`;
+  }
   function renderReports(root) {
+    const proj = curProject();
     const view = document.createElement('div');
     view.className = 'view';
+    const isAll = state.currentProjectId === '__all__';
+    if (isAll || !proj) {
+      view.innerHTML = `
+        <div class="page-head">
+          <div>
+            <div class="page-title">Status report</div>
+            <div class="page-sub">Pick a project to generate a report.</div>
+          </div>
+        </div>
+        <div class="empty">Reports are project-scoped. Choose a project from the topbar.</div>`;
+      root.appendChild(view);
+      return;
+    }
+    const range = reportPeriodRange();
+    const data = buildReportData(proj, range.since, range.until);
+    const k = data.kpis;
+    const optSel = (val) => reportState.period === val ? 'selected' : '';
     view.innerHTML = `
       <div class="page-head">
         <div>
-          <div class="page-title">Status report</div>
-          <div class="page-sub">Coming in Phase E — generates a Markdown / printable HTML status digest.</div>
+          <div class="page-title">${escapeHTML(proj.name)} — Status report</div>
+          <div class="page-sub">${fmtFull(data.since)} – ${fmtFull(data.until)}</div>
+        </div>
+        <div class="page-actions">
+          <select id="reportPeriod" class="report-period">
+            <option value="7d"  ${optSel('7d')}>Last 7 days</option>
+            <option value="30d" ${optSel('30d')}>Last 30 days</option>
+            <option value="90d" ${optSel('90d')}>Last 90 days</option>
+            <option value="custom" ${optSel('custom')}>Custom…</option>
+          </select>
+          <span class="report-custom" id="reportCustom" ${reportState.period === 'custom' ? '' : 'hidden'}>
+            <input type="date" id="reportSince" value="${reportState.customSince || data.since}" />
+            <span class="report-dash">–</span>
+            <input type="date" id="reportUntil" value="${reportState.customUntil || data.until}" />
+          </span>
+          <button class="ghost" id="btnReportCopyMd"  title="Copy as Markdown">Copy Markdown</button>
+          <button class="ghost" id="btnReportDownload" title="Download .md file">Download .md</button>
+          <button class="ghost" id="btnReportPrint"   title="Open print-ready HTML in a new tab">Print → PDF</button>
         </div>
       </div>
-      <div class="empty">Reports view will land in Phase E.</div>`;
+      <div class="report">
+        <div class="report-kpis">
+          <div class="report-kpi"><div class="report-kpi-num">${k.done}</div><div class="report-kpi-lbl">Done</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.changed}</div><div class="report-kpi-lbl">Changed</div></div>
+          <div class="report-kpi ${k.late > 0 ? 'bad' : ''}"><div class="report-kpi-num">${k.late}</div><div class="report-kpi-lbl">Late</div></div>
+          <div class="report-kpi ${k.blocked > 0 ? 'warn' : ''}"><div class="report-kpi-num">${k.blocked}</div><div class="report-kpi-lbl">Blocked</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.decisions}</div><div class="report-kpi-lbl">Decisions</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.crs}</div><div class="report-kpi-lbl">CRs decided</div></div>
+        </div>
+
+        ${reportSection('What changed', data.changed.slice(0, 30), (a) =>
+          `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.status)}${a.updatedAt ? ' · ' + a.updatedAt : ''}</span></div>`,
+          'No updates in this period.')}
+
+        ${reportSection('Late & blocked', data.lateOrBlocked, (a) => {
+          const reason = a.status === 'blocked' ? 'blocked' : `${Math.abs(dayDiff(a.due, data.today))}d late`;
+          return `<div class="report-row clickable bad" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${reason}</span></div>`;
+        }, 'Nothing late or blocked — nice work.')}
+
+        ${reportSection('Decisions made', data.decisions, (d) =>
+          `<div class="report-row"><span>${escapeHTML(d.title)}</span><span class="report-meta">${escapeHTML(personName(d.owner))} · ${escapeHTML(d.date || '—')}</span></div>${d.rationale ? `<div class="report-rationale">${escapeHTML(d.rationale)}</div>` : ''}`,
+          'No decisions logged in this period.')}
+
+        ${reportSection('Change requests decided', data.crsDecided, (c) =>
+          `<div class="report-row clickable" data-open-cr="${c.id}"><span>${escapeHTML(c.title)}</span><span class="report-meta">${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + escapeHTML(personName(c.decisionBy)) : ''}</span></div>`,
+          'No CRs decided in this period.')}
+
+        ${reportSection('Top risks (by residual)', data.topRisks, (r) =>
+          `<div class="report-row clickable" data-open-risk="${r.id}"><span>${escapeHTML(r.title)}</span><span class="report-meta">residual ${r._score}</span></div>${r.mitigation ? `<div class="report-rationale">${escapeHTML(r.mitigation)}</div>` : ''}`,
+          'No risks logged.')}
+
+        <div class="report-section">
+          <div class="report-section-title">What's next (next 14 days)</div>
+          ${(data.next.milestones.length || data.next.deliverables.length || data.next.actions.length)
+            ? `${data.next.milestones.length ? '<div class="report-sub-title">Milestones</div>' + data.next.milestones.map((m) => `<div class="report-row"><span>${escapeHTML(m.name || m.title || '')}</span><span class="report-meta">${escapeHTML(m.date || '')}</span></div>`).join('') : ''}
+               ${data.next.deliverables.length ? '<div class="report-sub-title">Deliverables</div>' + data.next.deliverables.map((d) => `<div class="report-row"><span>${escapeHTML(d.name || d.title || '')}</span><span class="report-meta">${escapeHTML(d.date || '')}</span></div>`).join('') : ''}
+               ${data.next.actions.length ? '<div class="report-sub-title">Due actions</div>' + data.next.actions.slice(0, 30).map((a) => `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.due || '')}</span></div>`).join('') : ''}`
+            : '<div class="empty">Nothing scheduled in the next 14 days.</div>'}
+        </div>
+      </div>`;
     root.appendChild(view);
+
+    // Interactivity
+    $('#reportPeriod').addEventListener('change', (e) => {
+      reportState.period = e.target.value;
+      render();
+    });
+    $('#reportSince')?.addEventListener('change', (e) => {
+      reportState.customSince = e.target.value; reportState.period = 'custom'; render();
+    });
+    $('#reportUntil')?.addEventListener('change', (e) => {
+      reportState.customUntil = e.target.value; reportState.period = 'custom'; render();
+    });
+    $('#btnReportCopyMd').addEventListener('click', async () => {
+      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
+      try { await navigator.clipboard.writeText(md); toast('Copied as Markdown'); }
+      catch (e) { toast('Copy failed — clipboard unavailable'); }
+    });
+    $('#btnReportDownload').addEventListener('click', () => {
+      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
+      const blob = new Blob([md], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `report-${proj.id}-${range.until}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Report downloaded');
+    });
+    $('#btnReportPrint').addEventListener('click', () => {
+      const html = reportToPrintHTML(buildReportData(curProject(), range.since, range.until));
+      const w = window.open('', '_blank');
+      if (!w) { toast('Pop-up blocked'); return; }
+      w.document.write(html); w.document.close();
+      setTimeout(() => { try { w.print(); } catch (e) { /* ignore */ } }, 250);
+    });
+
+    // Row drilldowns
+    view.querySelectorAll('[data-open-action]').forEach((el) => {
+      el.addEventListener('click', () => openDrawer(el.dataset.openAction));
+    });
+    view.querySelectorAll('[data-open-cr]').forEach((el) => {
+      el.addEventListener('click', () => openChangeRequestEditor(el.dataset.openCr));
+    });
+    view.querySelectorAll('[data-open-risk]').forEach((el) => {
+      el.addEventListener('click', () => openRiskEditor(el.dataset.openRisk));
+    });
   }
+  function reportSection(title, items, fmt, empty) {
+    return `
+      <div class="report-section">
+        <div class="report-section-title">${escapeHTML(title)}<span class="report-section-count">${items.length}</span></div>
+        ${items.length ? items.map(fmt).join('') : `<div class="empty">${escapeHTML(empty)}</div>`}
+      </div>`;
+  }
+
   function renderCalendar(root) {
     const view = document.createElement('div');
     view.className = 'view';
