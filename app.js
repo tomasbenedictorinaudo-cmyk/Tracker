@@ -41,6 +41,32 @@
     const parts = name.trim().split(/\s+/);
     return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?';
   };
+  // Phase A — fuzzy-score (subsequence + bonus for word-start matches).
+  // Returns 0 when query doesn't fuzzy-match haystack; higher score = better.
+  function fuzzyScore(query, hay) {
+    if (!query) return 1;
+    if (!hay) return 0;
+    const q = query.toLowerCase();
+    const h = hay.toLowerCase();
+    let qi = 0, score = 0, lastMatch = -1, run = 0;
+    for (let i = 0; i < h.length && qi < q.length; i++) {
+      if (h[i] === q[qi]) {
+        // word-start bonus
+        if (i === 0 || /[\s\-_/.]/.test(h[i - 1])) score += 4;
+        else score += 1;
+        // consecutive-match bonus
+        if (lastMatch === i - 1) { run++; score += run; }
+        else run = 0;
+        lastMatch = i;
+        qi++;
+      }
+    }
+    if (qi < q.length) return 0;
+    // Shorter haystacks score slightly higher (preserves intent of full match)
+    return score + Math.max(0, 30 - h.length) * 0.1;
+  }
+  // Phase A — Markdown escape for the upcoming status-report export.
+  const mdEscape = (s) => String(s ?? '').replace(/([\\`*_{}\[\]()#+\-.!|>])/g, '\\$1');
 
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
@@ -141,6 +167,25 @@
     redoStack = [];
     saveState();
     render();
+  }
+  // Phase A helper — stamp signed-edit metadata on a record (action, CR,
+  // open point, …) before committing. Optional `editor` lets future team-mode
+  // identify the author; defaults to the local user marker.
+  function stampEdit(record, editor) {
+    if (!record || typeof record !== 'object') return;
+    record.__lastEditor = editor || (state.settings.localUser || 'me');
+    record.__lastEditAt = new Date().toISOString();
+  }
+  // Wraps a mutator: runs it, stamps any returned record(s), then commits.
+  // Use as `mutate(() => { … return action; }, 'commit-name')`.
+  function mutate(fn, commitName) {
+    const result = fn();
+    if (result) {
+      if (Array.isArray(result)) result.forEach(stampEdit);
+      else stampEdit(result);
+    }
+    commit(commitName || 'edit');
+    return result;
   }
   function undo() {
     if (!undoStack.length) return;
@@ -586,6 +631,7 @@
       openPoints: flat('openPoints'),
       changes: flat('changes'),
       costCenters: flat('costCenters'),
+      tags: flat('tags'),
     };
   }
   // Find the source project for an action by id (works in merged mode too)
@@ -8281,6 +8327,21 @@
     if (!allowedMins.includes(ab.intervalMinutes)) ab.intervalMinutes = 60;
     if (typeof ab.dirName !== 'string') ab.dirName = '';
     if (typeof ab.lastBackupAt !== 'string') ab.lastBackupAt = null;
+    // Phase A — added flags / structures used by later phases. All retrocompat.
+    if (typeof s.settings.tourSeen     !== 'boolean') s.settings.tourSeen = false;
+    if (typeof s.settings.notifyEnabled !== 'boolean') s.settings.notifyEnabled = false;
+    if (typeof s.settings.sidebarGroups !== 'object' || !s.settings.sidebarGroups) {
+      s.settings.sidebarGroups = { workspace: true, project: true, engineering: true };
+    }
+    s.inbox = s.inbox || {};
+    s.inbox.dismissed = Array.isArray(s.inbox.dismissed) ? s.inbox.dismissed : [];
+    s.templates = Array.isArray(s.templates) ? s.templates : [];
+    s.templates.forEach((t) => {
+      t.id = t.id || uid('tpl');
+      t.name = t.name || 'Template';
+      t.createdAt = t.createdAt || todayISO();
+      t.shape = t.shape || {};
+    });
     s.currentView = s.currentView || 'board';
     if (s.currentView === 'teams') s.currentView = 'people';
     if (!s.currentProjectId || (s.currentProjectId !== '__all__' && !s.projects.some((p) => p.id === s.currentProjectId))) {
@@ -8313,6 +8374,16 @@
       p.links        = Array.isArray(p.links) ? p.links : [];
       p.costCenters  = Array.isArray(p.costCenters) ? p.costCenters : [];
       p.archive      = Array.isArray(p.archive) ? p.archive : [];
+      // Phase A: project-scoped tags. { id, name, rgb } — used as labels on
+      // actions / open points / CRs. Default empty for retrocompat.
+      p.tags         = Array.isArray(p.tags) ? p.tags : [];
+      p.tags.forEach((t) => {
+        t.id = t.id || uid('tg');
+        t.name = t.name || 'Tag';
+        t.rgb = t.rgb || '148,163,184';
+      });
+      // Optional: track template lineage so future merges can detect drift
+      if (p.templateOf === undefined) p.templateOf = null;
 
       p.actions.forEach((a) => {
         a.id = a.id || uid('a');
@@ -8339,6 +8410,18 @@
         // existing createdAt so legacy data behaves as if it were already set.
         a.originatorDate = a.originatorDate || a.createdAt || todayISO();
         a.history = Array.isArray(a.history) ? a.history : [];
+        // Phase A — dependencies, comments, tags, signed metadata. All defaulted.
+        a.dependsOn = Array.isArray(a.dependsOn) ? a.dependsOn : [];
+        a.tags      = Array.isArray(a.tags) ? a.tags : [];
+        a.comments  = Array.isArray(a.comments) ? a.comments : [];
+        a.comments.forEach((c) => {
+          c.id  = c.id  || uid('cm');
+          c.by  = c.by  || null;
+          c.at  = c.at  || todayISO();
+          c.text = c.text || '';
+        });
+        if (a.__lastEditor === undefined) a.__lastEditor = null;
+        if (a.__lastEditAt === undefined) a.__lastEditAt = null;
         // a.deletedAt is null for live, ISO string for archived — preserve as-is
       });
 
@@ -8397,6 +8480,17 @@
         // priorityLevel — added later; default to 'med' for retrocompat
         c.priorityLevel = (c.priorityLevel && PRIORITY_LEVELS.some((p) => p.id === c.priorityLevel)) ? c.priorityLevel : 'med';
         delete c.linkTitle; // dropped from schema
+        // Phase A — comments + tags + signed metadata
+        c.tags = Array.isArray(c.tags) ? c.tags : [];
+        c.comments = Array.isArray(c.comments) ? c.comments : [];
+        c.comments.forEach((cm) => {
+          cm.id   = cm.id   || uid('cm');
+          cm.by   = cm.by   || null;
+          cm.at   = cm.at   || todayISO();
+          cm.text = cm.text || '';
+        });
+        if (c.__lastEditor === undefined) c.__lastEditor = null;
+        if (c.__lastEditAt === undefined) c.__lastEditAt = null;
       });
 
       p.components.forEach((cmp) => {
@@ -8432,6 +8526,17 @@
           s.text = s.text || '';
           s.done = !!s.done;
         });
+        // Phase A — comments + tags + signed metadata
+        op.tags = Array.isArray(op.tags) ? op.tags : [];
+        op.comments = Array.isArray(op.comments) ? op.comments : [];
+        op.comments.forEach((cm) => {
+          cm.id = cm.id || uid('cm');
+          cm.by = cm.by || null;
+          cm.at = cm.at || todayISO();
+          cm.text = cm.text || '';
+        });
+        if (op.__lastEditor === undefined) op.__lastEditor = null;
+        if (op.__lastEditAt === undefined) op.__lastEditAt = null;
       });
 
       p.links.forEach((l) => {
