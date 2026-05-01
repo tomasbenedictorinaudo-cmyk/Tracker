@@ -11019,30 +11019,53 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   const calState = {
     monthOffset: 0, // 0 = current month, -1 = previous, +1 = next
     keyWired: false,
-    // 'month' = 7×6 grid (default); 'timeline' = horizontal swim-lane
-    // view of the same window — one lane per kind.
+    // 'month' = vertically-scrolling weekly grid with continuous reveal
+    // (default); 'timeline' = horizontal swim-lane view.
     format: 'month',
+    // Month-mode window state. firstWeekStart = Monday of the first
+    // rendered week. weekCount = how many weeks are currently rendered.
+    // windowAnchorOffset tracks the monthOffset the window was last
+    // built for; mismatch means re-center.
+    firstWeekStart: null,
+    weekCount: 12,
+    windowAnchorOffset: null,
     // Per-kind visibility filters. The legend doubles as the filter
     // strip: clicking a pill toggles its kind on/off. Persists across
     // month navigation but resets on reload (intentional — fresh
     // sessions start with everything shown).
     visible: { action: true, deliverable: true, milestone: true, cr: true, meeting: true },
   };
-  function calendarMonthBounds() {
+  // ISO 8601 week number — Mon-anchored, week 1 is the one containing
+  // the first Thursday of the year.
+  function isoWeekNumber(d) {
+    const dt = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    dt.setDate(dt.getDate() + 3 - ((dt.getDay() + 6) % 7));
+    const week1 = new Date(dt.getFullYear(), 0, 4);
+    return 1 + Math.round(((dt.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+  }
+  function ensureCalendarWindow() {
     const today = new Date();
-    const base = new Date(today.getFullYear(), today.getMonth() + calState.monthOffset, 1);
-    const year = base.getFullYear();
-    const month = base.getMonth();
-    const monthLabel = base.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
-    // Start the grid on Monday of the week containing the 1st of the month
-    const first = new Date(year, month, 1);
-    const dow = (first.getDay() + 6) % 7; // Mon=0 … Sun=6
-    const gridStart = new Date(year, month, 1 - dow);
-    // 6 rows × 7 cols = 42 cells, enough to cover any month
+    if (calState.windowAnchorOffset !== calState.monthOffset || !calState.firstWeekStart) {
+      const anchor = new Date(today.getFullYear(), today.getMonth() + calState.monthOffset, 1);
+      const dow = (anchor.getDay() + 6) % 7; // Mon=0
+      const monthGridStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1 - dow);
+      // Lead with 4 weeks before the anchor month start, 12 weeks total
+      calState.firstWeekStart = new Date(monthGridStart.getTime() - 4 * 7 * dayMs);
+      calState.weekCount = 12;
+      calState.windowAnchorOffset = calState.monthOffset;
+    }
+  }
+  function calendarMonthBounds() {
+    ensureCalendarWindow();
+    const today = new Date();
+    const anchor = new Date(today.getFullYear(), today.getMonth() + calState.monthOffset, 1);
+    const year = anchor.getFullYear();
+    const month = anchor.getMonth();
+    const monthLabel = anchor.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
     const cells = [];
-    for (let i = 0; i < 42; i++) {
-      const d = new Date(gridStart);
-      d.setDate(gridStart.getDate() + i);
+    for (let i = 0; i < calState.weekCount * 7; i++) {
+      const d = new Date(calState.firstWeekStart);
+      d.setDate(calState.firstWeekStart.getDate() + i);
       cells.push(d);
     }
     return { year, month, monthLabel, cells };
@@ -11325,22 +11348,23 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
 
     const todayISO_ = todayISO();
     const dayHeaders = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-    const cellHTML = cells.map((d, i) => {
+    // Build week-row HTML. Each row is one week-number cell + 7 day cells.
+    // Cells stay addressable via the original linear cell index so chip
+    // wiring (data-cell-idx) keeps working without changes elsewhere.
+    function dayCellHTML(d, i) {
       const iso = fmtISO(d);
       const inMonth = d.getMonth() === month;
       const isToday = iso === todayISO_;
       const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      const isFirstOfMonth = d.getDate() === 1;
       const cellItems = byDate.get(iso) || [];
       const VISIBLE = 4;
       const shown = cellItems.slice(0, VISIBLE);
       const hidden = cellItems.length - shown.length;
       const chipsHTML = shown.map((it, idx) => {
-        // Kind-specific icon prefix; ranged-milestone middle days use a thin
-        // connector glyph + 'is-middle' so the chip-row reads as a band.
         const icon = it.icon || '·';
         const rangeCls = it.kind === 'milestone' && it.rangePos
           ? ` is-${it.rangePos}` : '';
-        // Optional inline tint (currently used by component-tagged meetings)
         const tintStyle = it.tint ? ` style="--cal-chip-tint: ${it.tint};"` : '';
         const tintCls = it.tint ? ' has-tint' : '';
         return `
@@ -11349,21 +11373,36 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <span class="cal-chip-label">${escapeHTML(it.label)}</span>
           </button>`;
       }).join('');
-      const moreHTML = hidden > 0
-        ? `<button class="cal-more" data-cell-idx="${i}">+ ${hidden} more</button>`
-        : '';
+      const moreHTML = hidden > 0 ? `<button class="cal-more" data-cell-idx="${i}">+ ${hidden} more</button>` : '';
+      // First-of-month gets a small inline label so the user can find
+      // month boundaries while scrolling.
+      const dayLabel = isFirstOfMonth
+        ? `<span class="cal-day-month-tag">${d.toLocaleDateString(undefined, { month: 'short' })}</span> ${d.getDate()}`
+        : `${d.getDate()}`;
       return `
         <div class="cal-cell ${inMonth ? '' : 'out-of-month'} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}" data-cell-idx="${i}" data-iso="${iso}">
-          <div class="cal-day-num">${d.getDate()}</div>
+          <div class="cal-day-num">${dayLabel}</div>
           <div class="cal-chips">${chipsHTML}${moreHTML}</div>
         </div>`;
-    }).join('');
+    }
+    const weekRowsHTML = [];
+    for (let w = 0; w < calState.weekCount; w++) {
+      const startIdx = w * 7;
+      const weekStart = cells[startIdx];
+      const wn = isoWeekNumber(weekStart);
+      const cellsInWeek = [];
+      for (let j = 0; j < 7; j++) cellsInWeek.push(dayCellHTML(cells[startIdx + j], startIdx + j));
+      weekRowsHTML.push(`
+        <div class="cal-week-num" title="ISO week ${wn} (starts ${fmtISO(weekStart)})">${wn}</div>
+        ${cellsInWeek.join('')}`);
+    }
+    const cellHTML = weekRowsHTML.join('');
 
     view.innerHTML = `
       <div class="page-head">
         <div>
           <div class="page-title">${escapeHTML(proj.name)} — Calendar</div>
-          <div class="page-sub">${escapeHTML(monthLabel)} · arrow keys to switch months</div>
+          <div class="page-sub" id="calPageSub">${escapeHTML(monthLabel)} · scroll vertically for more weeks · ← / → for months</div>
         </div>
         <div class="page-actions">
           <div class="seg" role="tablist" aria-label="Calendar format">
@@ -11398,9 +11437,10 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       ${calState.format === 'month' ? `
         <div class="calendar">
           <div class="cal-head">
+            <div class="cal-head-cell cal-head-wk" title="ISO week number">Wk</div>
             ${dayHeaders.map((h) => `<div class="cal-head-cell">${h}</div>`).join('')}
           </div>
-          <div class="cal-grid">${cellHTML}</div>
+          <div class="cal-grid" id="calGrid">${cellHTML}</div>
         </div>
       ` : renderCalendarTimeline(cells, items, byDate, todayISO_)}`;
     root.appendChild(view);
@@ -11494,6 +11534,86 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // release so the user can pan continuously past the visible window.
     if (calState.format === 'month') wireMonthGridDrag(view);
     else                              wireTimelineDragPan(view);
+
+    // Month view: vertical scroll-to-reveal-more-weeks. When the user
+    // scrolls within ~200 px of the top or bottom edge, prepend / append
+    // 4 more weeks and adjust scrollTop so the visual position holds
+    // steady — no jump under the cursor. Also keep the page-sub label
+    // tracking the dominant month in the viewport.
+    if (calState.format === 'month') wireMonthGridScroll(view);
+  }
+  function wireMonthGridScroll(viewEl) {
+    const grid = viewEl.querySelector('#calGrid');
+    if (!grid) return;
+    const sub = viewEl.querySelector('#calPageSub');
+    let extending = false; // re-entry guard during prepend/append
+    function rowHeight() {
+      const first = grid.querySelector('.cal-cell');
+      return first ? first.getBoundingClientRect().height : 110;
+    }
+    function visibleCenterDate() {
+      // Use the row at the vertical center of the viewport.
+      const rh = rowHeight();
+      if (!rh) return null;
+      const rowsFromTop = Math.floor((grid.scrollTop + grid.clientHeight / 2) / rh);
+      const idx = clamp(rowsFromTop * 7, 0, calState.weekCount * 7 - 1);
+      const d = new Date(calState.firstWeekStart);
+      d.setDate(calState.firstWeekStart.getDate() + idx);
+      return d;
+    }
+    function refreshSub() {
+      const d = visibleCenterDate();
+      if (!d || !sub) return;
+      const lbl = d.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+      sub.textContent = `${lbl} · scroll vertically for more weeks · ← / → for months`;
+    }
+    function extendTop() {
+      if (extending) return;
+      extending = true;
+      const ADD = 4;
+      const beforeH = grid.scrollHeight;
+      const newStart = new Date(calState.firstWeekStart);
+      newStart.setDate(newStart.getDate() - ADD * 7);
+      calState.firstWeekStart = newStart;
+      calState.weekCount += ADD;
+      // Re-render and restore scroll position so the user's view doesn't
+      // jump by the height of the prepended rows.
+      const prevTop = grid.scrollTop;
+      render();
+      const newGrid = $('#calGrid');
+      if (newGrid) {
+        const afterH = newGrid.scrollHeight;
+        newGrid.scrollTop = prevTop + (afterH - beforeH);
+      }
+      extending = false;
+    }
+    function extendBottom() {
+      if (extending) return;
+      extending = true;
+      const ADD = 4;
+      calState.weekCount += ADD;
+      const prevTop = grid.scrollTop;
+      render();
+      const newGrid = $('#calGrid');
+      if (newGrid) newGrid.scrollTop = prevTop;
+      extending = false;
+    }
+    grid.addEventListener('scroll', () => {
+      const max = grid.scrollHeight - grid.clientHeight;
+      if (grid.scrollTop < 200) extendTop();
+      else if (grid.scrollTop > max - 200) extendBottom();
+      refreshSub();
+    });
+    // First paint: scroll today's row into the upper third of the viewport
+    // (so a few weeks of context above are visible without scrolling).
+    const todayCell = grid.querySelector('.cal-cell.today');
+    if (todayCell) {
+      const rh = rowHeight();
+      const todayIdx = +todayCell.dataset.cellIdx;
+      const todayRow = Math.floor(todayIdx / 7);
+      grid.scrollTop = Math.max(0, todayRow * rh - 80);
+    }
+    refreshSub();
   }
 
   // — Drag-pan helpers —
