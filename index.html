@@ -30,15 +30,18 @@
       </div>
 
       <nav class="nav">
-        <div class="nav-section">Workspace</div>
-        <button class="nav-item" data-view="portfolio">
-          <span class="nav-icon">▦</span><span>Portfolio</span>
-        </button>
-        <button class="nav-item" data-view="people">
-          <span class="nav-icon">◔</span><span>People</span>
-        </button>
+        <button class="nav-section nav-section-toggle" data-group="workspace" aria-expanded="true">Workspace<span class="nav-section-caret">▾</span></button>
+        <div class="nav-group" data-group-body="workspace">
+          <button class="nav-item" data-view="portfolio">
+            <span class="nav-icon">▦</span><span>Portfolio</span>
+          </button>
+          <button class="nav-item" data-view="people">
+            <span class="nav-icon">◔</span><span>People</span>
+          </button>
+        </div>
 
-        <div class="nav-section">Project</div>
+        <button class="nav-section nav-section-toggle" data-group="work" aria-expanded="true">Work<span class="nav-section-caret">▾</span></button>
+        <div class="nav-group" data-group-body="work">
         <button class="nav-item" data-view="board">
           <span class="nav-icon">▤</span><span>Board</span>
         </button>
@@ -49,36 +52,23 @@
           <span class="nav-icon">⚐</span><span>Open points</span>
         </button>
         <button class="nav-item" data-view="timeline">
-          <span class="nav-icon">▬</span><span>Timeline</span>
+          <span class="nav-icon">▬</span><span>Gantt</span>
         </button>
-        <button class="nav-item" data-view="dashboard">
-          <span class="nav-icon">◰</span><span>Dashboard</span>
-        </button>
-        <button class="nav-item" data-view="charts">
-          <span class="nav-icon">◵</span><span>Charts</span>
-        </button>
-        <button class="nav-item" data-view="review">
-          <span class="nav-icon">▶</span><span>Review</span>
-        </button>
-        <button class="nav-item" data-view="archive">
-          <span class="nav-icon">⌫</span><span>Archive</span>
+        <button class="nav-item" data-view="calendar">
+          <span class="nav-icon">▦</span><span>Calendar</span>
         </button>
         <button class="nav-item" data-view="links">
           <span class="nav-icon">↗</span><span>Links</span>
         </button>
+        </div>
 
-        <div class="nav-section">Engineering</div>
-        <button class="nav-item" data-view="components">
-          <span class="nav-icon">▣</span><span>Components</span>
+        <button class="nav-section nav-section-toggle" data-group="insight" aria-expanded="true">Insight<span class="nav-section-caret">▾</span></button>
+        <div class="nav-group" data-group-body="insight">
+        <button class="nav-item" data-view="dashboard">
+          <span class="nav-icon">◰</span><span>Dashboard</span>
         </button>
-        <button class="nav-item" data-view="budgets">
-          <span class="nav-icon">€</span><span>Budgets</span>
-        </button>
-        <button class="nav-item" data-view="deliverables">
-          <span class="nav-icon">◆</span><span>Deliverables</span>
-        </button>
-        <button class="nav-item" data-view="milestones">
-          <span class="nav-icon">◇</span><span>Milestones</span>
+        <button class="nav-item" data-view="review">
+          <span class="nav-icon">▶</span><span>Review</span>
         </button>
         <button class="nav-item" data-view="risks">
           <span class="nav-icon">△</span><span>Risks &amp; Opps</span>
@@ -89,11 +79,19 @@
         <button class="nav-item" data-view="changes">
           <span class="nav-icon">⇆</span><span>Change requests</span>
         </button>
+        <button class="nav-item" data-view="components">
+          <span class="nav-icon">▣</span><span>Components</span>
+        </button>
+        <button class="nav-item" data-view="budgets">
+          <span class="nav-icon">€</span><span>Budgets</span>
+        </button>
+        </div>
       </nav>
 
       <div class="sidebar-foot">
         <button class="icon-btn" id="btnImport" title="Import JSON — load a saved file">↓</button>
         <button class="icon-btn" id="btnExport" title="Export JSON — save current state to a file">↑</button>
+        <button class="icon-btn" id="btnMerge" title="Merge — combine a teammate's JSON with yours">⇄</button>
         <button class="icon-btn" id="btnAutoBackup" title="Auto-backup — pick a folder + frequency">⟳</button>
         <button class="icon-btn danger" id="btnEmpty" title="Start from zero — wipe everything">⊘</button>
         <button class="icon-btn" id="btnReset" title="Reset to sample data">↺</button>
@@ -137,7 +135,12 @@
         <button class="icon-btn" id="btnUndo" title="Undo (Cmd/Ctrl+Z)">↶</button>
         <button class="icon-btn" id="btnRedo" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
         <button class="icon-btn" id="btnNotesToggle" title="Toggle meeting notes (Cmd/Ctrl+\\)">✎</button>
-        <button class="primary" id="btnQuickAdd" title="Quick add (Cmd/Ctrl+K)">+ Quick add</button>
+        <button class="icon-btn icon-btn-bell" id="btnInbox" title="Inbox — items needing your attention">
+          <span aria-hidden="true">⚑</span>
+          <span class="bell-badge" id="bellBadge" hidden></span>
+        </button>
+        <button class="icon-btn" id="btnHelp" title="Keyboard shortcuts (?)">?</button>
+        <button class="primary" id="btnQuickAdd" title="Open command palette (Cmd/Ctrl+K)">+ Quick add</button>
       </div>
     </header>
 
@@ -222,6 +225,38 @@
         <button class="icon-btn" id="drawerClose">×</button>
       </div>
       <div class="drawer-body" id="drawerBody"></div>
+    </div>
+  </div>
+
+  <!-- Universal Cmd+K palette (Phase C) -->
+  <div class="overlay palette-overlay" id="paletteOverlay" hidden>
+    <div class="palette" role="dialog" aria-label="Command palette">
+      <div class="palette-input-row">
+        <span class="palette-glyph" aria-hidden="true">⌕</span>
+        <input id="paletteInput" type="text" placeholder="Search anything · type / for commands" autocomplete="off" />
+        <button class="icon-btn" id="paletteClose" title="Close (Esc)">×</button>
+      </div>
+      <div class="palette-results" id="paletteResults" role="listbox"></div>
+      <div class="palette-foot">
+        <span><kbd>↑↓</kbd> navigate</span>
+        <span><kbd>Enter</kbd> open</span>
+        <span><kbd>Esc</kbd> close</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Keyboard cheatsheet modal (Phase B) -->
+  <div class="overlay desc-overlay" id="helpOverlay" hidden>
+    <div class="desc-modal" style="width:520px;">
+      <div class="desc-head">
+        <div class="desc-title">Keyboard &amp; mouse shortcuts</div>
+        <button class="icon-btn" id="helpClose" title="Close">×</button>
+      </div>
+      <div class="help-body" id="helpBody"></div>
+      <div class="desc-foot">
+        <span class="hint" style="margin-right:auto; color:var(--text-faint); font-size:11px;">Tip: open this any time with <kbd>?</kbd></span>
+        <button class="primary" id="helpDone">Got it</button>
+      </div>
     </div>
   </div>
 

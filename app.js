@@ -41,6 +41,117 @@
     const parts = name.trim().split(/\s+/);
     return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || '?';
   };
+  // Phase A — fuzzy-score (subsequence + bonus for word-start matches).
+  // Returns 0 when query doesn't fuzzy-match haystack; higher score = better.
+  function fuzzyScore(query, hay) {
+    if (!query) return 1;
+    if (!hay) return 0;
+    const q = query.toLowerCase();
+    const h = hay.toLowerCase();
+    let qi = 0, score = 0, lastMatch = -1, run = 0;
+    for (let i = 0; i < h.length && qi < q.length; i++) {
+      if (h[i] === q[qi]) {
+        // word-start bonus
+        if (i === 0 || /[\s\-_/.]/.test(h[i - 1])) score += 4;
+        else score += 1;
+        // consecutive-match bonus
+        if (lastMatch === i - 1) { run++; score += run; }
+        else run = 0;
+        lastMatch = i;
+        qi++;
+      }
+    }
+    if (qi < q.length) return 0;
+    // Shorter haystacks score slightly higher (preserves intent of full match)
+    return score + Math.max(0, 30 - h.length) * 0.1;
+  }
+  // Phase A — Markdown escape for the upcoming status-report export.
+  const mdEscape = (s) => String(s ?? '').replace(/([\\`*_{}\[\]()#+\-.!|>])/g, '\\$1');
+
+  // Expand a meeting record into its concrete dates within a window.
+  // Handles oneoff and recurring (day / week / month) — single source of
+  // truth so the calendar and timeline never disagree about when a meeting
+  // recurs. Caps at m.endDate (if set) and the requested grid window.
+  function expandMeetingDates(m, gridStartISO, gridEndISO) {
+    if (!m) return [];
+    if (m.kind === 'oneoff') {
+      return (m.date && m.date >= gridStartISO && m.date <= gridEndISO) ? [m.date] : [];
+    }
+    if (m.kind !== 'recurring') return [];
+    const startISO = m.startDate || todayISO();
+    const startD   = parseDate(startISO);
+    const gridS    = parseDate(gridStartISO);
+    const gridE    = parseDate(gridEndISO);
+    const cap      = m.endDate ? parseDate(m.endDate) : null;
+    const interval = Math.max(1, m.interval || 1);
+    const out = [];
+    if (m.recurUnit === 'day') {
+      let dt = new Date(startD);
+      while (dt <= gridE && (!cap || dt <= cap)) {
+        if (dt >= gridS) out.push(fmtISO(dt));
+        dt = new Date(dt.getTime() + interval * dayMs);
+      }
+    } else if (m.recurUnit === 'week') {
+      const targetDow = (typeof m.dayOfWeek === 'number') ? m.dayOfWeek : startD.getDay();
+      // First occurrence ≥ startD landing on targetDow
+      let dt = new Date(startD);
+      while (dt.getDay() !== targetDow) dt = new Date(dt.getTime() + dayMs);
+      while (dt <= gridE && (!cap || dt <= cap)) {
+        if (dt >= gridS) out.push(fmtISO(dt));
+        dt = new Date(dt.getTime() + interval * 7 * dayMs);
+      }
+    } else if (m.recurUnit === 'month') {
+      // Step `interval` months at a time on the same day-of-month as
+      // startD; clamp to last-day if the target month is shorter (Feb 30).
+      const dom = startD.getDate();
+      let y = startD.getFullYear();
+      let mo = startD.getMonth();
+      while (true) {
+        const lastDay = new Date(y, mo + 1, 0).getDate();
+        const dt = new Date(y, mo, Math.min(dom, lastDay));
+        if (dt > gridE) break;
+        if (cap && dt > cap) break;
+        if (dt >= startD && dt >= gridS) out.push(fmtISO(dt));
+        mo += interval;
+        while (mo >= 12) { mo -= 12; y += 1; }
+      }
+    }
+    return out;
+  }
+  function meetingRecurrenceLabel(m) {
+    if (m.kind === 'oneoff') return 'Meeting';
+    if (m.kind !== 'recurring') return 'Meeting';
+    const n = Math.max(1, m.interval || 1);
+    const unit = m.recurUnit === 'day' ? 'day' : m.recurUnit === 'month' ? 'month' : 'week';
+    if (n === 1) return unit === 'day' ? 'Daily' : unit === 'week' ? 'Weekly' : 'Monthly';
+    return `Every ${n} ${unit}s`;
+  }
+
+  // Phase G — render tag chips for a record. Tags live on the project; a
+  // record stores only ids. Unknown ids (e.g. tag was deleted) are silently
+  // skipped to avoid empty chips.
+  function renderTagChipsHTML(tagIds, proj) {
+    if (!Array.isArray(tagIds) || !tagIds.length) return '';
+    const known = (proj?.tags || []).filter((t) => t && t.id);
+    const byId = new Map(known.map((t) => [t.id, t]));
+    return tagIds.map((id) => {
+      const t = byId.get(id);
+      if (!t) return '';
+      const rgb = t.rgb || '120, 120, 140';
+      return `<span class="tag-chip" style="background:rgba(${rgb},.18);color:rgb(${rgb});border:1px solid rgba(${rgb},.40)" title="${escapeHTML(t.name)}">${escapeHTML(t.name)}</span>`;
+    }).join('');
+  }
+  const TAG_PALETTE = [
+    '110, 168, 255',  // blue
+    '179, 137, 255',  // purple
+    '52,  211, 153',  // green
+    '251, 191, 36',   // amber
+    '248, 113, 113',  // red
+    '129, 140, 248',  // indigo
+    '236, 72, 153',   // pink
+    '244, 114, 182',  // rose
+    '20,  184, 166',  // teal
+  ];
 
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
@@ -141,6 +252,25 @@
     redoStack = [];
     saveState();
     render();
+  }
+  // Phase A helper — stamp signed-edit metadata on a record (action, CR,
+  // open point, …) before committing. Optional `editor` lets future team-mode
+  // identify the author; defaults to the local user marker.
+  function stampEdit(record, editor) {
+    if (!record || typeof record !== 'object') return;
+    record.__lastEditor = editor || (state.settings.localUser || 'me');
+    record.__lastEditAt = new Date().toISOString();
+  }
+  // Wraps a mutator: runs it, stamps any returned record(s), then commits.
+  // Use as `mutate(() => { … return action; }, 'commit-name')`.
+  function mutate(fn, commitName) {
+    const result = fn();
+    if (result) {
+      if (Array.isArray(result)) result.forEach(stampEdit);
+      else stampEdit(result);
+    }
+    commit(commitName || 'edit');
+    return result;
   }
   function undo() {
     if (!undoStack.length) return;
@@ -586,6 +716,7 @@
       openPoints: flat('openPoints'),
       changes: flat('changes'),
       costCenters: flat('costCenters'),
+      tags: flat('tags'),
     };
   }
   // Find the source project for an action by id (works in merged mode too)
@@ -692,6 +823,7 @@
     renderView();
     refreshNoteChips();
     refreshTodoFab();
+    refreshBell();
   }
 
   function renderTopbar() {
@@ -734,7 +866,9 @@
       openpoints: renderOpenPoints,
       timeline: renderTimeline,
       dashboard: renderDashboard,
-      charts: renderCharts,
+      // Charts is merged into Dashboard — route any stale 'charts' view
+      // (saved before the merge or arrived via palette) to the combined view.
+      charts: renderDashboard,
       review: renderReview,
       archive: renderArchive,
       components: renderComponents,
@@ -745,6 +879,9 @@
       decisions: renderDecisions,
       changes: renderChangeRequests,
       links: renderLinks,
+      inbox: renderInbox,
+      calendar: renderCalendar,
+      reports: renderReports,
     };
     (fns[view] || renderBoard)(main);
   }
@@ -759,12 +896,14 @@
     const head = document.createElement('div');
     head.className = 'page-head';
     const liveActions = (proj.actions || []).filter((a) => !a.deletedAt);
+    const archivedCount = (proj.actions || []).filter((a) => a.deletedAt).length;
     head.innerHTML = `
       <div>
         <div class="page-title">${escapeHTML(proj.name)}</div>
         <div class="page-sub">${liveActions.length} actions • ${proj.deliverables?.length || 0} deliverables • ${proj.milestones?.length || 0} milestones</div>
       </div>
       <div class="page-actions">
+        <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${archivedCount ? ` <span class="badge-count">${archivedCount}</span>` : ''}</button>
         <button class="ghost" id="btnAddAction">+ Action</button>
       </div>`;
     view.appendChild(head);
@@ -811,6 +950,10 @@
     root.appendChild(view);
 
     $('#btnAddAction').addEventListener('click', () => openQuickAdd('action'));
+    $('#btnOpenArchive').addEventListener('click', () => {
+      state.currentView = 'archive';
+      saveState(); render();
+    });
 
     // Clear-Done bulk action — archives only the done cards CURRENTLY DISPLAYED
     // (passing the topbar filters / search). Filtered-out done items are kept.
@@ -861,10 +1004,13 @@
     // Only render a chip when priority is non-default (Medium) — keeps cards
     // calm and lets High/Critical visually pop.
     const showPriorityChip = a.priorityLevel && a.priorityLevel !== 'med';
+    const tagChips = renderTagChipsHTML(a.tags, curProject(), a.comments);
     card.innerHTML = `
+      <button class="row-overflow" data-action="overflow" title="More actions" aria-label="More actions">⋯</button>
       <div class="card-top-row">
         ${component ? `<div class="component-chip">${escapeHTML(component.name)}</div>` : ''}
         ${showPriorityChip ? `<span class="prio-chip prio-${lvl.id}" title="Priority: ${lvl.label}" style="background:rgba(${lvl.rgb},.18);color:rgb(${lvl.rgb});border:1px solid rgb(${lvl.rgb})">${lvl.label}</span>` : ''}
+        ${tagChips}
       </div>
       <div class="card-title">${escapeHTML(a.title)}</div>
       <div class="card-meta">
@@ -872,13 +1018,24 @@
         <span class="due ${dueClass}">${due ? fmtDate(due) : 'no date'}</span>
         ${a.notes ? '<span class="tag">note</span>' : ''}
         ${a.description ? '<span class="tag has-desc" title="Has a description — hover to read">≡</span>' : ''}
+        ${(a.comments && a.comments.length) ? `<span class="tag has-comments" title="${a.comments.length} comment${a.comments.length === 1 ? '' : 's'}">💬 ${a.comments.length}</span>` : ''}
       </div>`;
     card.addEventListener('click', (e) => {
+      if (e.target.closest('[data-action="overflow"]')) {
+        e.stopPropagation();
+        const r = e.target.getBoundingClientRect();
+        showContextMenu(r.left, r.bottom + 4, actionContextItems(a));
+        return;
+      }
       if (card._suppressClick) { card._suppressClick = false; return; }
       openDrawer(a.id);
     });
     card.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return; // left mouse only
+      // Don't initiate drag from the ⋯ overflow button — startCardDrag
+      // hides the card via display:none on mousedown, which would tear
+      // the button out from under the click event before it fires.
+      if (e.target.closest('[data-action="overflow"]')) return;
       startCardDrag(e, card, a);
     });
     card.addEventListener('contextmenu', (e) => {
@@ -1860,13 +2017,22 @@
       list.innerHTML = items.map((op) => {
         // Backfill defaults for legacy items
         if (!op.criticality) op.criticality = 'med';
+        // Left-border tint reflects the *dominant* severity of either
+        // criticality or priority — whichever is higher drives the colour
+        // so a Critical-priority point is red even if its criticality is
+        // only Medium, and vice versa.
+        const SEV_ORDER = ['low', 'med', 'high', 'critical'];
+        const critIdx = Math.max(0, SEV_ORDER.indexOf(op.criticality || 'med'));
+        const prioIdx = Math.max(0, SEV_ORDER.indexOf(op.priorityLevel || 'med'));
+        const domKey = SEV_ORDER[Math.max(critIdx, prioIdx)];
+        const domRgb = CRITICALITY_RGB[domKey];
         if (!op.createdAt) op.createdAt = todayISO();
         if (!Array.isArray(op.steps)) op.steps = [];
         const cmp = findComponent(proj, op.component);
         const c = cmp ? componentColor(cmp.color) : null;
         const critRgb = CRITICALITY_RGB[op.criticality] || CRITICALITY_RGB.med;
         // The left border tracks criticality (component shown as a chip below).
-        const tint = `style="border-left-color: rgb(${critRgb})"`;
+        const tint = `style="border-left-color: rgb(${domRgb})"`;
         const critLabel = CRITICALITY_LABEL[op.criticality] || 'Medium';
         // op.notes holds rich HTML; legacy plain-string entries render as text
         const contextHtml = op.notes && /<\w+/.test(op.notes) ? op.notes : escapeHTML(op.notes || '');
@@ -1874,14 +2040,24 @@
         const stepTotal = op.steps.length;
         const stepsAllDone = stepTotal > 0 && stepDone === stepTotal;
         const prio = priorityLevel(op.priorityLevel);
-        const showOpPrioChip = op.priorityLevel && op.priorityLevel !== 'med';
+        // Both chips ALWAYS render so the user can click them to change
+        // values. The "med" (default) state uses a quieter visual treatment
+        // so the title row stays calm at rest and chips only "light up"
+        // when they carry a non-default signal.
+        const prioId = op.priorityLevel || 'med';
+        const prioQuiet = prioId === 'med';
+        const critQuiet = (op.criticality || 'med') === 'med';
+        const critChipStyle = critQuiet
+          ? `background:transparent;color:rgb(${critRgb});border:1px dashed rgba(${critRgb},.55)`
+          : `background:rgba(${critRgb},.18);color:rgb(${critRgb});border:1px solid rgb(${critRgb})`;
+        const prioChipStyle = prioQuiet
+          ? `background:transparent;color:rgba(${prio.rgb},.85);border:1px dashed rgba(${prio.rgb},.55)`
+          : `background:rgba(${prio.rgb},.18);color:rgb(${prio.rgb});border:1px solid rgb(${prio.rgb})`;
         return `
         <div class="op-item crit-${op.criticality}" data-id="${op.id}" ${tint}>
           <span class="op-row-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
           <div class="op-content">
             <div class="op-title-row">
-              <span class="op-crit-chip" title="Criticality" style="background:rgba(${critRgb},.18);color:rgb(${critRgb});border:1px solid rgb(${critRgb})">${critLabel}</span>
-              ${showOpPrioChip ? `<span class="prio-chip prio-${prio.id}" title="Priority: ${prio.label}" style="background:rgba(${prio.rgb},.18);color:rgb(${prio.rgb});border:1px solid rgb(${prio.rgb})">${prio.label}</span>` : ''}
               <div class="op-title" contenteditable="true" data-field="title">${escapeHTML(op.title)}</div>
             </div>
             <div class="op-context-wrap">
@@ -1924,19 +2100,12 @@
             <div class="op-meta">
               <span class="op-origin" title="Auto-set when this open point was originated">Originated ${fmtFull(op.createdAt)}</span>
               ${stepTotal ? `<span class="op-meta-steps ${stepsAllDone ? 'ok' : ''}" title="Resolution steps">✓ ${stepDone}/${stepTotal} steps</span>` : ''}
+              <button type="button" class="op-level-chip op-crit-chip ${critQuiet ? 'is-default' : ''}" data-kind="criticality" title="Click to set criticality (severity if not addressed)" style="${critChipStyle}">${critLabel}</button>
+              <button type="button" class="op-level-chip prio-chip prio-${prio.id} ${prioQuiet ? 'is-default' : ''}" data-kind="priority" title="Click to set priority (urgency to act)" style="${prioChipStyle}">${prio.label}</button>
               ${cmp ? `<span class="component-chip" style="background:rgba(${c.rgb},.2);color:rgb(${c.rgb})">${escapeHTML(cmp.name)}</span>` : ''}
             </div>
           </div>
           <div class="op-actions">
-            <select class="op-criticality" title="Criticality (severity if not addressed)">
-              <option value="low" ${op.criticality === 'low' ? 'selected' : ''}>Crit · Low</option>
-              <option value="med" ${op.criticality === 'med' ? 'selected' : ''}>Crit · Medium</option>
-              <option value="high" ${op.criticality === 'high' ? 'selected' : ''}>Crit · High</option>
-              <option value="critical" ${op.criticality === 'critical' ? 'selected' : ''}>Crit · Critical</option>
-            </select>
-            <select class="op-priority" title="Priority (urgency to address)">
-              ${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (op.priorityLevel || 'med') ? 'selected' : ''}>Prio · ${p.label}</option>`).join('')}
-            </select>
             <select class="op-component" title="Link to a component">
               <option value="">— component</option>
               ${(proj.components || []).map((pt) => `<option value="${pt.id}" ${pt.id === op.component ? 'selected' : ''}>${escapeHTML(pt.name)}</option>`).join('')}
@@ -2004,24 +2173,23 @@
             commit('op-component');
           });
         }
-        const critSel = el.querySelector('.op-criticality');
-        if (critSel) {
-          critSel.addEventListener('change', () => {
+        // Chip-driven criticality + priority — click the chip on the title
+        // row to open a colour-swatch popover, pick a level, commit. The
+        // <select> dropdowns these used to live in were removed: the chips
+        // now own the mutation, declutters the right-side actions row.
+        el.querySelectorAll('.op-level-chip').forEach((chip) => {
+          chip.addEventListener('click', (e) => {
+            e.stopPropagation();
             const op = proj.openPoints.find((x) => x.id === id);
             if (!op) return;
-            op.criticality = critSel.value;
-            commit('op-criticality');
+            const kind = chip.dataset.kind; // 'criticality' | 'priority'
+            const current = (kind === 'criticality') ? (op.criticality || 'med') : (op.priorityLevel || 'med');
+            showLevelPopover(chip, kind, current, (val) => {
+              if (kind === 'criticality') { op.criticality = val; commit('op-criticality'); }
+              else                        { op.priorityLevel = val; commit('op-priority'); }
+            });
           });
-        }
-        const prioSel = el.querySelector('.op-priority');
-        if (prioSel) {
-          prioSel.addEventListener('change', () => {
-            const op = proj.openPoints.find((x) => x.id === id);
-            if (!op) return;
-            op.priorityLevel = prioSel.value;
-            commit('op-priority');
-          });
-        }
+        });
         // Resolution steps — checkbox / edit / delete / add / drag-to-reorder
         wireOpStepHandlers(el, () => proj.openPoints.find((x) => x.id === id));
 
@@ -2205,7 +2373,12 @@
       case 'title':          return (a.title || '').toLowerCase();
       case 'component':      return (findComponent(proj, a.component)?.name || 'zzz').toLowerCase();
       case 'owner':          return personName(a.owner).toLowerCase();
-      case 'status':         return ['todo','doing','blocked','done'].indexOf(a.status);
+      // Open states first (todo · doing · blocked), then both closed
+       // states grouped at the same extreme (done · cancelled). Sorting
+       // ascending puts what's open at the top; descending pushes the
+       // closed pile up. Cancelled was previously missing from the
+       // index, which broke the order entirely.
+      case 'status':         return ['todo','doing','blocked','done','cancelled'].indexOf(a.status);
       case 'priority':       return ['critical','high','med','low'].indexOf(a.priorityLevel || 'med');
       case 'due':            return a.due || '9999-99-99';
       case 'predicted':      return predictedCompletion(a) || '9999-99-99';
@@ -2228,6 +2401,7 @@
           <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters.</div>
         </div>
         <div class="page-actions">
+          <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${(proj.actions || []).filter((a) => a.deletedAt).length ? ` <span class="badge-count">${(proj.actions || []).filter((a) => a.deletedAt).length}</span>` : ''}</button>
           <button class="ghost" id="btnArchiveDone" title="Move all currently visible done actions to Archive">⌫ Archive done</button>
           <button class="ghost" id="btnAddAction">+ Action</button>
         </div>
@@ -2449,19 +2623,32 @@
       const cmp = findComponent(proj, a.component);
       const c = cmp ? componentColor(cmp.color) : null;
       const dueCls = statusOfDue(a.due, a.status);
-      const tint = c ? `style="--row-tint: rgba(${c.rgb},.10);"` : '';
       const stat = STATUSES.find((s) => s.id === a.status);
-      const isOverdue = a.status !== 'done' && a.due && dayDiff(a.due, todayISO()) < 0;
-      const overdueBadge = isOverdue
-        ? `<span class="overdue-badge" title="Overdue by ${Math.abs(dayDiff(a.due, todayISO()))} day(s)">⏰</span>`
-        : '';
       const lvl = priorityLevel(a.priorityLevel);
+      // Left edge of the row now reflects priority (not the binary
+      // overdue state). The dedicated priority pip column is dropped —
+      // the left edge encodes the same signal more scannably.
+      const tintProps = [
+        c ? `--row-tint: rgba(${c.rgb},.10);` : '',
+        `--prio-rgb: ${lvl.rgb};`,
+      ].filter(Boolean).join(' ');
+      const tint = ` style="${tintProps}"`;
+      // Lateness as a 'drag tail' — a thin red trail whose width grows
+      // with days late, capped at 30 days so a 90-d-late item doesn't
+      // bully the title cell. Replaces the old ⏰ emoji.
+      const isOverdue = a.status !== 'done' && a.due && dayDiff(a.due, todayISO()) < 0;
+      const lateDays = isOverdue ? Math.abs(dayDiff(a.due, todayISO())) : 0;
+      const dragTail = isOverdue
+        ? `<span class="reg-late-tail" style="--days:${Math.min(lateDays, 30)};" title="Late by ${lateDays} day${lateDays === 1 ? '' : 's'} · was due ${escapeHTML(fmtDate(a.due))}"><span class="reg-late-icon" aria-hidden="true">⏰</span><span class="reg-late-num">+${lateDays}d</span></span>`
+        : '';
+      const isDone      = a.status === 'done';
+      const isCancelled = a.status === 'cancelled';
       return `
-        <div class="reg-row ${isOverdue ? 'is-overdue' : ''}" data-id="${a.id}" ${tint}>
+        <div class="reg-row prio-${lvl.id} ${isOverdue ? 'is-overdue' : ''} ${isDone ? 'is-done' : ''} ${isCancelled ? 'is-cancelled' : ''}" data-id="${a.id}"${tint}>
           <div class="reg-cell title-cell">
             ${ROW_GRIP_HTML}
-            ${overdueBadge}
             <input type="text" class="reg-inp title-inp" data-field="title" value="${escapeHTML(a.title)}" />
+            ${dragTail}
             ${a.notes ? '<span class="tag" title="Has notes">note</span>' : ''}
           </div>
           <div class="reg-cell">
@@ -2482,7 +2669,6 @@
             </select>
           </div>
           <div class="reg-cell priority-cell">
-            <span class="reg-prio-pip" style="background:rgb(${lvl.rgb})" title="${lvl.label}"></span>
             <select class="reg-inp" data-field="priorityLevel" style="color:rgb(${lvl.rgb});">
               ${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (a.priorityLevel || 'med') ? 'selected' : ''}>${p.label}</option>`).join('')}
             </select>
@@ -2681,6 +2867,10 @@
     });
 
     $('#btnAddAction').addEventListener('click', () => openQuickAdd('action'));
+    $('#btnOpenArchive').addEventListener('click', () => {
+      state.currentView = 'archive';
+      saveState(); render();
+    });
 
     // Archive every currently-visible done action (respecting active filters)
     // → they disappear from the register, remain visible in the Archive panel.
@@ -2721,7 +2911,7 @@
     view.innerHTML = `
       <div class="page-head">
         <div>
-          <div class="page-title">${escapeHTML(proj.name)} — Timeline</div>
+          <div class="page-title">${escapeHTML(proj.name)} — Gantt</div>
           <div class="page-sub">Drag bar body to shift • Drag edges to resize • Drag vertically to reassign • Double-click empty space to create</div>
         </div>
         <div class="page-actions">
@@ -3067,27 +3257,22 @@
       if (dv.dueDate) events.push({ kind: 'deliverable', date: dv.dueDate, name: dv.name, status: dv.status, sub: 'Deliverable' });
     });
     (proj.meetings || []).forEach((mt) => {
-      if (mt.kind === 'oneoff' && mt.date) {
-        events.push({ kind: 'meeting', date: mt.date, name: mt.title, sub: 'Meeting' + (mt.time ? ' ' + mt.time : '') });
-      } else if (mt.kind === 'weekly' && mt.dayOfWeek !== undefined) {
-        // Expand weekly meeting across the visible window
-        const since = mt.startDate ? parseDate(mt.startDate) : start;
-        let dt = new Date(Math.max(start.getTime(), since.getTime()));
-        while (dt.getDay() !== mt.dayOfWeek) dt = new Date(dt.getTime() + dayMs);
-        const last = new Date(start.getTime() + totalDays * dayMs);
-        let first = true;
-        while (dt <= last) {
-          events.push({
-            kind: 'meeting-weekly',
-            date: fmtISO(dt),
-            name: mt.title,
-            sub: 'Weekly' + (mt.time ? ' ' + mt.time : ''),
-            isFirst: first,
-          });
-          first = false;
-          dt = new Date(dt.getTime() + 7 * dayMs);
-        }
-      }
+      const winStartISO = fmtISO(start);
+      const winEndISO   = fmtISO(new Date(start.getTime() + totalDays * dayMs));
+      const dates = expandMeetingDates(mt, winStartISO, winEndISO);
+      if (!dates.length) return;
+      const baseLabel = meetingRecurrenceLabel(mt);
+      const sub = baseLabel + (mt.time ? ' ' + mt.time : '');
+      const isRecurring = mt.kind === 'recurring';
+      dates.forEach((iso, i) => {
+        events.push({
+          kind: isRecurring ? 'meeting-weekly' : 'meeting', // legacy class name kept for CSS; covers all recurrence
+          date: iso,
+          name: mt.title,
+          sub,
+          isFirst: i === 0,
+        });
+      });
     });
 
     // Filter to visible window and sort
@@ -3135,6 +3320,13 @@
       eventsRow.appendChild(m);
     });
 
+    // Critical-path detection — for every open milestone, walk back via
+    // dependsOn to find the longest unbroken chain. Every action on that
+    // chain gets a class on its bar; it also includes the actions linked
+    // to the milestone via a.milestone (since the milestone date is the
+    // chain's endpoint).
+    const criticalSet = computeCriticalActions(proj);
+
     // Draw bars
     actions.forEach((a) => {
       if (!a.due) return;
@@ -3158,7 +3350,7 @@
       const onHoliday = (holDue || holStart) && a.status !== 'done';
       const overload = actOverloads[a.id];
       const cmt = (typeof a.commitment === 'number') ? a.commitment : 100;
-      bar.className = `tl-bar ${a.status} ${dueCls === 'late' && a.status !== 'done' ? 'late' : ''} ${onHoliday ? 'holiday-conflict' : ''} ${overload ? 'over-allocated' : ''}`;
+      bar.className = `tl-bar ${a.status} ${dueCls === 'late' && a.status !== 'done' ? 'late' : ''} ${onHoliday ? 'holiday-conflict' : ''} ${overload ? 'over-allocated' : ''} ${criticalSet.has(a.id) ? 'critical-path' : ''}`;
       bar.style.left = left + 'px';
       bar.style.width = w + 'px';
       bar.dataset.id = a.id;
@@ -3218,6 +3410,130 @@
         toast('Action created — double-click bar to edit');
       });
     });
+
+    // Phase F — render dependency arrows on top of all bars. Drawn last so
+    // they sit above the grid lines, but pointer-events: none so bars stay
+    // interactive.
+    drawDependencyArrows(actions, gridEl, criticalSet);
+  }
+
+  // Walk back from every open milestone through dependsOn to flag the
+  // critical actions. Returns a Set of action ids on the longest chain to
+  // each open milestone (plus the actions directly linked to it).
+  function computeCriticalActions(proj) {
+    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    const byId = new Map(acts.map((a) => [a.id, a]));
+    const critical = new Set();
+    const depths = new Map();
+    const onStack = new Set();
+    function depth(id) {
+      if (depths.has(id)) return depths.get(id);
+      if (onStack.has(id)) return 0; // cycle guard
+      onStack.add(id);
+      const a = byId.get(id);
+      if (!a) { onStack.delete(id); return 0; }
+      const deps = (a.dependsOn || []).filter((d) => byId.has(d));
+      let best = 0;
+      deps.forEach((d) => { best = Math.max(best, depth(d)); });
+      onStack.delete(id);
+      depths.set(id, 1 + best);
+      return 1 + best;
+    }
+    function chain(id) {
+      const a = byId.get(id);
+      if (!a || critical.has(id)) return;
+      critical.add(id);
+      const deps = (a.dependsOn || []).filter((d) => byId.has(d));
+      if (!deps.length) return;
+      let bestDep = null, bestVal = -1;
+      deps.forEach((d) => { const v = depth(d); if (v > bestVal) { bestVal = v; bestDep = d; } });
+      if (bestDep) chain(bestDep);
+    }
+    (proj.milestones || []).forEach((m) => {
+      if (m.done || m.status === 'done') return;
+      const targets = acts.filter((a) => a.milestone === m.id && !isClosedStatus(a.status));
+      targets.forEach((t) => { depth(t.id); chain(t.id); });
+    });
+    return critical;
+  }
+
+  function drawDependencyArrows(actions, gridEl, criticalSet) {
+    const bars = Array.from(gridEl.querySelectorAll('.tl-bar[data-id]'));
+    if (!bars.length) return;
+    const byId = new Map(actions.map((a) => [a.id, a]));
+    const barById = new Map(bars.map((b) => [b.dataset.id, b]));
+
+    // Need positions relative to gridEl
+    const gridRect = gridEl.getBoundingClientRect();
+    function rectOf(b) {
+      const r = b.getBoundingClientRect();
+      return {
+        x: r.left - gridRect.left + gridEl.scrollLeft,
+        y: r.top - gridRect.top + gridEl.scrollTop,
+        w: r.width,
+        h: r.height,
+      };
+    }
+    const pairs = [];
+    actions.forEach((a) => {
+      if (!a.due) return;
+      const deps = a.dependsOn || [];
+      if (!deps.length) return;
+      const target = barById.get(a.id);
+      if (!target) return;
+      deps.forEach((depId) => {
+        const src = byId.get(depId);
+        const srcBar = barById.get(depId);
+        if (!src || !srcBar) return;
+        pairs.push({ src, srcBar, dst: a, dstBar: target });
+      });
+    });
+    if (!pairs.length) return;
+
+    // SVG overlay sized to the grid's full content
+    const w = gridEl.scrollWidth || gridEl.clientWidth;
+    const h = gridEl.scrollHeight || gridEl.clientHeight;
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'tl-dep-svg');
+    svg.setAttribute('width', String(w));
+    svg.setAttribute('height', String(h));
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.style.position = 'absolute';
+    svg.style.left = '0';
+    svg.style.top = '0';
+    svg.style.pointerEvents = 'none';
+
+    const defs = document.createElementNS(NS, 'defs');
+    defs.innerHTML = `
+      <marker id="depArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+      </marker>
+      <marker id="depArrowCrit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="#f87171" />
+      </marker>`;
+    svg.appendChild(defs);
+
+    pairs.forEach(({ src, dst, srcBar, dstBar }) => {
+      const a = rectOf(srcBar);
+      const b = rectOf(dstBar);
+      const x1 = a.x + a.w;
+      const y1 = a.y + a.h / 2;
+      const x2 = b.x;
+      const y2 = b.y + b.h / 2;
+      const isCritical = criticalSet.has(src.id) && criticalSet.has(dst.id);
+      const path = document.createElementNS(NS, 'path');
+      // Cubic bezier — a small horizontal lead-out and lead-in so connectors
+      // look intentional and don't clip into bar edges.
+      const handle = Math.max(12, Math.min(60, (x2 - x1) / 2));
+      const d = `M ${x1} ${y1} C ${x1 + handle} ${y1}, ${x2 - handle} ${y2}, ${x2 - 4} ${y2}`;
+      path.setAttribute('d', d);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('class', 'tl-dep-arrow' + (isCritical ? ' critical' : ''));
+      path.setAttribute('marker-end', isCritical ? 'url(#depArrowCrit)' : 'url(#depArrow)');
+      svg.appendChild(path);
+    });
+    gridEl.appendChild(svg);
   }
 
   function showTLTooltip(html, clientX, clientY) {
@@ -3604,8 +3920,32 @@
           <div class="panel-title">Status mix</div>
           <div id="statusMix"></div>
         </div>
+      </div>
+
+      <div class="dashboard-section-break">
+        <div class="dashboard-section-title">Charts</div>
+        <div class="dashboard-section-sub">Trends and projections across the portfolio</div>
+      </div>
+      <div class="charts-grid">
+        <div class="panel chart-panel">
+          <div class="panel-title">Schedule deviation waterfall <span class="legend">x = when forecast was made • y = forecast due • diagonal = delivered now</span></div>
+          ${chartWaterfall()}
+        </div>
+        <div class="panel chart-panel half">
+          <div class="panel-title">Cumulative workload (next 12 weeks) <span class="legend">click a name to hide / show</span></div>
+          <div id="cumWlSlot">${chartCumulativeWorkload(12)}</div>
+        </div>
+        <div class="panel chart-panel half">
+          <div class="panel-title">Activity / week (last 12 weeks)</div>
+          ${chartFlow(12)}
+        </div>
+        <div class="panel chart-panel">
+          <div class="panel-title">Per-person workload (next 12 weeks)</div>
+          ${chartPerPerson()}
+        </div>
       </div>`;
     root.appendChild(view);
+    wireCumWlLegend();
 
     // Stale-action rows in the decision-KPI panel → open the drawer for that action
     $$('.dkpi-list-row[data-action-id]', view).forEach((el) => {
@@ -3981,7 +4321,7 @@
     candidates.sort((x, y) => (y.hist.length - x.hist.length) || (x.a.due.localeCompare(y.a.due)));
     const top = candidates.slice(0, 12);
     if (!top.length) {
-      return `<div class="empty">No scheduled actions yet — add some, then dragging them on the Timeline will populate this chart over time.</div>`;
+      return `<div class="empty">No scheduled actions yet — add some, then dragging them on the Gantt will populate this chart over time.</div>`;
     }
 
     // Domain: x = snapshot dates from earliest 'at' to today
@@ -4105,40 +4445,181 @@
     wireCumWlLegend();
   }
 
+  // Merged Review + Reports. Two reading modes share the same data:
+  //  - 'walkthrough': stepper wizard with inline edits, for live meetings.
+  //  - 'full':        single-page snapshot, for distribution.
+  // Period selector + Markdown / Print exports are shared and always
+  // visible. Default mode is walkthrough so the live meeting flow lands
+  // first; users can flip to 'full' for the print-ready snapshot.
+  const reviewModeState = { mode: 'walkthrough' };
   function renderReview(root) {
     const proj = curProject();
     const view = document.createElement('div');
     view.className = 'view';
+    const isAll = state.currentProjectId === '__all__';
+    if (isAll || !proj) {
+      view.innerHTML = `
+        <div class="page-head">
+          <div>
+            <div class="page-title">Review</div>
+            <div class="page-sub">Pick a project to review.</div>
+          </div>
+        </div>
+        <div class="empty">Review is project-scoped. Choose a project from the topbar.</div>`;
+      root.appendChild(view);
+      return;
+    }
+    const range = reportPeriodRange();
+    const data = buildReportData(proj, range.since, range.until);
+    const mode = reviewModeState.mode;
+    const optSel = (val) => reportState.period === val ? 'selected' : '';
+
     view.innerHTML = `
       <div class="review">
-        <div class="page-head" style="margin-bottom:0;">
+        <div class="page-head" style="margin-bottom:10px;">
           <div>
             <div class="page-title">${escapeHTML(proj.name)} — Review</div>
-            <div class="page-sub">${fmtFull(todayISO())}</div>
+            <div class="page-sub">${fmtFull(data.since)} – ${fmtFull(data.until)}</div>
           </div>
           <div class="page-actions">
-            <button class="ghost" id="btnReviewExport">Export HTML</button>
+            <select id="reportPeriod" class="report-period" title="Period for changes / decisions / CRs">
+              <option value="7d"  ${optSel('7d')}>Last 7 days</option>
+              <option value="30d" ${optSel('30d')}>Last 30 days</option>
+              <option value="90d" ${optSel('90d')}>Last 90 days</option>
+              <option value="custom" ${optSel('custom')}>Custom…</option>
+            </select>
+            <span class="report-custom" id="reportCustom" ${reportState.period === 'custom' ? '' : 'hidden'}>
+              <input type="date" id="reportSince" value="${reportState.customSince || data.since}" />
+              <span class="report-dash">–</span>
+              <input type="date" id="reportUntil" value="${reportState.customUntil || data.until}" />
+            </span>
+            <div class="seg" role="tablist" aria-label="Review mode">
+              <button type="button" class="seg-btn ${mode === 'walkthrough' ? 'active' : ''}" data-review-mode="walkthrough">Walk-through</button>
+              <button type="button" class="seg-btn ${mode === 'full'        ? 'active' : ''}" data-review-mode="full">Full report</button>
+            </div>
+            <button class="ghost" id="btnReportCopyMd"  title="Copy as Markdown">Copy MD</button>
+            <button class="ghost" id="btnReportDownload" title="Download .md file">Download</button>
+            <button class="ghost" id="btnReportPrint"   title="Open print-ready HTML in a new tab">Print → PDF</button>
           </div>
         </div>
-        <div class="review-stepper" id="reviewStepper"></div>
-        <div class="review-card" id="reviewBody"></div>
-        <div class="review-foot">
-          <button class="ghost" id="btnReviewPrev">← Previous</button>
-          <button class="primary" id="btnReviewNext">Next →</button>
-        </div>
+        ${mode === 'walkthrough' ? `
+          <div class="review-stepper" id="reviewStepper"></div>
+          <div class="review-card" id="reviewBody"></div>
+          <div class="review-foot">
+            <button class="ghost" id="btnReviewPrev">← Previous</button>
+            <button class="primary" id="btnReviewNext">Next →</button>
+          </div>
+        ` : `
+          <div class="report" id="reportBody"></div>
+        `}
       </div>`;
     root.appendChild(view);
 
-    drawReviewStep();
-    $('#btnReviewPrev').addEventListener('click', () => {
-      reviewStep = clamp(reviewStep - 1, 0, REVIEW_STEPS.length - 1);
-      drawReviewStep();
+    // --- Period + custom-range wiring (shared) ---
+    $('#reportPeriod').addEventListener('change', (e) => {
+      reportState.period = e.target.value;
+      render();
     });
-    $('#btnReviewNext').addEventListener('click', () => {
-      reviewStep = clamp(reviewStep + 1, 0, REVIEW_STEPS.length - 1);
-      drawReviewStep();
+    $('#reportSince')?.addEventListener('change', (e) => {
+      reportState.customSince = e.target.value; reportState.period = 'custom'; render();
     });
-    $('#btnReviewExport').addEventListener('click', exportReviewHTML);
+    $('#reportUntil')?.addEventListener('change', (e) => {
+      reportState.customUntil = e.target.value; reportState.period = 'custom'; render();
+    });
+
+    // --- Mode toggle ---
+    $$('.seg-btn[data-review-mode]', view).forEach((b) => {
+      b.addEventListener('click', () => {
+        if (reviewModeState.mode === b.dataset.reviewMode) return;
+        reviewModeState.mode = b.dataset.reviewMode;
+        render();
+      });
+    });
+
+    // --- Export buttons (always export the FULL report for the current
+    // period — that's the most useful artifact regardless of mode) ---
+    $('#btnReportCopyMd').addEventListener('click', async () => {
+      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
+      try { await navigator.clipboard.writeText(md); toast('Copied as Markdown'); }
+      catch (e) { toast('Copy failed — clipboard unavailable'); }
+    });
+    $('#btnReportDownload').addEventListener('click', () => {
+      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
+      const blob = new Blob([md], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `report-${proj.id}-${range.until}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Report downloaded');
+    });
+    $('#btnReportPrint').addEventListener('click', () => {
+      const html = reportToPrintHTML(buildReportData(curProject(), range.since, range.until));
+      const w = window.open('', '_blank');
+      if (!w) { toast('Pop-up blocked'); return; }
+      w.document.write(html); w.document.close();
+      setTimeout(() => { try { w.print(); } catch (e) { /* ignore */ } }, 250);
+    });
+
+    // --- Mode-specific body wiring ---
+    if (mode === 'walkthrough') {
+      drawReviewStep();
+      $('#btnReviewPrev').addEventListener('click', () => {
+        reviewStep = clamp(reviewStep - 1, 0, REVIEW_STEPS.length - 1);
+        drawReviewStep();
+      });
+      $('#btnReviewNext').addEventListener('click', () => {
+        reviewStep = clamp(reviewStep + 1, 0, REVIEW_STEPS.length - 1);
+        drawReviewStep();
+      });
+    } else {
+      // Full report — render the same body the old Reports view used,
+      // wired with the same drilldowns.
+      const k = data.kpis;
+      const reportBody = $('#reportBody');
+      reportBody.innerHTML = `
+        <div class="report-kpis">
+          <div class="report-kpi"><div class="report-kpi-num">${k.done}</div><div class="report-kpi-lbl">Done</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.changed}</div><div class="report-kpi-lbl">Changed</div></div>
+          <div class="report-kpi ${k.late > 0 ? 'bad' : ''}"><div class="report-kpi-num">${k.late}</div><div class="report-kpi-lbl">Late</div></div>
+          <div class="report-kpi ${k.blocked > 0 ? 'warn' : ''}"><div class="report-kpi-num">${k.blocked}</div><div class="report-kpi-lbl">Blocked</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.decisions}</div><div class="report-kpi-lbl">Decisions</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.crs}</div><div class="report-kpi-lbl">CRs decided</div></div>
+        </div>
+        ${reportSection('What changed', data.changed.slice(0, 30), (a) =>
+          `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.status)}${a.updatedAt ? ' · ' + a.updatedAt : ''}</span></div>`,
+          'No updates in this period.')}
+        ${reportSection('Late & blocked', data.lateOrBlocked, (a) => {
+          const reason = a.status === 'blocked' ? 'blocked' : `${Math.abs(dayDiff(a.due, data.today))}d late`;
+          return `<div class="report-row clickable bad" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${reason}</span></div>`;
+        }, 'Nothing late or blocked — nice work.')}
+        ${reportSection('Decisions made', data.decisions, (d) =>
+          `<div class="report-row"><span>${escapeHTML(d.title)}</span><span class="report-meta">${escapeHTML(personName(d.owner))} · ${escapeHTML(d.date || '—')}</span></div>${d.rationale ? `<div class="report-rationale">${escapeHTML(d.rationale)}</div>` : ''}`,
+          'No decisions logged in this period.')}
+        ${reportSection('Change requests decided', data.crsDecided, (c) =>
+          `<div class="report-row clickable" data-open-cr="${c.id}"><span>${escapeHTML(c.title)}</span><span class="report-meta">${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + escapeHTML(personName(c.decisionBy)) : ''}</span></div>`,
+          'No CRs decided in this period.')}
+        ${reportSection('Top risks (by residual)', data.topRisks, (r) =>
+          `<div class="report-row clickable" data-open-risk="${r.id}"><span>${escapeHTML(r.title)}</span><span class="report-meta">residual ${r._score}</span></div>${r.mitigation ? `<div class="report-rationale">${escapeHTML(r.mitigation)}</div>` : ''}`,
+          'No risks logged.')}
+        <div class="report-section">
+          <div class="report-section-title">What's next (next 14 days)</div>
+          ${(data.next.milestones.length || data.next.deliverables.length || data.next.actions.length)
+            ? `${data.next.milestones.length ? '<div class="report-sub-title">Milestones</div>' + data.next.milestones.map((m) => `<div class="report-row"><span>${escapeHTML(m.name || m.title || '')}</span><span class="report-meta">${escapeHTML(m.date || '')}</span></div>`).join('') : ''}
+               ${data.next.deliverables.length ? '<div class="report-sub-title">Deliverables</div>' + data.next.deliverables.map((d) => `<div class="report-row"><span>${escapeHTML(d.name || d.title || '')}</span><span class="report-meta">${escapeHTML(d.date || '')}</span></div>`).join('') : ''}
+               ${data.next.actions.length ? '<div class="report-sub-title">Due actions</div>' + data.next.actions.slice(0, 30).map((a) => `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.due || '')}</span></div>`).join('') : ''}`
+            : '<div class="empty">Nothing scheduled in the next 14 days.</div>'}
+        </div>`;
+      reportBody.querySelectorAll('[data-open-action]').forEach((el) => {
+        el.addEventListener('click', () => openDrawer(el.dataset.openAction));
+      });
+      reportBody.querySelectorAll('[data-open-cr]').forEach((el) => {
+        el.addEventListener('click', () => openChangeRequestEditor(el.dataset.openCr));
+      });
+      reportBody.querySelectorAll('[data-open-risk]').forEach((el) => {
+        el.addEventListener('click', () => openRiskEditor(el.dataset.openRisk));
+      });
+    }
   }
 
   function drawReviewStep() {
@@ -4627,6 +5108,12 @@
               </select>
             </div>
           </div>
+          <div class="field"><label>Component <span class="muted">— optional</span></label>
+            <select id="dvComp">
+              <option value="">— None</option>
+              ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === d.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
+            </select>
+          </div>
         </div>
         <div class="desc-foot">
           <button class="ghost" id="dvCancel">Cancel</button>
@@ -4646,6 +5133,7 @@
       d.name = document.getElementById('dvName').value.trim() || d.name;
       d.dueDate = document.getElementById('dvDue').value || null;
       d.status = document.getElementById('dvStatus').value;
+      d.component = document.getElementById('dvComp').value || null;
       commit('deliverable-edit');
       close();
       toast('Saved');
@@ -4754,7 +5242,8 @@
         <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
           <div class="field"><label>Name</label><input id="msName" value="${escapeHTML(m.name)}" /></div>
           <div class="qa-row">
-            <div class="field"><label>Date</label><input id="msDate" type="date" value="${m.date || ''}" /></div>
+            <div class="field"><label>Start date</label><input id="msDate" type="date" value="${m.date || ''}" /></div>
+            <div class="field"><label>End date <span class="muted">— leave empty for a single day</span></label><input id="msEndDate" type="date" value="${m.endDate || ''}" /></div>
             <div class="field"><label>Status</label>
               <select id="msStatus">
                 <option value="todo" ${m.status === 'todo' ? 'selected' : ''}>Not started</option>
@@ -4762,6 +5251,12 @@
                 <option value="done" ${m.status === 'done' ? 'selected' : ''}>Done</option>
               </select>
             </div>
+          </div>
+          <div class="field"><label>Component <span class="muted">— optional</span></label>
+            <select id="msComp">
+              <option value="">— None</option>
+              ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === m.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
+            </select>
           </div>
         </div>
         <div class="desc-foot">
@@ -4781,7 +5276,12 @@
     overlay.querySelector('#msSave').addEventListener('click', () => {
       m.name = document.getElementById('msName').value.trim() || m.name;
       m.date = document.getElementById('msDate').value || null;
+      const ed = document.getElementById('msEndDate').value || null;
+      // Reject end-before-start; treat equal as single-day (clear endDate).
+      if (ed && m.date && ed < m.date) { toast('End date can\'t be before start date'); return; }
+      m.endDate = (ed && ed !== m.date) ? ed : null;
       m.status = document.getElementById('msStatus').value;
+      m.component = document.getElementById('msComp').value || null;
       commit('milestone-edit');
       close();
       toast('Saved');
@@ -4792,6 +5292,158 @@
       proj.milestones = (proj.milestones || []).filter((x) => x.id !== m.id);
       (proj.actions || []).forEach((a) => { if (a.milestone === m.id) a.milestone = null; });
       commit('milestone-delete');
+      close();
+      toast('Deleted');
+    });
+  }
+
+  // Click a meeting chip in the calendar → open this small editor with
+  // the same progressive-disclosure layout used by Quick Add: only the
+  // fields required for the current selection are visible. Switching
+  // toggle / unit re-shapes the schema in place so a meeting can be
+  // promoted from one-off → recurring (or vice-versa, or a different
+  // unit) without re-creating it.
+  function openMeetingEditor(meetingId) {
+    const proj = curProject();
+    const m = (proj.meetings || []).find((x) => x.id === meetingId);
+    if (!m) return;
+    const repeating = m.kind === 'recurring';
+    const initUnit  = repeating ? (m.recurUnit || 'week') : 'week';
+    const initInterval = repeating ? (m.interval || 1) : 1;
+    const dowOpts = [1,2,3,4,5,6,0].map((d) => {
+      const names = { 0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday' };
+      return `<option value="${d}" ${d === (m.dayOfWeek ?? 1) ? 'selected' : ''}>${names[d]}</option>`;
+    }).join('');
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width:520px;">
+        <div class="desc-head">
+          <div class="desc-title">Edit meeting</div>
+          <button class="icon-btn" id="mtgClose" title="Close">×</button>
+        </div>
+        <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
+          <div class="field"><label>Title</label><input id="mtgTitle" value="${escapeHTML(m.title || '')}" /></div>
+          <div class="qa-row">
+            <div class="field"><label id="mtgDateLbl">${repeating ? 'Start date' : 'Date'}</label>
+              <input id="mtgDate" type="date" value="${(repeating ? m.startDate : m.date) || ''}" />
+            </div>
+            <div class="field"><label>Time <span class="muted">— optional</span></label>
+              <input id="mtgTime" type="time" value="${m.time || ''}" />
+            </div>
+          </div>
+          <div class="field">
+            <label class="qa-toggle">
+              <input type="checkbox" id="mtgRepeats" ${repeating ? 'checked' : ''} />
+              <span>Repeating meeting</span>
+            </label>
+          </div>
+          <div id="mtgRecurWrap" ${repeating ? '' : 'hidden'}>
+            <div class="qa-row qa-row-tight">
+              <div class="field" style="flex: 0 0 auto;">
+                <label>Every</label>
+                <input id="mtgInterval" type="number" min="1" max="99" value="${initInterval}" style="width:64px;" />
+              </div>
+              <div class="field" style="flex: 1;">
+                <label>&nbsp;</label>
+                <select id="mtgUnit">
+                  <option value="day"   ${initUnit === 'day'   ? 'selected' : ''}>Day(s)</option>
+                  <option value="week"  ${initUnit === 'week'  ? 'selected' : ''}>Week(s)</option>
+                  <option value="month" ${initUnit === 'month' ? 'selected' : ''}>Month(s)</option>
+                </select>
+              </div>
+              <div class="field" id="mtgDowField" ${initUnit === 'week' ? '' : 'hidden'}>
+                <label>On</label>
+                <select id="mtgDow">${dowOpts}</select>
+              </div>
+            </div>
+            <div class="field">
+              <label>Ends <span class="muted">— optional</span></label>
+              <input id="mtgEndDate" type="date" value="${m.endDate || ''}" />
+            </div>
+          </div>
+          <div class="field"><label>Component <span class="muted">— optional</span></label>
+            <select id="mtgComp">
+              <option value="">— None</option>
+              ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === m.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="desc-foot">
+          <button class="ghost" id="mtgCancel">Cancel</button>
+          <button class="ghost" id="mtgDelete" style="margin-left:auto; color:var(--bad);">Delete</button>
+          <button class="primary" id="mtgSave">Save</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    setTimeout(() => document.getElementById('mtgTitle').focus(), 30);
+    const close = () => overlay.remove();
+    const repeatChk = overlay.querySelector('#mtgRepeats');
+    const recurWrap = overlay.querySelector('#mtgRecurWrap');
+    const dateInput = overlay.querySelector('#mtgDate');
+    const unitSel   = overlay.querySelector('#mtgUnit');
+    const dowField  = overlay.querySelector('#mtgDowField');
+    const dowSel    = overlay.querySelector('#mtgDow');
+    const dateLbl   = overlay.querySelector('#mtgDateLbl');
+    function syncDowFromDate() {
+      const v = dateInput.value;
+      if (v) dowSel.value = String(parseDate(v).getDay());
+    }
+    repeatChk.addEventListener('change', () => {
+      recurWrap.hidden = !repeatChk.checked;
+      dateLbl.textContent = repeatChk.checked ? 'Start date' : 'Date';
+      if (repeatChk.checked && unitSel.value === 'week') syncDowFromDate();
+    });
+    unitSel.addEventListener('change', () => {
+      dowField.hidden = unitSel.value !== 'week';
+      if (unitSel.value === 'week') syncDowFromDate();
+    });
+    dateInput.addEventListener('change', () => {
+      if (repeatChk.checked && unitSel.value === 'week') syncDowFromDate();
+    });
+    overlay.querySelector('#mtgClose').addEventListener('click', close);
+    overlay.querySelector('#mtgCancel').addEventListener('click', close);
+    overlay.querySelector('#mtgSave').addEventListener('click', () => {
+      const title = overlay.querySelector('#mtgTitle').value.trim();
+      if (!title) { toast('Title required'); return; }
+      const date = dateInput.value || todayISO();
+      const time = overlay.querySelector('#mtgTime').value || null;
+      const isRepeating = repeatChk.checked;
+      m.title = title;
+      m.time = time;
+      m.component = overlay.querySelector('#mtgComp').value || null;
+      if (!isRepeating) {
+        m.kind = 'oneoff';
+        m.date = date;
+        m.endDate = null;
+        delete m.recurUnit;
+        delete m.interval;
+        delete m.dayOfWeek;
+        delete m.startDate;
+      } else {
+        const interval = Math.max(1, parseInt(overlay.querySelector('#mtgInterval').value, 10) || 1);
+        const unit = unitSel.value === 'day' ? 'day'
+                   : unitSel.value === 'month' ? 'month'
+                   : 'week';
+        const ed = overlay.querySelector('#mtgEndDate').value || null;
+        if (ed && ed < date) { toast('End date can\'t be before the start date'); return; }
+        m.kind = 'recurring';
+        m.recurUnit = unit;
+        m.interval  = interval;
+        m.startDate = date;
+        m.endDate   = ed;
+        if (unit === 'week') m.dayOfWeek = parseInt(dowSel.value, 10);
+        else delete m.dayOfWeek;
+        delete m.date;
+      }
+      commit('meeting-edit');
+      close();
+      toast('Saved');
+    });
+    overlay.querySelector('#mtgDelete').addEventListener('click', () => {
+      if (!confirm(`Delete "${m.title}"?`)) return;
+      proj.meetings = (proj.meetings || []).filter((x) => x.id !== m.id);
+      commit('meeting-delete');
       close();
       toast('Deleted');
     });
@@ -6940,6 +7592,7 @@
             state.currentView = 'board';
             saveState(); render();
           }},
+          { icon: '⊕', label: 'Save as template…', onClick: () => saveProjectAsTemplate(pid) },
           { divider: true },
           { icon: '×', label: 'Delete project', danger: true, onClick: () => {
             if (state.projects.length <= 1) { toast('Cannot delete the only project'); return; }
@@ -6963,6 +7616,69 @@
       });
     });
     $('#btnNewProj2').addEventListener('click', () => openQuickAdd('project'));
+  }
+
+  /* --------------------- Phase J: project templates -------------------- */
+  // Build a structural skeleton from a project — strip ids, action data,
+  // decisions, notes, history, comments. Keep components, deliverable
+  // stubs, milestone stubs, risk skeletons (title + inherent matrix).
+  function projectToTemplate(p, name) {
+    const t = {
+      id: uid('tpl'),
+      name: (name || p.name + ' (template)'),
+      createdAt: todayISO(),
+      sourceProjectId: p.id,
+      shape: {
+        description: p.description || '',
+        components: (p.components || []).map((c) => ({
+          name: c.name, color: c.color, costCenter: c.costCenter || null,
+        })),
+        deliverables: (p.deliverables || []).map((d) => ({
+          name: d.name, status: 'todo',
+          // intentionally drop dates — instantiation should re-plan
+        })),
+        milestones: (p.milestones || []).map((m) => ({
+          name: m.name, status: 'planned',
+        })),
+        risks: (p.risks || []).map((r) => ({
+          title: r.title,
+          kind: r.kind || 'risk',
+          inherent: r.inherent ? { ...r.inherent } : { probability: 0, impact: 0 },
+          mitigation: r.mitigation || '',
+        })),
+        tags: (p.tags || []).map((tg) => ({ name: tg.name, rgb: tg.rgb })),
+        // Intentionally NOT cloned: actions, decisions, change requests,
+        // notes, links, meetings, history. The shape is the skeleton, not
+        // the in-flight work.
+      },
+    };
+    return t;
+  }
+  function applyTemplateToProject(np, tpl) {
+    const shape = tpl.shape || {};
+    if (shape.description && !np.description) np.description = shape.description;
+    np.components   = (shape.components   || []).map((c) => ({ id: uid('cm'), ...c }));
+    np.deliverables = (shape.deliverables || []).map((d) => ({ id: uid('d'), ...d }));
+    np.milestones   = (shape.milestones   || []).map((m) => ({ id: uid('m'), ...m }));
+    np.risks        = (shape.risks        || []).map((r) => ({
+      id: uid('rk'), ...r,
+      residual: r.inherent ? { ...r.inherent } : { probability: 0, impact: 0 },
+      owner: null,
+      actionId: null,
+    }));
+    np.tags         = (shape.tags         || []).map((t) => ({ id: uid('tg'), ...t }));
+  }
+  function saveProjectAsTemplate(projectId) {
+    const p = state.projects.find((x) => x.id === projectId);
+    if (!p) return;
+    const suggested = p.name + ' template';
+    const name = prompt('Template name:', suggested);
+    if (!name) return;
+    const tpl = projectToTemplate(p, name.trim());
+    state.templates = state.templates || [];
+    state.templates.push(tpl);
+    commit('template-create');
+    toast(`Saved as template: ${tpl.name}`);
   }
 
   function openProjectEditor(projectId) {
@@ -7144,18 +7860,15 @@
     });
     $$('.person-row.clickable', view).forEach((row) => {
       row.addEventListener('click', () => {
-        applyTopbarFilter({ owner: row.dataset.ownerId, view: 'register' });
-      });
-      row.addEventListener('dblclick', (e) => {
-        e.preventDefault();
-        applyTopbarFilter({ owner: '', view: 'register' });
+        openPersonDashboard(row.dataset.ownerId);
       });
       row.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         const id = row.dataset.ownerId;
         const p = state.people.find((x) => x.id === id);
         showContextMenu(e.clientX, e.clientY, [
-          { icon: '✎', label: 'Edit person…', onClick: () => openPersonEditor(id) },
+          { icon: '◰', label: 'Open dashboard',  onClick: () => openPersonDashboard(id) },
+          { icon: '✎', label: 'Edit person…',    onClick: () => openPersonEditor(id) },
           { icon: '⌕', label: `Filter Register to ${p?.name || ''}`, onClick: () => applyTopbarFilter({ owner: id, view: 'register' }) },
           { divider: true },
           { icon: '×', label: 'Delete person…', danger: true, onClick: () => {
@@ -7167,6 +7880,125 @@
             toast('Deleted');
           }},
         ]);
+      });
+    });
+  }
+
+  /* ---------------------- Phase I: Person dashboard -------------------- */
+  // Opens the existing drawer with an aggregated read-only view of one
+  // person: open / late actions, weekly load + spark, originated CRs,
+  // decisions made, owned risks with non-trivial residual. Each list item
+  // routes to its underlying drawer / editor.
+  function openPersonDashboard(personId) {
+    const p = state.people.find((x) => x.id === personId);
+    if (!p) return;
+    $('#drawerTitle').textContent = 'Person dashboard';
+    const today = todayISO();
+    const allActs = state.projects.flatMap((pr) =>
+      (pr.actions || []).filter((a) => !a.deletedAt && a.owner === p.id).map((a) => ({ a, pr })));
+    const open  = allActs.filter(({ a }) => !isClosedStatus(a.status));
+    const late  = open.filter(({ a }) => a.due && dayDiff(a.due, today) < 0);
+    const blocked = open.filter(({ a }) => a.status === 'blocked');
+    const allCRs       = state.projects.flatMap((pr) => (pr.changes || []).map((c) => ({ c, pr })));
+    const myCRs        = allCRs.filter(({ c }) => c.originator === p.id);
+    const myDecisions  = state.projects.flatMap((pr) => (pr.decisions || []).filter((d) => d.owner === p.id).map((d) => ({ d, pr })));
+    const myRisks      = state.projects.flatMap((pr) =>
+      (pr.risks || []).filter((r) => r.owner === p.id).map((r) => {
+        const res = r.residual || r.inherent || { probability: 0, impact: 0 };
+        return { r, pr, _score: (res.probability || 0) * (res.impact || 0) };
+      }))
+      .filter((x) => x._score >= 6)
+      .sort((a, b) => b._score - a._score);
+
+    const series = weeklyLoad(p.id, 12);
+    const cap = p.capacity || 100;
+    const peakWeek = series.reduce((mx, s) => s.count > mx.count ? s : mx, series[0] || { count: 0 });
+    const openCmt = open.reduce((s, { a }) => s + ((typeof a.commitment === 'number') ? a.commitment : 100), 0);
+    const pct = clamp(Math.round((openCmt / cap) * 100), 0, 200);
+    const cls = pct > 100 ? 'over' : pct > 80 ? 'warn' : 'ok';
+
+    const listRow = (title, sub, run) => `
+      <div class="dash-row${run ? ' clickable' : ''}" data-run="1">
+        <div class="dash-row-title">${escapeHTML(title)}</div>
+        <div class="dash-row-sub">${escapeHTML(sub)}</div>
+      </div>`;
+    const listOrEmpty = (title, count, html) => `
+      <div class="dash-section">
+        <div class="dash-section-title">${escapeHTML(title)}<span class="dash-section-count">${count}</span></div>
+        ${count ? html : '<div class="empty">— none</div>'}
+      </div>`;
+
+    $('#drawerBody').innerHTML = `
+      <div class="dash-head">
+        <span class="avatar lg">${initials(p.name)}</span>
+        <div class="dash-head-body">
+          <div class="dash-name">${escapeHTML(p.name)}</div>
+          <div class="dash-role">${escapeHTML(p.role || '—')}</div>
+          <div class="dash-head-actions">
+            <button class="ghost" id="dashEdit">Edit person…</button>
+            <button class="ghost" id="dashFilter">Filter Register to ${escapeHTML(p.name)}</button>
+          </div>
+        </div>
+      </div>
+      <div class="dash-kpis">
+        <div class="dash-kpi"><div class="dash-kpi-num">${open.length}</div><div class="dash-kpi-lbl">Open</div></div>
+        <div class="dash-kpi ${late.length ? 'bad' : ''}"><div class="dash-kpi-num">${late.length}</div><div class="dash-kpi-lbl">Late</div></div>
+        <div class="dash-kpi ${blocked.length ? 'warn' : ''}"><div class="dash-kpi-num">${blocked.length}</div><div class="dash-kpi-lbl">Blocked</div></div>
+        <div class="dash-kpi ${cls === 'over' ? 'bad' : cls === 'warn' ? 'warn' : ''}"><div class="dash-kpi-num">${pct}%</div><div class="dash-kpi-lbl">Load</div></div>
+      </div>
+      <div class="dash-section">
+        <div class="dash-section-title">Workload — next 12 weeks<span class="dash-section-count">peak ${peakWeek.count}%</span></div>
+        ${workloadSparkSVG(p, series)}
+      </div>
+      ${listOrEmpty('Late actions', late.length,
+        late.slice(0, 12).map(({ a, pr }) => `
+          <div class="dash-row clickable" data-action-id="${a.id}">
+            <div class="dash-row-title">${escapeHTML(a.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)} · ${Math.abs(dayDiff(a.due, today))}d late</div>
+          </div>`).join(''))}
+      ${listOrEmpty('Open actions', open.length,
+        open.slice(0, 20).map(({ a, pr }) => `
+          <div class="dash-row clickable" data-action-id="${a.id}">
+            <div class="dash-row-title">${escapeHTML(a.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)} · ${escapeHTML(a.status)}${a.due ? ' · due ' + a.due : ''}</div>
+          </div>`).join(''))}
+      ${listOrEmpty('Originated change requests', myCRs.length,
+        myCRs.slice(0, 12).map(({ c, pr }) => `
+          <div class="dash-row clickable" data-cr-id="${c.id}" data-proj-id="${pr.id}">
+            <div class="dash-row-title">${escapeHTML(c.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)} · ${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}</div>
+          </div>`).join(''))}
+      ${listOrEmpty('Decisions made', myDecisions.length,
+        myDecisions.slice(0, 12).map(({ d, pr }) => `
+          <div class="dash-row" data-dec-id="${d.id}">
+            <div class="dash-row-title">${escapeHTML(d.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)}${d.date ? ' · ' + d.date : ''}</div>
+          </div>`).join(''))}
+      ${listOrEmpty('Owned risks (residual ≥ 6)', myRisks.length,
+        myRisks.slice(0, 12).map(({ r, pr, _score }) => `
+          <div class="dash-row clickable" data-risk-id="${r.id}" data-proj-id="${pr.id}">
+            <div class="dash-row-title">${escapeHTML(r.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)} · residual ${_score}</div>
+          </div>`).join(''))}`;
+    $('#drawer').hidden = false;
+    $('#dashEdit').addEventListener('click', () => openPersonEditor(personId));
+    $('#dashFilter').addEventListener('click', () => {
+      closeDrawer();
+      applyTopbarFilter({ owner: personId, view: 'register' });
+    });
+    $('#drawerBody').querySelectorAll('[data-action-id]').forEach((row) => {
+      row.addEventListener('click', () => openDrawer(row.dataset.actionId));
+    });
+    $('#drawerBody').querySelectorAll('[data-cr-id]').forEach((row) => {
+      row.addEventListener('click', () => {
+        state.currentProjectId = row.dataset.projId;
+        openChangeRequestEditor(row.dataset.crId);
+      });
+    });
+    $('#drawerBody').querySelectorAll('[data-risk-id]').forEach((row) => {
+      row.addEventListener('click', () => {
+        state.currentProjectId = row.dataset.projId;
+        openRiskEditor(row.dataset.riskId);
       });
     });
   }
@@ -7216,7 +8048,16 @@
           <select id="dMile"><option value="">—</option>${(proj.milestones || []).map((m) => `<option value="${m.id}" ${m.id === a.milestone ? 'selected' : ''}>${escapeHTML(m.name)}</option>`).join('')}</select>
         </div>
       </div>
+      <div class="field"><label>Depends on <span class="muted">— actions that must finish before this one</span></label>
+        <div class="depends-input" id="dDependsWrap"></div>
+      </div>
+      <div class="field"><label>Tags</label>
+        <div class="tags-input" id="dTagsWrap"></div>
+      </div>
       <div class="field"><label>Notes / justification</label><textarea id="dNotes">${escapeHTML(a.notes || '')}</textarea></div>
+      <div class="field"><label>Comments</label>
+        <div class="comments" id="dComments"></div>
+      </div>
       <div class="field"><label>History</label>
         <div class="history">${(a.history || []).slice(-10).reverse().map((h) => `<div class="history-item"><b>${h.at}</b> — ${escapeHTML(h.what)}</div>`).join('')}</div>
       </div>
@@ -7226,6 +8067,245 @@
       </div>`;
     $('#drawer').hidden = false;
     $('#dCmt').addEventListener('input', (e) => { $('#dCmtVal').textContent = e.target.value + '%'; });
+
+    // Depends-on multi-select. Local working list mirrored back to a.dependsOn
+    // on save. Self-references and would-be cycles are filtered from the
+    // candidate dropdown so users can't create them in the first place.
+    const drawerDeps = Array.isArray(a.dependsOn) ? a.dependsOn.slice() : [];
+    function reverseDepGraph(actsList) {
+      // For cycle prevention: collect every action that already (transitively)
+      // depends on the action we're editing — those can't be added as deps.
+      const reverse = new Map();
+      actsList.forEach((x) => (x.dependsOn || []).forEach((depId) => {
+        if (!reverse.has(depId)) reverse.set(depId, new Set());
+        reverse.get(depId).add(x.id);
+      }));
+      const blocked = new Set();
+      const stack = [a.id];
+      while (stack.length) {
+        const id = stack.pop();
+        if (blocked.has(id)) continue;
+        blocked.add(id);
+        (reverse.get(id) || []).forEach((parent) => stack.push(parent));
+      }
+      return blocked;
+    }
+    function renderDepsUI() {
+      const wrap = $('#dDependsWrap');
+      const acts = (proj.actions || []).filter((x) => !x.deletedAt);
+      const byId = new Map(acts.map((x) => [x.id, x]));
+      const blocked = reverseDepGraph(acts); // includes a.id itself
+      wrap.innerHTML = `
+        <div class="depends-chips">
+          ${drawerDeps.map((id) => {
+            const dep = byId.get(id);
+            if (!dep) return '';
+            return `<span class="dep-chip" data-id="${escapeHTML(id)}">
+              <span class="dep-chip-text">${escapeHTML(dep.title)}</span>
+              <button type="button" class="dep-chip-x" data-action="remove" title="Remove">×</button>
+            </span>`;
+          }).join('')}
+        </div>
+        <div class="depends-search" data-empty="Add a dependency…">
+          <input type="text" id="dDepSearch" placeholder="Type to search actions…" autocomplete="off" />
+          <div class="depends-results" id="dDepResults" hidden></div>
+        </div>`;
+      wrap.querySelectorAll('[data-action="remove"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.closest('.dep-chip')?.dataset.id;
+          const idx = drawerDeps.indexOf(id);
+          if (idx >= 0) drawerDeps.splice(idx, 1);
+          renderDepsUI();
+        });
+      });
+      const inp = $('#dDepSearch');
+      const results = $('#dDepResults');
+      const updateResults = () => {
+        const q = inp.value.trim().toLowerCase();
+        const candidates = acts.filter((x) =>
+          x.id !== a.id &&
+          !drawerDeps.includes(x.id) &&
+          !blocked.has(x.id));
+        const ranked = q
+          ? candidates.map((x) => ({ x, s: fuzzyScore(q, (x.title + ' ' + personName(x.owner))) }))
+              .filter((r) => r.s > 0)
+              .sort((p, q2) => q2.s - p.s)
+          : candidates.slice(0, 8).map((x) => ({ x, s: 0 }));
+        const list = ranked.slice(0, 8);
+        if (!list.length) {
+          results.innerHTML = '<div class="depends-empty">No matches</div>';
+        } else {
+          results.innerHTML = list.map((r) => `
+            <div class="depends-result" data-id="${escapeHTML(r.x.id)}">
+              <span class="depends-result-title">${escapeHTML(r.x.title)}</span>
+              <span class="depends-result-meta">${escapeHTML(personName(r.x.owner))}${r.x.due ? ' · ' + r.x.due : ''}</span>
+            </div>`).join('');
+        }
+        results.hidden = false;
+        results.querySelectorAll('.depends-result').forEach((row) => {
+          row.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const id = row.dataset.id;
+            if (!drawerDeps.includes(id)) drawerDeps.push(id);
+            renderDepsUI();
+            setTimeout(() => $('#dDepSearch')?.focus(), 0);
+          });
+        });
+      };
+      inp.addEventListener('focus', updateResults);
+      inp.addEventListener('input', updateResults);
+      inp.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 120));
+    }
+    renderDepsUI();
+
+    // Phase G — tags multi-select. Tags are project-scoped; new tags are
+    // appended to proj.tags. Removing a chip just removes the id from the
+    // record's tags array (does not delete the project tag).
+    const drawerTags = Array.isArray(a.tags) ? a.tags.slice() : [];
+    function renderTagsUI() {
+      const wrap = $('#dTagsWrap');
+      const projTags = proj.tags || [];
+      const byId = new Map(projTags.map((t) => [t.id, t]));
+      const remaining = projTags.filter((t) => !drawerTags.includes(t.id));
+      wrap.innerHTML = `
+        <div class="tags-chips">
+          ${drawerTags.map((id) => {
+            const t = byId.get(id);
+            if (!t) return '';
+            const rgb = t.rgb || '120, 120, 140';
+            return `<span class="dep-chip tag-chip-edit" data-id="${escapeHTML(id)}" style="background:rgba(${rgb},.18);color:rgb(${rgb});border:1px solid rgba(${rgb},.40)">
+              <span class="dep-chip-text">${escapeHTML(t.name)}</span>
+              <button type="button" class="dep-chip-x" data-action="remove-tag" title="Remove">×</button>
+            </span>`;
+          }).join('')}
+        </div>
+        <div class="depends-search">
+          <input type="text" id="dTagSearch" placeholder="${remaining.length || drawerTags.length ? 'Type to search or create…' : 'Type a name to create your first tag…'}" autocomplete="off" />
+          <div class="depends-results" id="dTagResults" hidden></div>
+        </div>`;
+      wrap.querySelectorAll('[data-action="remove-tag"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.closest('.tag-chip-edit')?.dataset.id;
+          const idx = drawerTags.indexOf(id);
+          if (idx >= 0) drawerTags.splice(idx, 1);
+          renderTagsUI();
+        });
+      });
+      const inp = $('#dTagSearch');
+      const results = $('#dTagResults');
+      const updateResults = () => {
+        const q = inp.value.trim();
+        const candidates = (proj.tags || []).filter((t) => !drawerTags.includes(t.id));
+        const ranked = q
+          ? candidates.map((t) => ({ t, s: fuzzyScore(q, t.name) })).filter((r) => r.s > 0).sort((p, q2) => q2.s - p.s)
+          : candidates.slice(0, 8).map((t) => ({ t, s: 0 }));
+        const list = ranked.slice(0, 8);
+        const exact = q && (proj.tags || []).find((t) => t.name.toLowerCase() === q.toLowerCase());
+        const canCreate = q && !exact;
+        let html = list.map((r) => {
+          const rgb = r.t.rgb || '120, 120, 140';
+          return `<div class="depends-result tag-result" data-id="${escapeHTML(r.t.id)}">
+            <span class="tag-color-dot" style="background:rgb(${rgb})"></span>
+            <span class="depends-result-title">${escapeHTML(r.t.name)}</span>
+          </div>`;
+        }).join('');
+        if (canCreate) {
+          html += `<div class="depends-result tag-create" data-create="${escapeHTML(q)}">
+            <span class="tag-color-dot" style="background:rgb(${TAG_PALETTE[(proj.tags || []).length % TAG_PALETTE.length]})"></span>
+            <span class="depends-result-title">+ Create "<b>${escapeHTML(q)}</b>"</span>
+          </div>`;
+        }
+        if (!list.length && !canCreate) {
+          html = '<div class="depends-empty">Type a name to create a new tag.</div>';
+        }
+        results.innerHTML = html;
+        results.hidden = false;
+        results.querySelectorAll('.tag-result').forEach((row) => {
+          row.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const id = row.dataset.id;
+            if (!drawerTags.includes(id)) drawerTags.push(id);
+            inp.value = '';
+            renderTagsUI();
+            setTimeout(() => $('#dTagSearch')?.focus(), 0);
+          });
+        });
+        results.querySelector('.tag-create')?.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const name = e.currentTarget.dataset.create;
+          const t = { id: uid('tg'), name, rgb: TAG_PALETTE[(proj.tags || []).length % TAG_PALETTE.length] };
+          proj.tags = proj.tags || [];
+          proj.tags.push(t);
+          drawerTags.push(t.id);
+          inp.value = '';
+          renderTagsUI();
+          setTimeout(() => $('#dTagSearch')?.focus(), 0);
+        });
+      };
+      inp.addEventListener('focus', updateResults);
+      inp.addEventListener('input', updateResults);
+      inp.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 120));
+    }
+    renderTagsUI();
+
+    // Phase G — comments thread. Local working list; mutations are persisted
+    // immediately on Post (independent of Save) so a user typing a long
+    // comment doesn't lose it if they hit Cancel on the rest.
+    function renderCommentsUI() {
+      const wrap = $('#dComments');
+      const items = (a.comments || []).slice().sort((x, y) => (x.at || '').localeCompare(y.at || ''));
+      wrap.innerHTML = `
+        <div class="comments-list">
+          ${items.length ? items.map((c) => {
+            const author = personName(c.by) || (c.by ? c.by : 'someone');
+            const when = c.at ? c.at.replace('T', ' ').slice(0, 16) : '';
+            return `<div class="comment-row" data-comment-id="${escapeHTML(c.id)}">
+              <div class="comment-head">
+                <span class="comment-author">${escapeHTML(author)}</span>
+                <span class="comment-when">${escapeHTML(when)}</span>
+                <button class="comment-del" data-action="del-comment" title="Delete comment">×</button>
+              </div>
+              <div class="comment-text">${escapeHTML(c.text)}</div>
+            </div>`;
+          }).join('') : '<div class="comments-empty">No comments yet.</div>'}
+        </div>
+        <div class="comment-compose">
+          <textarea id="dCommentNew" placeholder="Add a comment…" rows="2"></textarea>
+          <button class="ghost" id="dCommentPost" disabled>Post</button>
+        </div>`;
+      wrap.querySelectorAll('[data-action="del-comment"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.closest('[data-comment-id]')?.dataset.commentId;
+          if (!id) return;
+          if (!confirm('Delete this comment?')) return;
+          a.comments = (a.comments || []).filter((c) => c.id !== id);
+          a.updatedAt = todayISO();
+          commit('comment-delete');
+          // Re-render the drawer so the comment thread updates immediately
+          // without re-opening, but other drawer fields keep their state.
+          renderCommentsUI();
+        });
+      });
+      const ta = $('#dCommentNew');
+      const post = $('#dCommentPost');
+      ta?.addEventListener('input', () => { post.disabled = !ta.value.trim(); });
+      post?.addEventListener('click', () => {
+        const text = ta.value.trim();
+        if (!text) return;
+        a.comments = a.comments || [];
+        a.comments.push({
+          id: uid('cm'),
+          by: state.settings?.localUser || null,
+          at: new Date().toISOString(),
+          text,
+        });
+        a.updatedAt = todayISO();
+        commit('comment-add');
+        renderCommentsUI();
+      });
+    }
+    renderCommentsUI();
+
     $('#dSave').addEventListener('click', () => {
       const oldStatus = a.status;
       const oldOwner = a.owner;
@@ -7249,6 +8329,14 @@
       }
       a.commitment = clamp(parseInt($('#dCmt').value, 10) || 100, 5, 100);
       if (oldCmt !== a.commitment) a.history.push({ at: todayISO(), what: `Commitment: ${oldCmt}% → ${a.commitment}%` });
+      const oldDeps = Array.isArray(a.dependsOn) ? a.dependsOn.slice() : [];
+      a.dependsOn = drawerDeps.slice();
+      const depsChanged = oldDeps.length !== a.dependsOn.length || oldDeps.some((d, i) => d !== a.dependsOn[i]);
+      if (depsChanged) a.history.push({ at: todayISO(), what: `Dependencies: ${oldDeps.length} → ${a.dependsOn.length}` });
+      const oldTags = Array.isArray(a.tags) ? a.tags.slice() : [];
+      a.tags = drawerTags.slice();
+      const tagsChanged = oldTags.length !== a.tags.length || oldTags.some((t, i) => t !== a.tags[i]);
+      if (tagsChanged) a.history.push({ at: todayISO(), what: `Tags: ${oldTags.length} → ${a.tags.length}` });
       a.notes = $('#dNotes').value;
       a.updatedAt = todayISO();
       if (oldStatus !== a.status) a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${a.status}` });
@@ -7367,11 +8455,26 @@
           <div class="field"><label>Status</label>
             <select id="qStatus"><option value="todo">Not started</option><option value="doing">In progress</option><option value="done">Done</option></select>
           </div>
+        </div>
+        <div class="field"><label>Component <span class="muted">— optional</span></label>
+          <select id="qComp">
+            <option value="">— None</option>
+            ${(proj.components || []).map((cmp) => `<option value="${cmp.id}">${escapeHTML(cmp.name)}</option>`).join('')}
+          </select>
         </div>`;
     } else if (qaType === 'milestone') {
       body.innerHTML = `
         <div class="field"><label>Name</label><input id="qName" /></div>
-        <div class="field"><label>Date</label><input id="qDate" type="date" /></div>`;
+        <div class="qa-row">
+          <div class="field"><label>Start date</label><input id="qDate" type="date" /></div>
+          <div class="field"><label>End date <span class="muted">— optional, for a range</span></label><input id="qEndDate" type="date" /></div>
+        </div>
+        <div class="field"><label>Component <span class="muted">— optional</span></label>
+          <select id="qComp">
+            <option value="">— None</option>
+            ${(proj.components || []).map((cmp) => `<option value="${cmp.id}">${escapeHTML(cmp.name)}</option>`).join('')}
+          </select>
+        </div>`;
     } else if (qaType === 'risk') {
       const kind = qaInit.kind === 'opportunity' ? 'opportunity' : 'risk';
       const actionsList = (proj.actions || []).slice().sort((a, b) => a.title.localeCompare(b.title));
@@ -7420,41 +8523,89 @@
           <div class="field"><label>Date</label><input id="qDate" type="date" value="${todayISO()}" /></div>
         </div>`;
     } else if (qaType === 'meeting') {
-      const kind = qaInit.mtKind || 'oneoff';
+      // Progressive disclosure: title / date / time / repeating-toggle are
+      // always visible. When repeating is on, reveal a single periodicity
+      // row ("Every [n] [unit]") plus optional end-date — and only show the
+      // day-of-week selector when the unit is "Week(s)". When off, none
+      // of those controls render.
+      const repeating = qaInit.mtKind === 'recurring';
+      const initUnit  = qaInit.mtUnit || 'week';
       body.innerHTML = `
         <div class="field"><label>Title</label><input id="qTitle" placeholder="e.g. Weekly standup, PDR walkthrough" /></div>
-        <div class="field"><label>Type</label>
-          <div class="seg" role="tablist">
-            <button type="button" class="seg-btn ${kind === 'oneoff' ? 'active' : ''}" data-mt-kind="oneoff">One-off</button>
-            <button type="button" class="seg-btn ${kind === 'weekly' ? 'active' : ''}" data-mt-kind="weekly">Weekly</button>
+        <div class="qa-row">
+          <div class="field"><label id="qDateLbl">${repeating ? 'Start date' : 'Date'}</label><input id="qDate" type="date" value="${todayISO()}" /></div>
+          <div class="field"><label>Time <span class="muted">— optional</span></label><input id="qTime" type="time" /></div>
+        </div>
+        <div class="field">
+          <label class="qa-toggle">
+            <input type="checkbox" id="qMtRepeats" ${repeating ? 'checked' : ''} />
+            <span>Repeating meeting</span>
+          </label>
+        </div>
+        <div id="qMtRecurWrap" ${repeating ? '' : 'hidden'}>
+          <div class="qa-row qa-row-tight">
+            <div class="field" style="flex: 0 0 auto;">
+              <label>Every</label>
+              <input id="qInterval" type="number" min="1" max="99" value="1" style="width:64px;" />
+            </div>
+            <div class="field" style="flex: 1;">
+              <label>&nbsp;</label>
+              <select id="qUnit">
+                <option value="day"   ${initUnit === 'day'   ? 'selected' : ''}>Day(s)</option>
+                <option value="week"  ${initUnit === 'week'  ? 'selected' : ''}>Week(s)</option>
+                <option value="month" ${initUnit === 'month' ? 'selected' : ''}>Month(s)</option>
+              </select>
+            </div>
+            <div class="field" id="qDowField" ${initUnit === 'week' ? '' : 'hidden'}>
+              <label>On</label>
+              <select id="qDow">
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+            </div>
+          </div>
+          <div class="field">
+            <label>Ends <span class="muted">— optional</span></label>
+            <input id="qEndDate" type="date" />
           </div>
         </div>
-        <div class="qa-row" id="qMtOneoff" ${kind === 'weekly' ? 'hidden' : ''}>
-          <div class="field"><label>Date</label><input id="qDate" type="date" value="${todayISO()}" /></div>
-          <div class="field"><label>Time (optional)</label><input id="qTime" type="time" /></div>
-        </div>
-        <div class="qa-row" id="qMtWeekly" ${kind === 'oneoff' ? 'hidden' : ''}>
-          <div class="field"><label>Day of week</label>
-            <select id="qDow">
-              <option value="1">Monday</option>
-              <option value="2">Tuesday</option>
-              <option value="3">Wednesday</option>
-              <option value="4">Thursday</option>
-              <option value="5">Friday</option>
-              <option value="6">Saturday</option>
-              <option value="0">Sunday</option>
-            </select>
-          </div>
-          <div class="field"><label>Starts</label><input id="qStartDate" type="date" value="${todayISO()}" /></div>
-          <div class="field"><label>Time (optional)</label><input id="qTime2" type="time" /></div>
+        <div class="field"><label>Component <span class="muted">— optional</span></label>
+          <select id="qComp">
+            <option value="">— None</option>
+            ${(proj.components || []).map((cmp) => `<option value="${cmp.id}">${escapeHTML(cmp.name)}</option>`).join('')}
+          </select>
         </div>`;
-      $$('.seg-btn[data-mt-kind]', body).forEach((b) => {
-        b.addEventListener('click', () => {
-          qaInit.mtKind = b.dataset.mtKind;
-          $$('.seg-btn[data-mt-kind]', body).forEach((x) => x.classList.toggle('active', x.dataset.mtKind === qaInit.mtKind));
-          $('#qMtOneoff').hidden = qaInit.mtKind !== 'oneoff';
-          $('#qMtWeekly').hidden = qaInit.mtKind !== 'weekly';
-        });
+      const repeatChk = body.querySelector('#qMtRepeats');
+      const recurWrap = body.querySelector('#qMtRecurWrap');
+      const dateInput = body.querySelector('#qDate');
+      const unitSel   = body.querySelector('#qUnit');
+      const dowField  = body.querySelector('#qDowField');
+      const dowSel    = body.querySelector('#qDow');
+      const dateLbl   = body.querySelector('#qDateLbl');
+      function syncDowFromDate() {
+        const v = dateInput.value;
+        if (v) dowSel.value = String(parseDate(v).getDay());
+      }
+      if (repeating && initUnit === 'week') syncDowFromDate();
+      repeatChk.addEventListener('change', () => {
+        recurWrap.hidden = !repeatChk.checked;
+        dateLbl.textContent = repeatChk.checked ? 'Start date' : 'Date';
+        qaInit.mtKind = repeatChk.checked ? 'recurring' : 'oneoff';
+        if (repeatChk.checked && unitSel.value === 'week') syncDowFromDate();
+      });
+      unitSel.addEventListener('change', () => {
+        qaInit.mtUnit = unitSel.value;
+        // Day-of-week selector is only relevant for the 'week' unit.
+        dowField.hidden = unitSel.value !== 'week';
+        if (unitSel.value === 'week') syncDowFromDate();
+      });
+      dateInput.addEventListener('change', () => {
+        if (repeatChk.checked && unitSel.value === 'week') syncDowFromDate();
       });
     } else if (qaType === 'person') {
       body.innerHTML = `
@@ -7464,9 +8615,17 @@
           <div class="field"><label>Capacity</label><input id="qCap" type="number" min="1" max="20" value="5" /></div>
         </div>`;
     } else if (qaType === 'project') {
+      const tpls = state.templates || [];
       body.innerHTML = `
         <div class="field"><label>Name</label><input id="qName" /></div>
-        <div class="field"><label>Description</label><textarea id="qDesc"></textarea></div>`;
+        <div class="field"><label>Description</label><textarea id="qDesc"></textarea></div>
+        ${tpls.length ? `
+        <div class="field"><label>Start from <span class="muted">— template, or empty</span></label>
+          <select id="qFrom">
+            <option value="">Empty project</option>
+            ${tpls.map((t) => `<option value="${escapeHTML(t.id)}">From template — ${escapeHTML(t.name)}</option>`).join('')}
+          </select>
+        </div>` : ''}`;
     } else if (qaType === 'link') {
       body.innerHTML = `
         <div class="field"><label>Title</label><input id="qTitle" placeholder="Display name" /></div>
@@ -7539,12 +8698,29 @@
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
       proj.deliverables = proj.deliverables || [];
-      proj.deliverables.push({ id: uid('d'), name, dueDate: $('#qDue').value || null, status: $('#qStatus').value });
+      proj.deliverables.push({
+        id: uid('d'),
+        name,
+        dueDate: $('#qDue').value || null,
+        status: $('#qStatus').value,
+        component: $('#qComp')?.value || null,
+      });
     } else if (qaType === 'milestone') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
+      const date = $('#qDate').value || null;
+      const ed = $('#qEndDate')?.value || null;
+      if (ed && date && ed < date) { toast('End date can\'t be before start date'); return; }
       proj.milestones = proj.milestones || [];
-      proj.milestones.push({ id: uid('m'), name, date: $('#qDate').value || null, status: 'todo' });
+      proj.milestones.push({
+        id: uid('m'),
+        name,
+        date,
+        // Range: only stored if it's strictly after the start.
+        endDate: (ed && ed !== date) ? ed : null,
+        status: 'todo',
+        component: $('#qComp')?.value || null,
+      });
     } else if (qaType === 'risk') {
       const title = $('#qTitle').value.trim();
       if (!title) return toast('Title required');
@@ -7580,15 +8756,27 @@
     } else if (qaType === 'meeting') {
       const title = $('#qTitle').value.trim();
       if (!title) return toast('Title required');
-      const kind = qaInit.mtKind || 'oneoff';
-      const m = { id: uid('mtg'), kind, title };
-      if (kind === 'oneoff') {
-        m.date = $('#qDate').value || todayISO();
-        m.time = $('#qTime').value || null;
+      const repeating = !!$('#qMtRepeats')?.checked;
+      const date = $('#qDate').value || todayISO();
+      const time = $('#qTime').value || null;
+      const component = $('#qComp')?.value || null;
+      const m = { id: uid('mtg'), title, time, endDate: null, component };
+      if (!repeating) {
+        m.kind = 'oneoff';
+        m.date = date;
       } else {
-        m.dayOfWeek = parseInt($('#qDow').value, 10);
-        m.startDate = $('#qStartDate').value || todayISO();
-        m.time = $('#qTime2').value || null;
+        const interval = Math.max(1, parseInt($('#qInterval').value, 10) || 1);
+        const unit = $('#qUnit').value === 'day' ? 'day'
+                   : $('#qUnit').value === 'month' ? 'month'
+                   : 'week';
+        const ed = $('#qEndDate')?.value || '';
+        if (ed && ed < date) { toast('End date can\'t be before the start date'); return; }
+        m.kind      = 'recurring';
+        m.recurUnit = unit;
+        m.interval  = interval;
+        m.startDate = date;
+        m.endDate   = ed || null;
+        if (unit === 'week') m.dayOfWeek = parseInt($('#qDow').value, 10);
       }
       proj.meetings = proj.meetings || [];
       proj.meetings.push(m);
@@ -7608,6 +8796,14 @@
         description: $('#qDesc').value || '',
         actions: [], deliverables: [], milestones: [], risks: [], decisions: [], changes: [], components: [], links: [],
       };
+      const fromId = $('#qFrom')?.value;
+      if (fromId) {
+        const tpl = (state.templates || []).find((t) => t.id === fromId);
+        if (tpl) {
+          applyTemplateToProject(np, tpl);
+          np.templateOf = tpl.id;
+        }
+      }
       state.projects.push(np);
       state.currentProjectId = np.id;
     } else if (qaType === 'link') {
@@ -7639,6 +8835,83 @@
   /* -------------------------- Context menu --------------------------- */
 
   let _ctxOutsideHandler = null;
+  // Small floating picker anchored under a chip. Used by open-point
+  // criticality + priority chips so they replace the old <select>s
+  // without losing the all-options-visible affordance.
+  let _levelPopOutsideHandler = null;
+  function closeLevelPopover() {
+    document.querySelectorAll('.level-pop').forEach((m) => m.remove());
+    if (_levelPopOutsideHandler) {
+      document.removeEventListener('mousedown', _levelPopOutsideHandler);
+      document.removeEventListener('keydown', _levelPopOutsideHandler);
+      _levelPopOutsideHandler = null;
+    }
+  }
+  function showLevelPopover(anchorEl, kind, currentValue, onPick) {
+    closeLevelPopover();
+    closeContextMenu();
+    const opts = (kind === 'criticality')
+      ? ['low', 'med', 'high', 'critical'].map((id) => ({ id, label: CRITICALITY_LABEL[id], rgb: CRITICALITY_RGB[id] }))
+      : PRIORITY_LEVELS.map((p) => ({ id: p.id, label: p.label, rgb: p.rgb }));
+    const subtitle = kind === 'criticality'
+      ? 'Severity if not addressed'
+      : 'Urgency to act';
+    const heading = kind === 'criticality' ? 'Criticality' : 'Priority';
+
+    const pop = document.createElement('div');
+    pop.className = 'level-pop';
+    pop.innerHTML = `
+      <div class="level-pop-head">
+        <div class="level-pop-title">${escapeHTML(heading)}</div>
+        <div class="level-pop-sub">${escapeHTML(subtitle)}</div>
+      </div>
+      <div class="level-pop-list">
+        ${opts.map((o) => `
+          <button type="button" class="level-pop-item ${o.id === currentValue ? 'sel' : ''}" data-val="${escapeHTML(o.id)}">
+            <span class="level-pop-dot" style="background:rgb(${o.rgb})"></span>
+            <span class="level-pop-label">${escapeHTML(o.label)}</span>
+            ${o.id === currentValue ? '<span class="level-pop-check">✓</span>' : ''}
+          </button>`).join('')}
+      </div>`;
+    document.body.appendChild(pop);
+
+    // Anchor below the chip; clamp to viewport so right-edge chips don't
+    // push the popover off-screen
+    const r = anchorEl.getBoundingClientRect();
+    const w = pop.getBoundingClientRect().width;
+    const h = pop.getBoundingClientRect().height;
+    let x = r.left;
+    let y = r.bottom + 6;
+    if (x + w > innerWidth - 8)  x = innerWidth - w - 8;
+    if (y + h > innerHeight - 8) y = r.top - h - 6; // flip above
+    pop.style.left = Math.max(8, x) + 'px';
+    pop.style.top  = Math.max(8, y) + 'px';
+
+    pop.querySelectorAll('.level-pop-item').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const val = btn.dataset.val;
+        closeLevelPopover();
+        try { onPick(val); } catch (err) { console.error(err); }
+      });
+    });
+
+    // Outside-click + Escape close (popover is transient — same rule as
+    // the existing ctx-menu / palette).
+    _levelPopOutsideHandler = (e) => {
+      if (e.type === 'keydown') {
+        if (e.key === 'Escape') closeLevelPopover();
+        return;
+      }
+      if (pop.contains(e.target)) return;
+      closeLevelPopover();
+    };
+    setTimeout(() => {
+      document.addEventListener('mousedown', _levelPopOutsideHandler);
+      document.addEventListener('keydown', _levelPopOutsideHandler);
+    }, 0);
+  }
+
   function showContextMenu(x, y, items) {
     closeContextMenu();
     const menu = document.createElement('div');
@@ -8281,6 +9554,37 @@
     if (!allowedMins.includes(ab.intervalMinutes)) ab.intervalMinutes = 60;
     if (typeof ab.dirName !== 'string') ab.dirName = '';
     if (typeof ab.lastBackupAt !== 'string') ab.lastBackupAt = null;
+    // Phase A — added flags / structures used by later phases. All retrocompat.
+    if (typeof s.settings.tourSeen     !== 'boolean') s.settings.tourSeen = false;
+    if (typeof s.settings.notifyEnabled !== 'boolean') s.settings.notifyEnabled = false;
+    if (typeof s.settings.sidebarGroups !== 'object' || !s.settings.sidebarGroups) {
+      s.settings.sidebarGroups = { workspace: true, work: true, insight: true };
+    }
+    // Migration: legacy 'project' / 'engineering' group keys were renamed
+    // to 'work' / 'insight' when the sidebar was re-grouped by intent.
+    // Carry over the user's collapse state so a tidy sidebar stays tidy.
+    if (s.settings.sidebarGroups.project !== undefined && s.settings.sidebarGroups.work === undefined) {
+      s.settings.sidebarGroups.work = s.settings.sidebarGroups.project;
+      delete s.settings.sidebarGroups.project;
+    }
+    if (s.settings.sidebarGroups.engineering !== undefined && s.settings.sidebarGroups.insight === undefined) {
+      s.settings.sidebarGroups.insight = s.settings.sidebarGroups.engineering;
+      delete s.settings.sidebarGroups.engineering;
+    }
+    // Ensure the three current keys exist so first-render doesn't fall
+    // through to undefined (which the helper treats as 'expanded').
+    ['workspace', 'work', 'insight'].forEach((k) => {
+      if (s.settings.sidebarGroups[k] === undefined) s.settings.sidebarGroups[k] = true;
+    });
+    s.inbox = s.inbox || {};
+    s.inbox.dismissed = Array.isArray(s.inbox.dismissed) ? s.inbox.dismissed : [];
+    s.templates = Array.isArray(s.templates) ? s.templates : [];
+    s.templates.forEach((t) => {
+      t.id = t.id || uid('tpl');
+      t.name = t.name || 'Template';
+      t.createdAt = t.createdAt || todayISO();
+      t.shape = t.shape || {};
+    });
     s.currentView = s.currentView || 'board';
     if (s.currentView === 'teams') s.currentView = 'people';
     if (!s.currentProjectId || (s.currentProjectId !== '__all__' && !s.projects.some((p) => p.id === s.currentProjectId))) {
@@ -8313,6 +9617,16 @@
       p.links        = Array.isArray(p.links) ? p.links : [];
       p.costCenters  = Array.isArray(p.costCenters) ? p.costCenters : [];
       p.archive      = Array.isArray(p.archive) ? p.archive : [];
+      // Phase A: project-scoped tags. { id, name, rgb } — used as labels on
+      // actions / open points / CRs. Default empty for retrocompat.
+      p.tags         = Array.isArray(p.tags) ? p.tags : [];
+      p.tags.forEach((t) => {
+        t.id = t.id || uid('tg');
+        t.name = t.name || 'Tag';
+        t.rgb = t.rgb || '148,163,184';
+      });
+      // Optional: track template lineage so future merges can detect drift
+      if (p.templateOf === undefined) p.templateOf = null;
 
       p.actions.forEach((a) => {
         a.id = a.id || uid('a');
@@ -8339,6 +9653,18 @@
         // existing createdAt so legacy data behaves as if it were already set.
         a.originatorDate = a.originatorDate || a.createdAt || todayISO();
         a.history = Array.isArray(a.history) ? a.history : [];
+        // Phase A — dependencies, comments, tags, signed metadata. All defaulted.
+        a.dependsOn = Array.isArray(a.dependsOn) ? a.dependsOn : [];
+        a.tags      = Array.isArray(a.tags) ? a.tags : [];
+        a.comments  = Array.isArray(a.comments) ? a.comments : [];
+        a.comments.forEach((c) => {
+          c.id  = c.id  || uid('cm');
+          c.by  = c.by  || null;
+          c.at  = c.at  || todayISO();
+          c.text = c.text || '';
+        });
+        if (a.__lastEditor === undefined) a.__lastEditor = null;
+        if (a.__lastEditAt === undefined) a.__lastEditAt = null;
         // a.deletedAt is null for live, ISO string for archived — preserve as-is
       });
 
@@ -8347,12 +9673,20 @@
         d.name = d.name || '';
         d.dueDate = d.dueDate || null;
         d.status = d.status || 'todo';
+        // Optional component link, surfaced as a colour stripe on calendar
+        // chips so the user can scan-by-component across kinds.
+        if (d.component === undefined) d.component = null;
       });
 
       p.milestones.forEach((m) => {
         m.id = m.id || uid('m');
         m.name = m.name || '';
         m.date = m.date || null;
+        // Optional range end-date. When null, the milestone is a single-day
+        // event (legacy behaviour); when set, the milestone spans
+        // [date … endDate] inclusive in the calendar.
+        if (m.endDate === undefined) m.endDate = null;
+        if (m.component === undefined) m.component = null;
         m.status = m.status || 'todo';
       });
 
@@ -8397,6 +9731,17 @@
         // priorityLevel — added later; default to 'med' for retrocompat
         c.priorityLevel = (c.priorityLevel && PRIORITY_LEVELS.some((p) => p.id === c.priorityLevel)) ? c.priorityLevel : 'med';
         delete c.linkTitle; // dropped from schema
+        // Phase A — comments + tags + signed metadata
+        c.tags = Array.isArray(c.tags) ? c.tags : [];
+        c.comments = Array.isArray(c.comments) ? c.comments : [];
+        c.comments.forEach((cm) => {
+          cm.id   = cm.id   || uid('cm');
+          cm.by   = cm.by   || null;
+          cm.at   = cm.at   || todayISO();
+          cm.text = cm.text || '';
+        });
+        if (c.__lastEditor === undefined) c.__lastEditor = null;
+        if (c.__lastEditAt === undefined) c.__lastEditAt = null;
       });
 
       p.components.forEach((cmp) => {
@@ -8411,8 +9756,27 @@
         m.kind = m.kind || 'oneoff';
         m.title = m.title || '';
         m.time = m.time || null;
-        if (m.kind === 'oneoff') m.date = m.date || todayISO();
-        else { m.dayOfWeek = (typeof m.dayOfWeek === 'number') ? m.dayOfWeek : 1; m.startDate = m.startDate || todayISO(); }
+        // Migration: legacy 'weekly' kind → unified 'recurring' with
+        // recurUnit/interval. Old data continues to work because all
+        // consumers go through expandMeetingDates() which only sees the
+        // new shape after normalizeState has run.
+        if (m.kind === 'weekly') {
+          m.kind = 'recurring';
+          m.recurUnit = 'week';
+          m.interval = m.interval || 1;
+        }
+        if (m.kind === 'oneoff') {
+          m.date = m.date || todayISO();
+        } else if (m.kind === 'recurring') {
+          m.recurUnit = (m.recurUnit === 'day' || m.recurUnit === 'week' || m.recurUnit === 'month') ? m.recurUnit : 'week';
+          m.interval  = (typeof m.interval === 'number' && m.interval >= 1) ? Math.floor(m.interval) : 1;
+          m.startDate = m.startDate || todayISO();
+          if (m.recurUnit === 'week') {
+            m.dayOfWeek = (typeof m.dayOfWeek === 'number') ? m.dayOfWeek : parseDate(m.startDate).getDay();
+          }
+        }
+        if (m.endDate === undefined) m.endDate = null;
+        if (m.component === undefined) m.component = null;
       });
 
       p.openPoints.forEach((op) => {
@@ -8432,6 +9796,17 @@
           s.text = s.text || '';
           s.done = !!s.done;
         });
+        // Phase A — comments + tags + signed metadata
+        op.tags = Array.isArray(op.tags) ? op.tags : [];
+        op.comments = Array.isArray(op.comments) ? op.comments : [];
+        op.comments.forEach((cm) => {
+          cm.id = cm.id || uid('cm');
+          cm.by = cm.by || null;
+          cm.at = cm.at || todayISO();
+          cm.text = cm.text || '';
+        });
+        if (op.__lastEditor === undefined) op.__lastEditor = null;
+        if (op.__lastEditAt === undefined) op.__lastEditAt = null;
       });
 
       p.links.forEach((l) => {
@@ -8755,6 +10130,257 @@
     input.click();
   }
 
+  /* ----------------------- Phase K: light merge ------------------------ */
+  // 2-way merge between local state ("mine") and a teammate's JSON
+  // ("theirs"). The diff is computed per record-kind by id; conflicts
+  // (same id, differing payload) get a per-row resolution UI. Records
+  // that exist on only one side default to 'include' so nothing is lost
+  // unless the user explicitly drops it.
+  function openMergeOverlay() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'application/json';
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const obj = JSON.parse(reader.result);
+          if (!obj || !obj.projects || !obj.people) throw new Error('Not a Cockpit JSON');
+          delete obj.__schemaVersion; delete obj.__exportedAt; delete obj.__app;
+          const theirs = normalizeState(JSON.parse(JSON.stringify(obj)));
+          showMergeUI(state, theirs);
+        } catch (e) { toast('Merge failed: ' + e.message); }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+  function recordKey(rec) { return rec.id || ''; }
+  function recordSig(rec) {
+    // Signature for change detection: stringify everything except edit
+    // metadata (so a re-stamp without value change doesn't count as a diff).
+    const { __lastEditor, __lastEditAt, ...rest } = rec || {};
+    return JSON.stringify(rest);
+  }
+  function diffArr(mineArr, theirsArr) {
+    const mineMap = new Map((mineArr || []).map((r) => [recordKey(r), r]));
+    const theirsMap = new Map((theirsArr || []).map((r) => [recordKey(r), r]));
+    const onlyMine = [], onlyTheirs = [], conflicts = [], same = [];
+    mineMap.forEach((m, id) => {
+      if (!theirsMap.has(id)) { onlyMine.push(m); return; }
+      const t = theirsMap.get(id);
+      if (recordSig(m) === recordSig(t)) same.push(m);
+      else conflicts.push({ id, mine: m, theirs: t });
+    });
+    theirsMap.forEach((t, id) => { if (!mineMap.has(id)) onlyTheirs.push(t); });
+    return { onlyMine, onlyTheirs, conflicts, same };
+  }
+  function showMergeUI(mine, theirs) {
+    // Build per-project diffs across actions / openPoints / changes /
+    // risks / decisions / deliverables / milestones / components / links.
+    const projDiffs = [];
+    const mineProj = new Map(mine.projects.map((p) => [p.id, p]));
+    const theirsProj = new Map(theirs.projects.map((p) => [p.id, p]));
+    const projIds = new Set([...mineProj.keys(), ...theirsProj.keys()]);
+    projIds.forEach((pid) => {
+      const m = mineProj.get(pid);
+      const t = theirsProj.get(pid);
+      if (!m && t) {
+        projDiffs.push({ pid, name: t.name, only: 'theirs', proj: t });
+        return;
+      }
+      if (m && !t) {
+        projDiffs.push({ pid, name: m.name, only: 'mine', proj: m });
+        return;
+      }
+      const arrays = ['actions', 'openPoints', 'changes', 'risks', 'decisions', 'deliverables', 'milestones', 'components', 'links', 'meetings'];
+      const perKind = {};
+      arrays.forEach((k) => { perKind[k] = diffArr(m[k] || [], t[k] || []); });
+      projDiffs.push({ pid, name: m.name, perKind });
+    });
+    // Resolution state: choices per record-key
+    const choices = {};
+    // Default: include only-theirs (auto-add new from teammate), keep
+    // only-mine (don't drop), conflicts default to 'mine'.
+    projDiffs.forEach((pd) => {
+      if (!pd.perKind) return;
+      Object.entries(pd.perKind).forEach(([kind, d]) => {
+        d.onlyTheirs.forEach((r) => { choices[`${pd.pid}:${kind}:${r.id}`] = 'include'; });
+        d.onlyMine.forEach((r)   => { choices[`${pd.pid}:${kind}:${r.id}`] = 'keep'; });
+        d.conflicts.forEach((c)  => {
+          // Tiebreaker: take whichever has the most-recent __lastEditAt
+          const mAt = c.mine.__lastEditAt || c.mine.updatedAt || '';
+          const tAt = c.theirs.__lastEditAt || c.theirs.updatedAt || '';
+          choices[`${pd.pid}:${kind}:${c.id}`] = (tAt > mAt) ? 'theirs' : 'mine';
+        });
+      });
+    });
+
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay merge-overlay';
+    overlay.innerHTML = `
+      <div class="merge-modal">
+        <div class="merge-head">
+          <div class="merge-title">Merge teammate's JSON</div>
+          <button class="icon-btn" id="mClose" title="Close">×</button>
+        </div>
+        <div class="merge-body" id="mBody"></div>
+        <div class="merge-foot">
+          <span class="merge-summary" id="mSummary"></span>
+          <button class="ghost" id="mCancel">Cancel</button>
+          <button class="primary" id="mApply">Apply merge</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    $('#mClose', overlay).addEventListener('click', close);
+    $('#mCancel', overlay).addEventListener('click', close);
+
+    function renderMergeBody() {
+      const body = $('#mBody', overlay);
+      let totalConflicts = 0, totalAdds = 0;
+      body.innerHTML = projDiffs.map((pd) => {
+        if (pd.only === 'theirs') {
+          totalAdds++;
+          return `<div class="merge-section">
+            <div class="merge-section-title">${escapeHTML(pd.name)} <span class="merge-tag merge-tag-add">new project</span></div>
+            <div class="merge-row">
+              <label class="merge-choice">
+                <input type="radio" name="proj-${escapeHTML(pd.pid)}" value="include" checked />
+                <span>Include teammate's project</span>
+              </label>
+              <label class="merge-choice">
+                <input type="radio" name="proj-${escapeHTML(pd.pid)}" value="skip" />
+                <span>Skip</span>
+              </label>
+            </div>
+          </div>`;
+        }
+        if (pd.only === 'mine') {
+          return `<div class="merge-section">
+            <div class="merge-section-title">${escapeHTML(pd.name)} <span class="merge-tag merge-tag-keep">only in yours</span></div>
+            <div class="merge-row muted">Project will remain as-is.</div>
+          </div>`;
+        }
+        const blocks = Object.entries(pd.perKind).map(([kind, d]) => {
+          const adds = d.onlyTheirs.length;
+          const conflicts = d.conflicts.length;
+          const onlyMineN = d.onlyMine.length;
+          totalAdds += adds;
+          totalConflicts += conflicts;
+          if (!adds && !conflicts && !onlyMineN) return '';
+          const summary = [
+            adds      ? `<span class="merge-tag merge-tag-add">+${adds} new</span>`     : '',
+            conflicts ? `<span class="merge-tag merge-tag-conflict">${conflicts} differ</span>` : '',
+            onlyMineN ? `<span class="merge-tag merge-tag-keep">${onlyMineN} only-yours</span>` : '',
+          ].join(' ');
+          const conflictRows = d.conflicts.map((c) => {
+            const key = `${pd.pid}:${kind}:${c.id}`;
+            const cur = choices[key] || 'mine';
+            const label = c.mine.title || c.mine.name || c.theirs.title || c.theirs.name || c.id;
+            const mAt = c.mine.__lastEditAt || c.mine.updatedAt || '—';
+            const tAt = c.theirs.__lastEditAt || c.theirs.updatedAt || '—';
+            return `<div class="merge-conflict" data-key="${escapeHTML(key)}">
+              <div class="merge-conflict-title">${escapeHTML(label)}</div>
+              <div class="merge-conflict-versions">
+                <label class="merge-version ${cur === 'mine' ? 'sel' : ''}">
+                  <input type="radio" name="${escapeHTML(key)}" value="mine" ${cur === 'mine' ? 'checked' : ''} />
+                  <span class="merge-version-label">Yours <span class="merge-version-when">${escapeHTML(mAt)}</span></span>
+                </label>
+                <label class="merge-version ${cur === 'theirs' ? 'sel' : ''}">
+                  <input type="radio" name="${escapeHTML(key)}" value="theirs" ${cur === 'theirs' ? 'checked' : ''} />
+                  <span class="merge-version-label">Theirs <span class="merge-version-when">${escapeHTML(tAt)}</span></span>
+                </label>
+                <label class="merge-version ${cur === 'both' ? 'sel' : ''}">
+                  <input type="radio" name="${escapeHTML(key)}" value="both" ${cur === 'both' ? 'checked' : ''} />
+                  <span class="merge-version-label">Keep both</span>
+                </label>
+              </div>
+            </div>`;
+          }).join('');
+          return `<div class="merge-block">
+            <div class="merge-block-head">${kind} ${summary}</div>
+            ${conflicts ? `<div class="merge-conflicts">${conflictRows}</div>` : ''}
+          </div>`;
+        }).filter(Boolean).join('');
+        return `<div class="merge-section">
+          <div class="merge-section-title">${escapeHTML(pd.name)}</div>
+          ${blocks || '<div class="merge-row muted">No differences.</div>'}
+        </div>`;
+      }).join('') || '<div class="empty">No differences detected.</div>';
+
+      $('#mSummary', overlay).textContent =
+        `${totalAdds} additions · ${totalConflicts} conflicts`;
+
+      // Wire change events for conflict + project radios
+      body.querySelectorAll('input[type=radio]').forEach((rd) => {
+        rd.addEventListener('change', () => {
+          const name = rd.name;
+          if (name.startsWith('proj-')) {
+            const pid = name.slice(5);
+            choices[`__proj__:${pid}`] = rd.value;
+          } else {
+            choices[name] = rd.value;
+          }
+        });
+      });
+    }
+    renderMergeBody();
+
+    $('#mApply', overlay).addEventListener('click', () => {
+      // Apply choices to mine
+      undoStack.push(JSON.stringify(state));
+      const result = JSON.parse(JSON.stringify(mine));
+      const resultProjMap = new Map(result.projects.map((p, i) => [p.id, i]));
+      projDiffs.forEach((pd) => {
+        if (pd.only === 'theirs') {
+          const choice = choices[`__proj__:${pd.pid}`] || 'include';
+          if (choice === 'include') {
+            result.projects.push(JSON.parse(JSON.stringify(pd.proj)));
+          }
+          return;
+        }
+        if (pd.only === 'mine') return;
+        const targetIdx = resultProjMap.get(pd.pid);
+        if (targetIdx == null) return;
+        const target = result.projects[targetIdx];
+        Object.entries(pd.perKind).forEach(([kind, d]) => {
+          // 1. Apply only-theirs additions for which the user kept default 'include'
+          d.onlyTheirs.forEach((r) => {
+            const key = `${pd.pid}:${kind}:${r.id}`;
+            if ((choices[key] || 'include') !== 'include') return;
+            target[kind] = target[kind] || [];
+            target[kind].push(JSON.parse(JSON.stringify(r)));
+          });
+          // 2. Conflicts
+          d.conflicts.forEach((c) => {
+            const key = `${pd.pid}:${kind}:${c.id}`;
+            const choice = choices[key] || 'mine';
+            const list = target[kind] || (target[kind] = []);
+            const idx = list.findIndex((x) => x.id === c.id);
+            if (choice === 'theirs') {
+              if (idx >= 0) list[idx] = JSON.parse(JSON.stringify(c.theirs));
+            } else if (choice === 'both') {
+              const dup = JSON.parse(JSON.stringify(c.theirs));
+              const prefix = (c.theirs.id || 'id').split('_')[0] || 'id';
+              dup.id = uid(prefix);
+              if (dup.title) dup.title = dup.title + ' (theirs)';
+              else if (dup.name) dup.name = dup.name + ' (theirs)';
+              list.push(dup);
+            }
+            // 'mine' = no-op
+          });
+        });
+      });
+      state = normalizeState(result);
+      saveState();
+      render();
+      close();
+      toast('Merged');
+    });
+  }
+
   /* ------------------- Personal to-do (floating widget) ------------------ */
 
   // The widget lives at the state level (project-independent), so changes only
@@ -8898,7 +10524,2349 @@
     refreshTodoFab();
   }
 
+  /* ----------------------- Phase D: Inbox + bell ---------------------- */
+  // Aggregate items that need user attention. Each item has a stable id so
+  // the user can dismiss it and the dismissal sticks across reloads.
+  const STALE_DAYS = 14;
+  const SOON_DAYS = 3;
+  function inboxItems() {
+    const today = todayISO();
+    const dismissed = new Set(state.inbox?.dismissed || []);
+    const out = [];
+    state.projects.forEach((proj) => {
+      // Late actions
+      (proj.actions || []).forEach((a) => {
+        if (a.deletedAt) return;
+        if (isClosedStatus(a.status)) return;
+        if (a.due && dayDiff(a.due, today) < 0) {
+          out.push({
+            id: 'late-action:' + a.id,
+            kind: 'late', icon: '⏰', tone: 'bad',
+            title: a.title,
+            sub: `${proj.name} · ${personName(a.owner)} · ${Math.abs(dayDiff(a.due, today))}d late`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'board'; render(); setTimeout(() => openDrawer(a.id), 30); },
+          });
+        } else if (a.due && dayDiff(a.due, today) <= SOON_DAYS) {
+          out.push({
+            id: 'due-soon:' + a.id,
+            kind: 'soon', icon: '⏳', tone: 'warn',
+            title: a.title,
+            sub: `${proj.name} · ${personName(a.owner)} · due in ${dayDiff(a.due, today)}d`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'board'; render(); setTimeout(() => openDrawer(a.id), 30); },
+          });
+        }
+        // Stale (open + not updated in N days)
+        if (!isClosedStatus(a.status) && a.updatedAt && dayDiff(today, a.updatedAt) >= STALE_DAYS) {
+          out.push({
+            id: 'stale-action:' + a.id,
+            kind: 'stale', icon: '·', tone: 'muted',
+            title: a.title,
+            sub: `${proj.name} · ${personName(a.owner)} · untouched ${dayDiff(today, a.updatedAt)}d`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'board'; render(); setTimeout(() => openDrawer(a.id), 30); },
+          });
+        }
+      });
+      // Pending CRs > 14d
+      (proj.changes || []).forEach((c) => {
+        if (c.status !== 'proposed' && c.status !== 'under_review') return;
+        if (c.originatedDate && dayDiff(today, c.originatedDate) >= STALE_DAYS) {
+          out.push({
+            id: 'cr-pending:' + c.id,
+            kind: 'cr', icon: '⇆', tone: 'warn',
+            title: c.title,
+            sub: `${proj.name} · ${c.status.replace('_', ' ')} · ${dayDiff(today, c.originatedDate)}d ago`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'changes'; render(); setTimeout(() => openChangeRequestEditor(c.id), 30); },
+          });
+        }
+      });
+      // High-criticality unmitigated risks
+      (proj.risks || []).forEach((r) => {
+        if ((r.kind || 'risk') === 'opportunity') return;
+        const inh = r.inherent || { probability: 0, impact: 0 };
+        const res = r.residual || inh;
+        const score = (res.probability || 0) * (res.impact || 0);
+        if (score >= 12 && !r.actionId) {
+          out.push({
+            id: 'risk-unmit:' + r.id,
+            kind: 'risk', icon: '△', tone: 'bad',
+            title: r.title,
+            sub: `${proj.name} · residual ${score} · no linked action`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'risks'; render(); setTimeout(() => openRiskEditor(r.id), 30); },
+          });
+        }
+      });
+    });
+    // Personal todos due / open
+    (state.todos || []).forEach((t) => {
+      if (t.done) return;
+      out.push({
+        id: 'todo:' + t.id,
+        kind: 'todo', icon: '✓', tone: 'muted',
+        title: t.text || '(untitled)',
+        sub: 'Personal to-do',
+        run: () => $('#todoFab')?.click(),
+      });
+    });
+    return out.filter((it) => !dismissed.has(it.id));
+  }
+  function inboxCount() { return inboxItems().length; }
+  function refreshBell() {
+    const bell = $('#bellBadge');
+    if (!bell) return;
+    const n = inboxCount();
+    if (n > 0) { bell.textContent = String(n); bell.hidden = false; }
+    else bell.hidden = true;
+  }
+  function dismissInbox(id) {
+    state.inbox = state.inbox || { dismissed: [] };
+    state.inbox.dismissed = state.inbox.dismissed || [];
+    if (!state.inbox.dismissed.includes(id)) state.inbox.dismissed.push(id);
+    saveState();
+  }
+  function renderInbox(root) {
+    const view = document.createElement('div');
+    view.className = 'view';
+    const items = inboxItems();
+    const grouped = { late: [], soon: [], cr: [], risk: [], stale: [], todo: [] };
+    items.forEach((it) => { (grouped[it.kind] || (grouped[it.kind] = [])).push(it); });
+    const sectionTitle = { late: 'Late', soon: 'Due soon', cr: 'CR aging', risk: 'Unmitigated risks', stale: 'Stale', todo: 'Personal to-do' };
+    const order = ['late', 'soon', 'cr', 'risk', 'stale', 'todo'];
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Inbox</div>
+          <div class="page-sub">${items.length ? `${items.length} item${items.length === 1 ? '' : 's'} need your attention` : 'Nothing requires action right now — nice work.'}</div>
+        </div>
+        <div class="page-actions">
+          ${state.settings.notifyEnabled ? '' : '<button class="ghost" id="btnEnableNotify" title="Browser notifications when new items arrive">Enable notifications</button>'}
+          ${items.length ? '<button class="ghost" id="btnDismissAll" title="Dismiss all">Dismiss all</button>' : ''}
+        </div>
+      </div>
+      <div class="inbox">
+        ${items.length === 0 ? '<div class="empty">Your inbox is clear.</div>' : ''}
+        ${order.filter((k) => (grouped[k] || []).length).map((k) => `
+          <div class="inbox-section">
+            <div class="inbox-section-title">${escapeHTML(sectionTitle[k] || k)}<span class="inbox-section-count">${grouped[k].length}</span></div>
+            <div class="inbox-list">
+              ${grouped[k].map((it) => `
+                <div class="inbox-item tone-${it.tone}" data-id="${escapeHTML(it.id)}">
+                  <span class="inbox-icon">${escapeHTML(it.icon)}</span>
+                  <div class="inbox-text">
+                    <div class="inbox-title">${escapeHTML(it.title)}</div>
+                    <div class="inbox-sub">${escapeHTML(it.sub)}</div>
+                  </div>
+                  <button class="inbox-dismiss" data-action="dismiss" title="Dismiss" aria-label="Dismiss">×</button>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+    root.appendChild(view);
+
+    view.querySelectorAll('.inbox-item').forEach((row) => {
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action="dismiss"]')) return;
+        const id = row.dataset.id;
+        const it = inboxItems().find((x) => x.id === id);
+        if (it) it.run();
+      });
+      row.querySelector('[data-action="dismiss"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = row.dataset.id;
+        dismissInbox(id);
+        render();
+      });
+    });
+    $('#btnDismissAll')?.addEventListener('click', () => {
+      if (!confirm('Dismiss all inbox items? They\'ll re-appear if their condition still holds tomorrow.')) return;
+      items.forEach((it) => dismissInbox(it.id));
+      render();
+    });
+    $('#btnEnableNotify')?.addEventListener('click', async () => {
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          state.settings.notifyEnabled = true;
+          saveState(); render();
+          toast('Notifications enabled');
+        } else {
+          toast('Notifications denied');
+        }
+      } catch (e) { toast('Notifications not supported'); }
+    });
+  }
+  function maybeNotifyInbox() {
+    if (!state.settings.notifyEnabled) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const today = todayISO();
+    if (state.inbox?.lastNotifyDate === today) return;
+    const items = inboxItems();
+    if (!items.length) return;
+    state.inbox = state.inbox || {};
+    state.inbox.lastNotifyDate = today;
+    saveState();
+    try {
+      new Notification('Cockpit — ' + items.length + ' item' + (items.length === 1 ? '' : 's') + ' need your attention', {
+        body: items.slice(0, 3).map((it) => '• ' + it.title).join('\n'),
+        silent: false,
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  /* ----------------------- Phase E: Status Report ---------------------- */
+  // Compose a period-bounded status report from existing data, render as
+  // a live HTML preview, then export as Markdown / Markdown file / Print.
+  // Period state lives outside the rendered view so re-renders preserve it.
+  const reportState = {
+    period: '7d',          // '7d' | '30d' | '90d' | 'custom'
+    customSince: '',
+    customUntil: '',
+  };
+  function reportPeriodRange() {
+    const today = todayISO();
+    if (reportState.period === 'custom' && reportState.customSince && reportState.customUntil) {
+      return { since: reportState.customSince, until: reportState.customUntil };
+    }
+    const days = reportState.period === '30d' ? 30 : reportState.period === '90d' ? 90 : 7;
+    const since = fmtISO(new Date(Date.now() - days * dayMs));
+    return { since, until: today };
+  }
+  function buildReportData(proj, since, until) {
+    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    const today = todayISO();
+    const horizon = fmtISO(new Date(parseDate(today).getTime() + 14 * dayMs));
+    const inRange = (d) => d && d >= since && d <= until;
+
+    const changed = acts.filter((a) => a.updatedAt && inRange(a.updatedAt))
+      .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    const lateOrBlocked = acts.filter((a) =>
+      !isClosedStatus(a.status) && ((a.due && dayDiff(a.due, today) < 0) || a.status === 'blocked'));
+    const doneInPeriod = acts.filter((a) => a.status === 'done' && inRange(a.updatedAt));
+    const decisions = (proj.decisions || []).filter((d) => inRange(d.date))
+      .sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const crsDecided = (proj.changes || []).filter((c) =>
+      ['approved', 'rejected', 'implemented', 'cancelled'].includes(c.status) && inRange(c.decisionDate))
+      .sort((a, b) => (b.decisionDate || '').localeCompare(a.decisionDate || ''));
+    const topRisks = (proj.risks || [])
+      .filter((r) => (r.kind || 'risk') === 'risk')
+      .map((r) => {
+        const res = r.residual || r.inherent || { probability: 0, impact: 0 };
+        return { ...r, _score: (res.probability || 0) * (res.impact || 0) };
+      })
+      .filter((r) => r._score > 0)
+      .sort((a, b) => b._score - a._score)
+      .slice(0, 5);
+    const upcomingMilestones = (proj.milestones || []).filter((m) =>
+      !m.done && m.date && m.date >= today && m.date <= horizon)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const upcomingDeliverables = (proj.deliverables || []).filter((d) =>
+      !d.done && d.date && d.date >= today && d.date <= horizon)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const upcomingDue = acts.filter((a) =>
+      !isClosedStatus(a.status) && a.due && a.due >= today && a.due <= horizon)
+      .sort((a, b) => (a.due || '').localeCompare(b.due || ''));
+
+    const k = {
+      done: doneInPeriod.length,
+      changed: changed.length,
+      late: lateOrBlocked.filter((a) => a.due && dayDiff(a.due, today) < 0).length,
+      blocked: lateOrBlocked.filter((a) => a.status === 'blocked').length,
+      decisions: decisions.length,
+      crs: crsDecided.length,
+    };
+    return {
+      proj, since, until, today,
+      kpis: k, changed, lateOrBlocked, doneInPeriod,
+      decisions, crsDecided, topRisks,
+      next: { milestones: upcomingMilestones, deliverables: upcomingDeliverables, actions: upcomingDue },
+    };
+  }
+  function reportPeriodLabel() {
+    const r = reportPeriodRange();
+    return `${fmtFull(r.since)} – ${fmtFull(r.until)}`;
+  }
+  function reportToMarkdown(data) {
+    const lines = [];
+    const proj = data.proj;
+    lines.push(`# ${proj.name} — Status report`);
+    lines.push('');
+    lines.push(`_${fmtFull(data.since)} – ${fmtFull(data.until)}_`);
+    lines.push('');
+    lines.push('## KPIs');
+    lines.push('');
+    lines.push(`| Done | Changed | Late | Blocked | Decisions | CRs decided |`);
+    lines.push(`|---:|---:|---:|---:|---:|---:|`);
+    lines.push(`| ${data.kpis.done} | ${data.kpis.changed} | ${data.kpis.late} | ${data.kpis.blocked} | ${data.kpis.decisions} | ${data.kpis.crs} |`);
+    lines.push('');
+    const section = (title, items, fmt) => {
+      lines.push(`## ${title}`);
+      lines.push('');
+      if (!items.length) { lines.push('_None._'); lines.push(''); return; }
+      items.forEach((it) => lines.push('- ' + fmt(it)));
+      lines.push('');
+    };
+    section('What changed', data.changed.slice(0, 30), (a) =>
+      `**${mdEscape(a.title)}** — ${mdEscape(personName(a.owner))} · ${a.status}${a.updatedAt ? ' · ' + a.updatedAt : ''}`);
+    section('Late & blocked', data.lateOrBlocked, (a) => {
+      const reason = a.status === 'blocked'
+        ? 'blocked'
+        : `${Math.abs(dayDiff(a.due, data.today))}d late`;
+      return `**${mdEscape(a.title)}** — ${mdEscape(personName(a.owner))} · ${reason}`;
+    });
+    section('Decisions made', data.decisions, (d) =>
+      `**${mdEscape(d.title)}** — ${mdEscape(personName(d.owner))} · ${d.date || '—'}${d.rationale ? '\n  > ' + mdEscape(d.rationale) : ''}`);
+    section('Change requests decided', data.crsDecided, (c) =>
+      `**${mdEscape(c.title)}** — ${c.status}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + mdEscape(personName(c.decisionBy)) : ''}`);
+    section('Top risks (by residual)', data.topRisks, (r) =>
+      `**${mdEscape(r.title)}** — residual ${r._score}${r.mitigation ? ' · ' + mdEscape(r.mitigation) : ''}`);
+    lines.push(`## What's next (next 14 days)`);
+    lines.push('');
+    if (!data.next.milestones.length && !data.next.deliverables.length && !data.next.actions.length) {
+      lines.push('_Nothing scheduled in the next 14 days._');
+    } else {
+      if (data.next.milestones.length) {
+        lines.push('**Milestones**');
+        data.next.milestones.forEach((m) => lines.push(`- ${mdEscape(m.name || m.title || '')} · ${m.date}`));
+        lines.push('');
+      }
+      if (data.next.deliverables.length) {
+        lines.push('**Deliverables**');
+        data.next.deliverables.forEach((d) => lines.push(`- ${mdEscape(d.name || d.title || '')} · ${d.date}`));
+        lines.push('');
+      }
+      if (data.next.actions.length) {
+        lines.push('**Due actions**');
+        data.next.actions.slice(0, 30).forEach((a) =>
+          lines.push(`- ${mdEscape(a.title)} — ${mdEscape(personName(a.owner))} · ${a.due}`));
+      }
+    }
+    return lines.join('\n');
+  }
+  function reportToPrintHTML(data) {
+    const k = data.kpis;
+    const proj = data.proj;
+    const list = (arr, fmt, empty) => arr.length
+      ? '<ul>' + arr.map(fmt).join('') + '</ul>'
+      : `<p class="empty">${empty}</p>`;
+    const li = (a) => `<li><b>${escapeHTML(a.title)}</b> — ${escapeHTML(personName(a.owner))} · ${escapeHTML(a.status)}${a.updatedAt ? ' · ' + a.updatedAt : ''}</li>`;
+    const liDue = (a) => {
+      const reason = a.status === 'blocked' ? 'blocked' : `${Math.abs(dayDiff(a.due, data.today))}d late`;
+      return `<li><b>${escapeHTML(a.title)}</b> — ${escapeHTML(personName(a.owner))} · ${reason}</li>`;
+    };
+    const liDec = (d) => `<li><b>${escapeHTML(d.title)}</b> — ${escapeHTML(personName(d.owner))} · ${d.date || '—'}${d.rationale ? '<br/><i>' + escapeHTML(d.rationale) + '</i>' : ''}</li>`;
+    const liCR = (c) => `<li><b>${escapeHTML(c.title)}</b> — ${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + escapeHTML(personName(c.decisionBy)) : ''}</li>`;
+    const liRisk = (r) => `<li><b>${escapeHTML(r.title)}</b> — residual ${r._score}${r.mitigation ? '<br/><i>' + escapeHTML(r.mitigation) + '</i>' : ''}</li>`;
+    const liNext = (it, dateField) => `<li><b>${escapeHTML(it.name || it.title || '')}</b> · ${escapeHTML(it[dateField] || '—')}</li>`;
+    const liActDue = (a) => `<li><b>${escapeHTML(a.title)}</b> — ${escapeHTML(personName(a.owner))} · due ${a.due}</li>`;
+
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHTML(proj.name)} — Status report</title>
+<style>
+  body{font:14px -apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1a1c24;max-width:820px;margin:30px auto;padding:0 20px;}
+  h1{font-size:22px;margin:0 0 4px;} h2{font-size:15px;margin:22px 0 8px;border-bottom:1px solid #ddd;padding-bottom:4px;letter-spacing:.04em;text-transform:uppercase;color:#444;}
+  .meta{color:#666;font-size:12px;margin-bottom:18px;}
+  .kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin:14px 0;}
+  .kpi{background:#f6f7fb;border:1px solid #e5e7ee;border-radius:8px;padding:10px;text-align:center;}
+  .kpi b{font-size:22px;display:block;font-weight:700;}
+  .kpi span{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:.06em;}
+  ul{padding-left:18px;margin:6px 0;} li{margin:5px 0;} .empty{color:#888;font-style:italic;margin:6px 0;}
+  @media print { body { margin: 0 auto; } }
+</style></head><body>
+<h1>${escapeHTML(proj.name)} — Status report</h1>
+<div class="meta">${fmtFull(data.since)} – ${fmtFull(data.until)} · generated ${fmtFull(data.today)}</div>
+<div class="kpis">
+  <div class="kpi"><b>${k.done}</b><span>Done</span></div>
+  <div class="kpi"><b>${k.changed}</b><span>Changed</span></div>
+  <div class="kpi"><b>${k.late}</b><span>Late</span></div>
+  <div class="kpi"><b>${k.blocked}</b><span>Blocked</span></div>
+  <div class="kpi"><b>${k.decisions}</b><span>Decisions</span></div>
+  <div class="kpi"><b>${k.crs}</b><span>CRs decided</span></div>
+</div>
+<h2>What changed</h2>${list(data.changed.slice(0, 30), li, 'No updates in this period.')}
+<h2>Late &amp; blocked</h2>${list(data.lateOrBlocked, liDue, 'Nothing late or blocked — nice work.')}
+<h2>Decisions made</h2>${list(data.decisions, liDec, 'No decisions logged in this period.')}
+<h2>Change requests decided</h2>${list(data.crsDecided, liCR, 'No CRs decided in this period.')}
+<h2>Top risks (by residual)</h2>${list(data.topRisks, liRisk, 'No risks logged.')}
+<h2>What's next (next 14 days)</h2>
+${data.next.milestones.length ? '<p><b>Milestones</b></p>' + list(data.next.milestones, (m) => liNext(m, 'date'), '') : ''}
+${data.next.deliverables.length ? '<p><b>Deliverables</b></p>' + list(data.next.deliverables, (d) => liNext(d, 'date'), '') : ''}
+${data.next.actions.length ? '<p><b>Due actions</b></p>' + list(data.next.actions.slice(0, 30), liActDue, '') : ''}
+${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.actions.length) ? '<p class="empty">Nothing scheduled in the next 14 days.</p>' : ''}
+</body></html>`;
+  }
+  // Reports is merged into Review — keep the function name for any
+  // remaining callers (palette, stale state.currentView), but route to
+  // the merged Review in 'full' mode so the old entry-point gives the
+  // single-page snapshot users expected.
+  function renderReports(root) {
+    reviewModeState.mode = 'full';
+    return renderReview(root);
+  }
+  // The full implementation below is dead-code post-merge but kept for
+  // reference and so any direct callers continue to compile.
+  function renderReports_legacy_unused(root) {
+    const proj = curProject();
+    const view = document.createElement('div');
+    view.className = 'view';
+    const isAll = state.currentProjectId === '__all__';
+    if (isAll || !proj) {
+      view.innerHTML = `
+        <div class="page-head">
+          <div>
+            <div class="page-title">Status report</div>
+            <div class="page-sub">Pick a project to generate a report.</div>
+          </div>
+        </div>
+        <div class="empty">Reports are project-scoped. Choose a project from the topbar.</div>`;
+      root.appendChild(view);
+      return;
+    }
+    const range = reportPeriodRange();
+    const data = buildReportData(proj, range.since, range.until);
+    const k = data.kpis;
+    const optSel = (val) => reportState.period === val ? 'selected' : '';
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">${escapeHTML(proj.name)} — Status report</div>
+          <div class="page-sub">${fmtFull(data.since)} – ${fmtFull(data.until)}</div>
+        </div>
+        <div class="page-actions">
+          <select id="reportPeriod" class="report-period">
+            <option value="7d"  ${optSel('7d')}>Last 7 days</option>
+            <option value="30d" ${optSel('30d')}>Last 30 days</option>
+            <option value="90d" ${optSel('90d')}>Last 90 days</option>
+            <option value="custom" ${optSel('custom')}>Custom…</option>
+          </select>
+          <span class="report-custom" id="reportCustom" ${reportState.period === 'custom' ? '' : 'hidden'}>
+            <input type="date" id="reportSince" value="${reportState.customSince || data.since}" />
+            <span class="report-dash">–</span>
+            <input type="date" id="reportUntil" value="${reportState.customUntil || data.until}" />
+          </span>
+          <button class="ghost" id="btnReportCopyMd"  title="Copy as Markdown">Copy Markdown</button>
+          <button class="ghost" id="btnReportDownload" title="Download .md file">Download .md</button>
+          <button class="ghost" id="btnReportPrint"   title="Open print-ready HTML in a new tab">Print → PDF</button>
+        </div>
+      </div>
+      <div class="report">
+        <div class="report-kpis">
+          <div class="report-kpi"><div class="report-kpi-num">${k.done}</div><div class="report-kpi-lbl">Done</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.changed}</div><div class="report-kpi-lbl">Changed</div></div>
+          <div class="report-kpi ${k.late > 0 ? 'bad' : ''}"><div class="report-kpi-num">${k.late}</div><div class="report-kpi-lbl">Late</div></div>
+          <div class="report-kpi ${k.blocked > 0 ? 'warn' : ''}"><div class="report-kpi-num">${k.blocked}</div><div class="report-kpi-lbl">Blocked</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.decisions}</div><div class="report-kpi-lbl">Decisions</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.crs}</div><div class="report-kpi-lbl">CRs decided</div></div>
+        </div>
+
+        ${reportSection('What changed', data.changed.slice(0, 30), (a) =>
+          `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.status)}${a.updatedAt ? ' · ' + a.updatedAt : ''}</span></div>`,
+          'No updates in this period.')}
+
+        ${reportSection('Late & blocked', data.lateOrBlocked, (a) => {
+          const reason = a.status === 'blocked' ? 'blocked' : `${Math.abs(dayDiff(a.due, data.today))}d late`;
+          return `<div class="report-row clickable bad" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${reason}</span></div>`;
+        }, 'Nothing late or blocked — nice work.')}
+
+        ${reportSection('Decisions made', data.decisions, (d) =>
+          `<div class="report-row"><span>${escapeHTML(d.title)}</span><span class="report-meta">${escapeHTML(personName(d.owner))} · ${escapeHTML(d.date || '—')}</span></div>${d.rationale ? `<div class="report-rationale">${escapeHTML(d.rationale)}</div>` : ''}`,
+          'No decisions logged in this period.')}
+
+        ${reportSection('Change requests decided', data.crsDecided, (c) =>
+          `<div class="report-row clickable" data-open-cr="${c.id}"><span>${escapeHTML(c.title)}</span><span class="report-meta">${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + escapeHTML(personName(c.decisionBy)) : ''}</span></div>`,
+          'No CRs decided in this period.')}
+
+        ${reportSection('Top risks (by residual)', data.topRisks, (r) =>
+          `<div class="report-row clickable" data-open-risk="${r.id}"><span>${escapeHTML(r.title)}</span><span class="report-meta">residual ${r._score}</span></div>${r.mitigation ? `<div class="report-rationale">${escapeHTML(r.mitigation)}</div>` : ''}`,
+          'No risks logged.')}
+
+        <div class="report-section">
+          <div class="report-section-title">What's next (next 14 days)</div>
+          ${(data.next.milestones.length || data.next.deliverables.length || data.next.actions.length)
+            ? `${data.next.milestones.length ? '<div class="report-sub-title">Milestones</div>' + data.next.milestones.map((m) => `<div class="report-row"><span>${escapeHTML(m.name || m.title || '')}</span><span class="report-meta">${escapeHTML(m.date || '')}</span></div>`).join('') : ''}
+               ${data.next.deliverables.length ? '<div class="report-sub-title">Deliverables</div>' + data.next.deliverables.map((d) => `<div class="report-row"><span>${escapeHTML(d.name || d.title || '')}</span><span class="report-meta">${escapeHTML(d.date || '')}</span></div>`).join('') : ''}
+               ${data.next.actions.length ? '<div class="report-sub-title">Due actions</div>' + data.next.actions.slice(0, 30).map((a) => `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.due || '')}</span></div>`).join('') : ''}`
+            : '<div class="empty">Nothing scheduled in the next 14 days.</div>'}
+        </div>
+      </div>`;
+    root.appendChild(view);
+
+    // Interactivity
+    $('#reportPeriod').addEventListener('change', (e) => {
+      reportState.period = e.target.value;
+      render();
+    });
+    $('#reportSince')?.addEventListener('change', (e) => {
+      reportState.customSince = e.target.value; reportState.period = 'custom'; render();
+    });
+    $('#reportUntil')?.addEventListener('change', (e) => {
+      reportState.customUntil = e.target.value; reportState.period = 'custom'; render();
+    });
+    $('#btnReportCopyMd').addEventListener('click', async () => {
+      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
+      try { await navigator.clipboard.writeText(md); toast('Copied as Markdown'); }
+      catch (e) { toast('Copy failed — clipboard unavailable'); }
+    });
+    $('#btnReportDownload').addEventListener('click', () => {
+      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
+      const blob = new Blob([md], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `report-${proj.id}-${range.until}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Report downloaded');
+    });
+    $('#btnReportPrint').addEventListener('click', () => {
+      const html = reportToPrintHTML(buildReportData(curProject(), range.since, range.until));
+      const w = window.open('', '_blank');
+      if (!w) { toast('Pop-up blocked'); return; }
+      w.document.write(html); w.document.close();
+      setTimeout(() => { try { w.print(); } catch (e) { /* ignore */ } }, 250);
+    });
+
+    // Row drilldowns
+    view.querySelectorAll('[data-open-action]').forEach((el) => {
+      el.addEventListener('click', () => openDrawer(el.dataset.openAction));
+    });
+    view.querySelectorAll('[data-open-cr]').forEach((el) => {
+      el.addEventListener('click', () => openChangeRequestEditor(el.dataset.openCr));
+    });
+    view.querySelectorAll('[data-open-risk]').forEach((el) => {
+      el.addEventListener('click', () => openRiskEditor(el.dataset.openRisk));
+    });
+  }
+  function reportSection(title, items, fmt, empty) {
+    return `
+      <div class="report-section">
+        <div class="report-section-title">${escapeHTML(title)}<span class="report-section-count">${items.length}</span></div>
+        ${items.length ? items.map(fmt).join('') : `<div class="empty">${escapeHTML(empty)}</div>`}
+      </div>`;
+  }
+
+  /* ----------------------- Phase H: Calendar view ---------------------- */
+  // Month grid (7 cols × N rows) of every dated item. Each cell shows
+  // colour-tinted chips per kind: action due, milestone, deliverable,
+  // CR decided, meeting. Arrow keys navigate months. Clicking a chip
+  // opens the relevant drawer / editor.
+  const calState = {
+    monthOffset: 0, // 0 = current month, -1 = previous, +1 = next
+    keyWired: false,
+    // 'month' = vertically-scrolling weekly grid with continuous reveal
+    // (default); 'timeline' = horizontal swim-lane view.
+    format: 'month',
+    // Month-mode window state. firstWeekStart = Monday of the first
+    // rendered week. weekCount = how many weeks are currently rendered.
+    // windowAnchorOffset tracks the monthOffset the window was last
+    // built for; mismatch means re-center.
+    firstWeekStart: null,
+    weekCount: 12,
+    windowAnchorOffset: null,
+    // Timeline-mode zoom — continuous (px-per-day). Tick granularity
+    // is auto-derived from this value:
+    //   pxPerDay ≥ 12 → 'day'    (one tick per day)
+    //   pxPerDay ≥  3 → 'week'   (one tick per Monday)
+    //   else          → 'month'  (one tick per 1st-of-month)
+    tlPxPerDay: 26,
+    // Per-kind visibility filters. The legend doubles as the filter
+    // strip: clicking a pill toggles its kind on/off. Persists across
+    // month navigation but resets on reload (intentional — fresh
+    // sessions start with everything shown).
+    visible: { action: true, deliverable: true, milestone: true, cr: true, meeting: true },
+  };
+  // ISO 8601 week number — Mon-anchored, week 1 is the one containing
+  // the first Thursday of the year.
+  function isoWeekNumber(d) {
+    const dt = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    dt.setDate(dt.getDate() + 3 - ((dt.getDay() + 6) % 7));
+    const week1 = new Date(dt.getFullYear(), 0, 4);
+    return 1 + Math.round(((dt.getTime() - week1.getTime()) / 86400000 - 3 + ((week1.getDay() + 6) % 7)) / 7);
+  }
+  function ensureCalendarWindow() {
+    const today = new Date();
+    if (calState.windowAnchorOffset !== calState.monthOffset || !calState.firstWeekStart) {
+      const anchor = new Date(today.getFullYear(), today.getMonth() + calState.monthOffset, 1);
+      const dow = (anchor.getDay() + 6) % 7; // Mon=0
+      const monthGridStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1 - dow);
+      // Lead with 4 weeks before the anchor month start, 12 weeks total
+      calState.firstWeekStart = new Date(monthGridStart.getTime() - 4 * 7 * dayMs);
+      calState.weekCount = 12;
+      calState.windowAnchorOffset = calState.monthOffset;
+      calState.scrollToTodayPending = true;
+    }
+  }
+  function calendarMonthBounds() {
+    ensureCalendarWindow();
+    const today = new Date();
+    const anchor = new Date(today.getFullYear(), today.getMonth() + calState.monthOffset, 1);
+    const year = anchor.getFullYear();
+    const month = anchor.getMonth();
+    const monthLabel = anchor.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+    const cells = [];
+    for (let i = 0; i < calState.weekCount * 7; i++) {
+      const d = new Date(calState.firstWeekStart);
+      d.setDate(calState.firstWeekStart.getDate() + i);
+      cells.push(d);
+    }
+    return { year, month, monthLabel, cells };
+  }
+  function buildCalendarItems(proj, year, month, gridStartISO, gridEndISO) {
+    const inRange = (d) => d && d >= gridStartISO && d <= gridEndISO;
+    const items = []; // { date, kind, label, tone, run, icon, rangePos }
+    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    acts.forEach((a) => {
+      if (!a.due || !inRange(a.due)) return;
+      const cmp = a.component ? findComponent(proj, a.component) : null;
+      const cmpRgb = cmp ? componentColor(cmp.color)?.rgb : null;
+      const subBase = personName(a.owner);
+      items.push({
+        date: a.due,
+        kind: 'action',
+        tone: a.status === 'done' ? 'muted' : (a.status === 'blocked' ? 'bad' : 'accent'),
+        label: a.title,
+        sub: cmp ? `${subBase} · ${cmp.name}` : subBase,
+        // Checkbox glyph reflects status — filled box for done, empty
+        // outline otherwise. Reads at-a-glance like a to-do checklist.
+        icon: a.status === 'done' ? '☑' : '☐',
+        tint: cmpRgb,
+        _record: a,                  // exposed so the timeline can drag-mutate
+        run: () => openDrawer(a.id),
+      });
+    });
+    (proj.milestones || []).forEach((m) => {
+      if (!m.date) return;
+      // Ranged milestones expand into one chip per day in [date … endDate],
+      // each tagged with its position (start / middle / end / single) so the
+      // calendar can paint a connected band across cells.
+      const start = m.date;
+      const end = m.endDate || m.date;
+      if (!inRange(start) && !inRange(end) && !(start <= gridStartISO && end >= gridEndISO)) return;
+      const startT = parseDate(start).getTime();
+      const endT   = parseDate(end).getTime();
+      const isRange = endT > startT;
+      const cmp = m.component ? findComponent(proj, m.component) : null;
+      const cmpRgb = cmp ? componentColor(cmp.color)?.rgb : null;
+      for (let t = startT; t <= endT; t += dayMs) {
+        const iso = fmtISO(new Date(t));
+        if (!inRange(iso)) continue;
+        const isStart = iso === start;
+        const isEnd   = iso === end;
+        const rangePos = !isRange ? 'single' : isStart ? 'start' : isEnd ? 'end' : 'middle';
+        const icon = !isRange ? '◇' : isStart ? '▷' : isEnd ? '▭' : '─';
+        const baseSub = isRange
+          ? (isStart ? `Milestone start · ends ${end}` : isEnd ? `Milestone end · started ${start}` : 'Milestone in progress')
+          : 'Milestone';
+        items.push({
+          date: iso,
+          kind: 'milestone',
+          tone: 'milestone',
+          label: m.name,
+          sub: cmp ? `${baseSub} · ${cmp.name}` : baseSub,
+          icon,
+          rangePos,
+          tint: cmpRgb,
+          _record: m,
+          run: () => openMilestoneEditor(m.id),
+        });
+      }
+    });
+    (proj.deliverables || []).forEach((d) => {
+      const dt = d.dueDate || d.date;
+      if (!dt || !inRange(dt)) return;
+      const cmp = d.component ? findComponent(proj, d.component) : null;
+      const cmpRgb = cmp ? componentColor(cmp.color)?.rgb : null;
+      items.push({
+        date: dt,
+        kind: 'deliverable',
+        tone: 'deliverable',
+        label: d.name,
+        sub: cmp ? `Deliverable · ${cmp.name}` : 'Deliverable',
+        icon: '◆',
+        tint: cmpRgb,
+        _record: d,
+        run: () => openDeliverableEditor(d.id),
+      });
+    });
+    (proj.changes || []).forEach((c) => {
+      if (!c.decisionDate || !inRange(c.decisionDate)) return;
+      const decided = ['approved', 'rejected', 'implemented', 'cancelled'].includes(c.status);
+      if (!decided) return;
+      items.push({
+        date: c.decisionDate,
+        kind: 'cr',
+        tone: c.status === 'rejected' || c.status === 'cancelled' ? 'bad' : 'good',
+        label: c.title,
+        sub: 'CR ' + c.status,
+        icon: '⇆',
+        run: () => openChangeRequestEditor(c.id),
+      });
+    });
+    (proj.meetings || []).forEach((m) => {
+      const dates = expandMeetingDates(m, gridStartISO, gridEndISO);
+      if (!dates.length) return;
+      const baseLabel = meetingRecurrenceLabel(m);
+      const cmp = m.component ? findComponent(proj, m.component) : null;
+      const cmpRgb = cmp ? componentColor(cmp.color)?.rgb : null;
+      const subBase = m.time ? `${baseLabel} · ${m.time}` : baseLabel;
+      const subWithComponent = cmp ? `${subBase} · ${cmp.name}` : subBase;
+      dates.forEach((iso) => {
+        items.push({
+          date: iso,
+          kind: 'meeting',
+          tone: 'meeting',
+          label: m.title,
+          sub: subWithComponent,
+          icon: '⊕',
+          // When a component is set, the chip's icon + label pick up the
+          // component's colour so meetings cluster visually with their
+          // related work area. Stored on the item so the chip renderer
+          // can apply it inline alongside the existing tone class.
+          tint: cmpRgb,
+          run: () => openMeetingEditor(m.id),
+        });
+      });
+    });
+    return items;
+  }
+  // Timeline format. A graduated arrow axis on top, swim-lanes underneath
+  // (one per kind), events packed greedily into sub-rows per lane so two
+  // overlapping events never occlude each other. The zoom tier strictly
+  // controls tick granularity (Day / Week / Month — never intermediates)
+  // and the pixel-per-day scale.
+  // Tick-granularity thresholds. Tuned so each visible tick has at least
+  // ~24 px of horizontal room — readable but not crowded.
+  const TL_ZOOM_MIN = 0.5;
+  const TL_ZOOM_MAX = 80;
+  function tlGranularityFor(pxPerDay) {
+    if (pxPerDay >= 12) return 'day';
+    if (pxPerDay >= 3)  return 'week';
+    return 'month';
+  }
+  function tlWindowDaysFor(pxPerDay) {
+    // Render enough days to keep ~3000 px of total stage width regardless
+    // of zoom, with a minimum of ~12 weeks so the user always has context
+    // around the anchor month.
+    return Math.max(84, Math.ceil(3000 / Math.max(0.1, pxPerDay)));
+  }
+  // Table format: sortable list of every dated item across a generous
+  // window. Same data as the Calendar / Timeline views (going through
+  // buildCalendarItems), same kind filters via the legend pills, same
+  // click-through opening the relevant editor — just as a flat table
+  // ordered by date so users can scan upcoming work at a glance.
+  const tableState = {
+    sortBy: 'date',     // 'date' | 'kind' | 'title' | 'sub'
+    sortDir: 'asc',     // 'asc' | 'desc'
+  };
+  function renderCalendarTable() {
+    const proj = curProject();
+    const todayD = new Date();
+    const todayISO_ = todayISO();
+    // 12-month window centred on the anchor month (~6 before, ~6 after).
+    const anchor = new Date(todayD.getFullYear(), todayD.getMonth() + calState.monthOffset, 1);
+    const startDate = new Date(anchor.getFullYear(), anchor.getMonth() - 6, 1);
+    const endDate   = new Date(anchor.getFullYear(), anchor.getMonth() + 7, 0);
+    const startISO  = fmtISO(startDate);
+    const endISO    = fmtISO(endDate);
+
+    const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
+    const filtered = allItems.filter((it) => calState.visible[it.kind] !== false);
+    // Drop range middle/end (we'll show the start row with the range
+    // length appended in the date column).
+    const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
+
+    // Per-kind label + icon for the Kind column
+    const kindLabels = { milestone: 'Milestone', deliverable: 'Deliverable', action: 'Action', meeting: 'Meeting', cr: 'Change request' };
+
+    // For range milestones, find the matching 'end' position so we can
+    // surface 'May 1 → May 4' in the Date column.
+    function endIsoFor(it) {
+      if (it.kind === 'milestone' && it.rangePos === 'start') {
+        const same = filtered.filter((x) => x.kind === 'milestone' && x.label === it.label && x.date >= it.date);
+        return same.reduce((mx, x) => x.date > mx ? x.date : mx, it.date);
+      }
+      return null;
+    }
+    function dateLabelOf(it) {
+      const end = endIsoFor(it);
+      const base = parseDate(it.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      if (end && end !== it.date) {
+        const e = parseDate(end).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        return `${base} → ${e}`;
+      }
+      return base;
+    }
+
+    // Component label (for the Kind column subtitle when present)
+    function componentName(it) {
+      // The chip's tint is derived from item.component → lookup name.
+      // We don't have a direct id reference on `it`, but `it.sub` already
+      // includes the component name when set (set in buildCalendarItems).
+      return null;
+    }
+
+    // Sorting
+    const dir = tableState.sortDir === 'asc' ? 1 : -1;
+    const cmp = (a, b) => {
+      const get = (it) => {
+        switch (tableState.sortBy) {
+          case 'date':  return it.date;
+          case 'kind':  return it.kind;
+          case 'title': return (it.label || '').toLowerCase();
+          case 'sub':   return (it.sub || '').toLowerCase();
+          default:      return it.date;
+        }
+      };
+      const av = get(a), bv = get(b);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return  1 * dir;
+      return 0;
+    };
+    items.sort(cmp);
+
+    // Run-callback resolution map (mirrors timeline)
+    calState._tlRunMap = new Map();
+    let _ctr = 0;
+    function runKey(it) { const k = 'tbl-' + (++_ctr); calState._tlRunMap.set(k, it.run); return k; }
+
+    const sortIcon = (col) => tableState.sortBy === col
+      ? (tableState.sortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+
+    const rowsHTML = items.map((it) => {
+      const past   = it.date < todayISO_;
+      const today  = it.date === todayISO_;
+      const tintStyle = it.tint ? `--cal-chip-tint:${it.tint};` : '';
+      const tintCls   = it.tint ? ' has-tint' : '';
+      const dateCls   = today ? 'is-today' : (past ? 'is-past' : '');
+      return `
+        <tr class="cal-tbl-row kind-${it.kind}${tintCls}" data-tl-run-key="${runKey(it)}" style="${tintStyle}">
+          <td class="cal-tbl-date ${dateCls}">${escapeHTML(dateLabelOf(it))}</td>
+          <td class="cal-tbl-kind">
+            <span class="cal-chip-icon kind-${it.kind}">${escapeHTML(it.icon || '·')}</span>
+            <span class="cal-tbl-kind-name">${escapeHTML(kindLabels[it.kind] || it.kind)}</span>
+          </td>
+          <td class="cal-tbl-title">${escapeHTML(it.label || '')}</td>
+          <td class="cal-tbl-sub">${escapeHTML(it.sub || '')}</td>
+        </tr>`;
+    }).join('');
+
+    const empty = items.length ? '' : `<div class="empty">No events in the visible window — toggle a filter or scroll to a different month.</div>`;
+
+    return `
+      <div class="cal-table-wrap">
+        ${empty}
+        ${items.length ? `
+          <table class="cal-table">
+            <thead>
+              <tr>
+                <th class="cal-tbl-date sortable" data-tbl-sort="date">Date${sortIcon('date')}</th>
+                <th class="cal-tbl-kind sortable" data-tbl-sort="kind">Kind${sortIcon('kind')}</th>
+                <th class="cal-tbl-title sortable" data-tbl-sort="title">Title${sortIcon('title')}</th>
+                <th class="cal-tbl-sub sortable" data-tbl-sort="sub">Detail${sortIcon('sub')}</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHTML}</tbody>
+          </table>` : ''}
+      </div>`;
+  }
+
+  function renderCalendarTimelineV2() {
+    const proj = curProject();
+    const todayISO_ = todayISO();
+    const todayD = parseDate(todayISO_);
+    const pxPerDay = clamp(calState.tlPxPerDay || 26, TL_ZOOM_MIN, TL_ZOOM_MAX);
+    const granularity = tlGranularityFor(pxPerDay);
+    const windowDays = tlWindowDaysFor(pxPerDay);
+
+    // Anchor near a Monday so axis ticks land cleanly. Lead the window
+    // with ~30% behind the anchor month so a bit of history is visible.
+    const anchor = new Date(todayD.getFullYear(), todayD.getMonth() + calState.monthOffset, 1);
+    let windowStart = new Date(anchor.getTime() - Math.floor(windowDays * 0.3) * dayMs);
+    while (windowStart.getDay() !== 1) windowStart = new Date(windowStart.getTime() - dayMs);
+    const totalDays = windowDays;
+    const windowEnd = new Date(windowStart.getTime() + (totalDays - 1) * dayMs);
+    const totalPx = Math.round(totalDays * pxPerDay);
+    const startISO = fmtISO(windowStart);
+    const endISO   = fmtISO(windowEnd);
+    const xFor = (iso) => Math.round((parseDate(iso).getTime() - windowStart.getTime()) / dayMs * pxPerDay);
+
+    // Build items for the visible window
+    const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
+    const filtered = allItems.filter((it) => calState.visible[it.kind] !== false);
+    // Drop milestone middle/end positions — the start chip's width covers
+    // the range as one continuous bar.
+    const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
+
+    function endIsoFor(it) {
+      if (it.kind === 'milestone' && it.rangePos === 'start') {
+        const same = filtered.filter((x) => x.kind === 'milestone' && x.label === it.label && x.date >= it.date);
+        return same.reduce((mx, x) => x.date > mx ? x.date : mx, it.date);
+      }
+      return it.date;
+    }
+
+    // ---- Layout: split events into RANGE bars (sit on the axis) and POINT
+    // markers (cards alternating above/below the axis with a stem). ----
+    const CARD_W_HINT = 150;     // typical card width — used for collision packing
+    const CARD_H = 36;           // card body height
+    const STEM_H = 16;           // stem from card to axis
+    const CARD_GAP = 6;          // vertical gap between rows of cards on same side
+    const ROW_H = CARD_H + STEM_H + CARD_GAP;
+    const RANGE_H = 22;          // a range bar's height
+    const RANGE_GAP = 4;
+    const AXIS_GAP = 14;         // breathing room around the axis line
+    const AXIS_LABEL_H = 22;     // tick-label area below the axis line
+
+    const ranges = [];
+    const points = [];
+    items.forEach((it) => {
+      const startIso = it.date;
+      const endIso   = endIsoFor(it);
+      const left  = xFor(startIso);
+      const isRange = it.kind === 'milestone' && it.rangePos === 'start' && endIso > startIso;
+      if (isRange) {
+        const span = (parseDate(endIso).getTime() - parseDate(startIso).getTime()) / dayMs + 1;
+        const width = Math.max(40, Math.round(span * pxPerDay));
+        ranges.push({ ...it, _start: startIso, _end: endIso, _left: left, _width: width });
+      } else {
+        // Point card: width is the typical card width (used for overlap
+        // detection only; actual chip width is set by content).
+        points.push({ ...it, _start: startIso, _end: endIso, _left: left, _width: CARD_W_HINT });
+      }
+    });
+
+    // Pack ranges into rows above the axis (greedy, by left).
+    ranges.sort((a, b) => a._left - b._left);
+    const rangeRowMaxRight = [];
+    ranges.forEach((it) => {
+      const right = it._left + it._width;
+      let placed = -1;
+      for (let i = 0; i < rangeRowMaxRight.length; i++) {
+        if (rangeRowMaxRight[i] + 4 <= it._left) { rangeRowMaxRight[i] = right; placed = i; break; }
+      }
+      if (placed < 0) { placed = rangeRowMaxRight.length; rangeRowMaxRight.push(right); }
+      it._row = placed;
+    });
+    const rangeRowCount = rangeRowMaxRight.length;
+
+    // Pack points alternating above/below the axis. Each side has its own
+    // greedy row stack; events alternate sides on insertion (sorted by left)
+    // so adjacent overlapping events naturally split between top + bottom.
+    points.sort((a, b) => a._left - b._left);
+    const aboveRowMaxRight = [];
+    const belowRowMaxRight = [];
+    let nextSide = 'above';
+    points.forEach((it) => {
+      const rows = nextSide === 'above' ? aboveRowMaxRight : belowRowMaxRight;
+      const right = it._left + it._width;
+      let placed = -1;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i] + 6 <= it._left) { rows[i] = right; placed = i; break; }
+      }
+      if (placed < 0) { placed = rows.length; rows.push(right); }
+      it._side = nextSide;
+      it._row = placed;
+      nextSide = (nextSide === 'above' ? 'below' : 'above');
+    });
+    const aboveRowCount = aboveRowMaxRight.length;
+    const belowRowCount = belowRowMaxRight.length;
+
+    // ---- Vertical layout coordinates ----
+    const aboveBlockH = aboveRowCount * ROW_H + (aboveRowCount ? AXIS_GAP : 0);
+    const rangeBlockH = rangeRowCount * (RANGE_H + RANGE_GAP);
+    const axisLineY = aboveBlockH + rangeBlockH + AXIS_GAP / 2;
+    const axisBlockH = AXIS_GAP + AXIS_LABEL_H;
+    const belowBlockH = belowRowCount * ROW_H + (belowRowCount ? AXIS_GAP : 0);
+    const stageH = Math.max(160, aboveBlockH + rangeBlockH + axisBlockH + belowBlockH);
+
+    // Card top for a packed event:
+    //   above: row 0 sits closest to the axis (just above the range bars).
+    //   below: row 0 sits closest to the axis (just under the labels).
+    function cardTopAbove(row) {
+      // axis at axisLineY; cards above it. row 0 closest.
+      return aboveBlockH - (row + 1) * ROW_H + CARD_GAP;
+    }
+    function cardTopBelow(row) {
+      return aboveBlockH + rangeBlockH + axisBlockH + row * ROW_H;
+    }
+
+    // Tick generation — strict per-zoom granularity (Day / Week / Month),
+    // auto-derived from the current pxPerDay.
+    const ticks = [];
+    if (granularity === 'day') {
+      for (let d = 0; d < totalDays; d++) {
+        const dt = new Date(windowStart.getTime() + d * dayMs);
+        const x = Math.round(d * pxPerDay);
+        const isMon = dt.getDay() === 1;
+        const isFirst = dt.getDate() === 1;
+        const label = isFirst
+          ? dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          : isMon ? String(dt.getDate()) : '';
+        ticks.push({ x, label, major: isMon || isFirst });
+      }
+    } else if (granularity === 'week') {
+      let d = new Date(windowStart);
+      while (d <= windowEnd) {
+        const offset = Math.round((d.getTime() - windowStart.getTime()) / dayMs);
+        const x = Math.round(offset * pxPerDay);
+        const isFirst = d.getDate() <= 7;
+        const label = isFirst
+          ? d.toLocaleDateString(undefined, { month: 'short' })
+          : `W${isoWeekNumber(d)}`;
+        ticks.push({ x, label, major: isFirst });
+        d = new Date(d.getTime() + 7 * dayMs);
+      }
+    } else {
+      let cur = new Date(windowStart.getFullYear(), windowStart.getMonth(), 1);
+      if (cur < windowStart) cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      while (cur <= windowEnd) {
+        const offset = Math.round((cur.getTime() - windowStart.getTime()) / dayMs);
+        const x = Math.round(offset * pxPerDay);
+        const isJan = cur.getMonth() === 0;
+        const label = isJan
+          ? cur.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+          : cur.toLocaleDateString(undefined, { month: 'short' });
+        ticks.push({ x, label, major: isJan });
+        cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      }
+    }
+
+    const todayX = (todayISO_ >= startISO && todayISO_ <= endISO) ? xFor(todayISO_) : null;
+
+    // Run-callback resolution + drag-mutation pointer per chip. Each
+    // entry holds { run, drag } where drag (when present) carries
+    // { kind, record } so the timeline drag handler can mutate the
+    // source record directly without going through the editor.
+    calState._tlRunMap = new Map();
+    // Stash window/zoom for the hover marker + drag math
+    calState._tlWindowStartMs = windowStart.getTime();
+    let _tlRunCounter = 0;
+    function runKey(it) {
+      const k = 'tl-' + (++_tlRunCounter);
+      const drag = (it.kind === 'action' || it.kind === 'deliverable' || it.kind === 'milestone') && it._record
+        ? { kind: it.kind, record: it._record }
+        : null;
+      calState._tlRunMap.set(k, { run: it.run, drag });
+      return k;
+    }
+
+    // ---- SVG axis: arrow line + ticks + labels ----
+    const axisOvershoot = 14;
+    const axisW = totalPx + axisOvershoot;
+    const axisSVG = `
+      <svg class="tl-axis-svg" width="${axisW}" height="${axisBlockH}" viewBox="0 0 ${axisW} ${axisBlockH}" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" y1="${AXIS_GAP / 2}" x2="${totalPx}" y2="${AXIS_GAP / 2}" class="tl-axis-line"/>
+        <polygon points="${totalPx},${AXIS_GAP / 2 - 5} ${axisW},${AXIS_GAP / 2} ${totalPx},${AXIS_GAP / 2 + 5}" class="tl-axis-arrow"/>
+        ${ticks.map((t) => `
+          <line x1="${t.x}" y1="${t.major ? AXIS_GAP / 2 - 6 : AXIS_GAP / 2 - 3}" x2="${t.x}" y2="${t.major ? AXIS_GAP / 2 + 6 : AXIS_GAP / 2 + 3}" class="tl-axis-tick ${t.major ? 'major' : ''}"/>
+          ${t.label ? `<text x="${t.x + 3}" y="${AXIS_GAP + 12}" class="tl-axis-label ${t.major ? 'major' : ''}">${escapeHTML(t.label)}</text>` : ''}
+        `).join('')}
+      </svg>`;
+
+    // ---- Range bars (phase-arrow style on the axis) ----
+    const rangeBarsHTML = ranges.map((it) => {
+      const top = aboveBlockH + it._row * (RANGE_H + RANGE_GAP);
+      const tintStyle = it.tint ? `--cal-chip-tint:${it.tint};` : '';
+      const tintCls = it.tint ? ' has-tint' : '';
+      return `
+        <button class="tl-range-bar kind-${it.kind}${tintCls}"
+                style="left:${it._left}px;top:${top}px;width:${it._width}px;height:${RANGE_H}px;${tintStyle}"
+                data-tl-run-key="${runKey(it)}"
+                title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+          <span class="tl-range-icon">${escapeHTML(it.icon || '◇')}</span>
+          <span class="tl-range-label">${escapeHTML(it.label)}</span>
+        </button>`;
+    }).join('');
+
+    // ---- Point markers (above/below alternating) ----
+    function markerHTML(it) {
+      const isAbove = it._side === 'above';
+      const cardTop = isAbove ? cardTopAbove(it._row) : cardTopBelow(it._row);
+      // Stem: from the card to the axis line
+      const stemTop    = isAbove ? cardTop + CARD_H : axisLineY;
+      const stemHeight = isAbove ? (axisLineY - (cardTop + CARD_H)) : (cardTop - axisLineY);
+      const dotTop = axisLineY - 4; // dot 8px tall, centered on axis
+      const tintStyle = it.tint ? `--cal-chip-tint:${it.tint};` : '';
+      const tintCls = it.tint ? ' has-tint' : '';
+      const sideCls = isAbove ? ' is-above' : ' is-below';
+      // Date label format for the card sub
+      const dateLabel = (() => {
+        try { return parseDate(it.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch (e) { return it.date || ''; }
+      })();
+      return `
+        <button class="tl-marker kind-${it.kind}${tintCls}${sideCls}"
+                style="left:${it._left}px;${tintStyle}"
+                data-tl-run-key="${runKey(it)}"
+                title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+          <span class="tl-marker-card" style="top:${cardTop}px;">
+            <span class="tl-marker-icon">${escapeHTML(it.icon || '·')}</span>
+            <span class="tl-marker-text">
+              <span class="tl-marker-label">${escapeHTML(it.label)}</span>
+              <span class="tl-marker-date">${escapeHTML(dateLabel)}</span>
+            </span>
+          </span>
+          <span class="tl-marker-stem" style="top:${stemTop}px;height:${Math.max(0, stemHeight)}px;"></span>
+          <span class="tl-marker-dot" style="top:${dotTop}px;"></span>
+        </button>`;
+    }
+    const pointsHTML = points.map(markerHTML).join('');
+
+    // ---- Today vertical line ----
+    const todayLineHTML = todayX != null
+      ? `<div class="tl-today-line" style="left:${todayX}px;height:${stageH}px;"></div>`
+      : '';
+
+    // ---- Empty hint ----
+    const emptyHTML = (!ranges.length && !points.length)
+      ? `<div class="tl-empty">No events in the visible window — scroll, drag, or zoom out to find some.</div>`
+      : '';
+
+    return `
+      <div class="cal-timeline">
+        <div class="tl-scroll">
+          <div class="tl-stage" style="width:${axisW}px;height:${stageH}px;">
+            ${todayLineHTML}
+            ${rangeBarsHTML}
+            <div class="tl-axis-host" style="top:${aboveBlockH + rangeBlockH}px;width:${axisW}px;">
+              ${axisSVG}
+            </div>
+            ${pointsHTML}
+            ${emptyHTML}
+          </div>
+        </div>
+      </div>`;
+  }
+  // Old timeline (kept temporarily for reference; renderCalendar now uses v2)
+  function renderCalendarTimeline(cells, items, byDate, todayISO_) {
+    const startMs = cells[0].getTime();
+    const totalDays = cells.length;
+    const dayPx = 30; // column width per day
+    const totalPx = totalDays * dayPx;
+
+    // Build per-kind lanes from the (already-filter-aware) flat items list,
+    // skipping milestone middle/end positions — they're absorbed into the
+    // start chip's wider bar so the range reads as one continuous element
+    // rather than 4 separate chips.
+    const laneOrder = ['milestone', 'deliverable', 'action', 'meeting', 'cr'];
+    const laneLabels = { milestone: 'Milestones', deliverable: 'Deliverables', action: 'Actions', meeting: 'Meetings', cr: 'CRs' };
+    const laneIcons  = { milestone: '◇', deliverable: '◆', action: '☐', meeting: '⊕', cr: '⇆' };
+    const lanes = laneOrder
+      .filter((k) => calState.visible[k] !== false)
+      .map((k) => ({ kind: k, items: [] }));
+    const laneByKind = Object.fromEntries(lanes.map((l) => [l.kind, l]));
+
+    // Track which (item.key) we've already added so a milestone band's
+    // start chip is the only one we keep (its width covers the range).
+    const seenMilestoneIds = new Set();
+    items.forEach((it) => {
+      const lane = laneByKind[it.kind];
+      if (!lane) return;
+      // Range-aware milestone packing: only the 'start' / 'single' positions
+      // create a chip; middle/end positions are skipped because the start
+      // chip's width spans the range.
+      if (it.kind === 'milestone' && it.rangePos && (it.rangePos === 'middle' || it.rangePos === 'end')) {
+        return;
+      }
+      lane.items.push(it);
+    });
+
+    // Index helper (offset days from the grid start)
+    const offsetDays = (iso) => Math.round((parseDate(iso).getTime() - startMs) / dayMs);
+
+    // Today indicator x-position
+    const todayOffset = todayISO_ >= fmtISO(cells[0]) && todayISO_ <= fmtISO(cells[cells.length - 1])
+      ? offsetDays(todayISO_) * dayPx + dayPx / 2 : null;
+
+    // Axis: render a tick + label every 7 days, plus highlight Mondays.
+    // Labels show 'Mon Apr 27' / 'May 4' etc; abbreviated to fit 30px column.
+    const axisCells = cells.map((d, i) => {
+      const iso = fmtISO(d);
+      const isToday = iso === todayISO_;
+      const isMon = d.getDay() === 1;
+      const showLabel = isMon || i === 0;
+      const lbl = showLabel
+        ? (d.getDate() === 1 || i === 0
+            ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+            : String(d.getDate()))
+        : '';
+      return `<div class="tl-axis-cell ${isToday ? 'is-today' : ''} ${isMon ? 'is-mon' : ''}" data-iso="${iso}" style="width:${dayPx}px;">${lbl}</div>`;
+    }).join('');
+
+    // For each item we need to know its index in byDate.get(iso) so chip
+    // clicks can resolve back to the run() callback. We re-derive that here.
+    function indexInDateBucket(it) {
+      const bucket = byDate.get(it.date) || [];
+      return bucket.indexOf(it);
+    }
+
+    // Render lanes. Each chip is absolutely-positioned by left/width.
+    // Range milestones get width = (endOffset - startOffset + 1) * dayPx;
+    // everything else gets width = dayPx.
+    function renderLane(lane) {
+      const chipsHTML = lane.items.map((it) => {
+        const idx = indexInDateBucket(it);
+        const x = offsetDays(it.date) * dayPx;
+        // Compute width for milestone ranges; use the underlying record so
+        // we can read endDate (item itself only carries rangePos+date).
+        let w = dayPx - 2;
+        if (it.kind === 'milestone' && it.rangePos === 'start') {
+          // Find the matching 'end' chip to derive width
+          const startD = it.date;
+          // The day-bucketed items include 'end' positions; locate the same
+          // milestone label across the whole `items` array.
+          const same = items.filter((x) => x.kind === 'milestone' && x.label === it.label);
+          const lastIso = same.reduce((mx, x) => x.date > mx ? x.date : mx, startD);
+          const span = offsetDays(lastIso) - offsetDays(startD) + 1;
+          w = Math.max(dayPx - 2, span * dayPx - 2);
+        }
+        const tintStyle = it.tint ? `--cal-chip-tint: ${it.tint};` : '';
+        const tintCls = it.tint ? ' has-tint' : '';
+        const rangeCls = it.rangePos ? ` is-${it.rangePos}` : '';
+        return `
+          <button class="tl-chip cal-chip cal-chip-${it.tone} kind-${it.kind}${rangeCls}${tintCls}"
+                  style="left:${x}px;width:${w}px;${tintStyle}"
+                  data-tl-item-key="${escapeHTML(it.date)}|${idx}"
+                  title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+            <span class="cal-chip-icon" aria-hidden="true">${escapeHTML(it.icon || '·')}</span>
+            <span class="cal-chip-label">${escapeHTML(it.label)}</span>
+          </button>`;
+      }).join('');
+      const empty = !lane.items.length ? '<div class="tl-lane-empty">— none</div>' : '';
+      return `
+        <div class="tl-lane">
+          <div class="tl-lane-label">
+            <span class="cal-chip-icon kind-${lane.kind}">${laneIcons[lane.kind]}</span>
+            ${escapeHTML(laneLabels[lane.kind])}
+          </div>
+          <div class="tl-lane-track" style="width:${totalPx}px;">
+            ${chipsHTML}
+            ${empty}
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="cal-timeline">
+        <div class="tl-scroll">
+          <div class="tl-axis-row">
+            <div class="tl-lane-label tl-axis-spacer"></div>
+            <div class="tl-axis-track" style="width:${totalPx}px;">
+              ${axisCells}
+              ${todayOffset != null ? `<div class="tl-today-line" style="left:${todayOffset}px;"></div>` : ''}
+            </div>
+          </div>
+          ${lanes.map(renderLane).join('')}
+        </div>
+      </div>`;
+  }
+
+  function renderCalendar(root) {
+    const proj = curProject(); // merged project (id: '__all__') when all-projects is selected
+    const view = document.createElement('div');
+    view.className = 'view';
+    if (!proj) {
+      view.innerHTML = `
+        <div class="page-head">
+          <div>
+            <div class="page-title">Calendar</div>
+            <div class="page-sub">No project loaded.</div>
+          </div>
+        </div>
+        <div class="empty">Pick a project (or 'All projects') from the topbar.</div>`;
+      root.appendChild(view);
+      return;
+    }
+    const isMerged = state.currentProjectId === '__all__';
+    const { year, month, monthLabel, cells } = calendarMonthBounds();
+    const gridStartISO = fmtISO(cells[0]);
+    const gridEndISO   = fmtISO(cells[cells.length - 1]);
+    const allItems = buildCalendarItems(proj, year, month, gridStartISO, gridEndISO);
+    // Apply per-kind visibility filters (driven by the interactive legend
+    // below). buildCalendarItems still returns everything so the toggle
+    // state can flip without rebuilding the source data.
+    const items = allItems.filter((it) => calState.visible[it.kind] !== false);
+    const byDate = new Map();
+    items.forEach((it) => {
+      if (!byDate.has(it.date)) byDate.set(it.date, []);
+      byDate.get(it.date).push(it);
+    });
+    // Per-kind counts for the legend (using the unfiltered set so users
+    // see the underlying total, not the post-filter count).
+    const kindCounts = { milestone: 0, deliverable: 0, action: 0, cr: 0, meeting: 0 };
+    allItems.forEach((it) => {
+      // Ranged milestones expand into one item per day in buildCalendarItems
+      // — but for the legend counter we want one count per *record*, not
+      // per day. Skip the middle/end positions so a 5-day range
+      // milestone counts as 1.
+      if (it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')) return;
+      if (it.kind in kindCounts) kindCounts[it.kind]++;
+    });
+
+    const todayISO_ = todayISO();
+    const dayHeaders = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    // Build week-row HTML. Each row is one week-number cell + 7 day cells.
+    // Cells stay addressable via the original linear cell index so chip
+    // wiring (data-cell-idx) keeps working without changes elsewhere.
+    function dayCellHTML(d, i) {
+      const iso = fmtISO(d);
+      // Month bands instead of an 'in-month' anchor: with continuous
+      // scroll the anchor doesn't move, so highlighting one month and
+      // greying everything else reads incorrectly. Alternate odd/even
+      // months with a subtle background difference so users can scan
+      // month boundaries while scrolling.
+      const monthBand = d.getMonth() % 2 === 1 ? 'month-band' : '';
+      const isToday = iso === todayISO_;
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      const isFirstOfMonth = d.getDate() === 1;
+      const cellItems = byDate.get(iso) || [];
+      const VISIBLE = 4;
+      const shown = cellItems.slice(0, VISIBLE);
+      const hidden = cellItems.length - shown.length;
+      const chipsHTML = shown.map((it, idx) => {
+        const icon = it.icon || '·';
+        const rangeCls = it.kind === 'milestone' && it.rangePos
+          ? ` is-${it.rangePos}` : '';
+        const tintStyle = it.tint ? ` style="--cal-chip-tint: ${it.tint};"` : '';
+        const tintCls = it.tint ? ' has-tint' : '';
+        return `
+          <button class="cal-chip cal-chip-${it.tone} kind-${it.kind}${rangeCls}${tintCls}" data-cell-idx="${i}" data-item-idx="${idx}" title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}"${tintStyle}>
+            <span class="cal-chip-icon" aria-hidden="true">${escapeHTML(icon)}</span>
+            <span class="cal-chip-label">${escapeHTML(it.label)}</span>
+          </button>`;
+      }).join('');
+      const moreHTML = hidden > 0 ? `<button class="cal-more" data-cell-idx="${i}">+ ${hidden} more</button>` : '';
+      // First-of-month gets a small inline label so the user can find
+      // month boundaries while scrolling.
+      const dayLabel = isFirstOfMonth
+        ? `<span class="cal-day-month-tag">${d.toLocaleDateString(undefined, { month: 'short' })}</span> ${d.getDate()}`
+        : `${d.getDate()}`;
+      return `
+        <div class="cal-cell ${monthBand} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}" data-cell-idx="${i}" data-iso="${iso}">
+          <div class="cal-day-num">${dayLabel}</div>
+          <div class="cal-chips">${chipsHTML}${moreHTML}</div>
+        </div>`;
+    }
+    const weekRowsHTML = [];
+    for (let w = 0; w < calState.weekCount; w++) {
+      const startIdx = w * 7;
+      const weekStart = cells[startIdx];
+      const wn = isoWeekNumber(weekStart);
+      const cellsInWeek = [];
+      for (let j = 0; j < 7; j++) cellsInWeek.push(dayCellHTML(cells[startIdx + j], startIdx + j));
+      weekRowsHTML.push(`
+        <div class="cal-week-num" title="ISO week ${wn} (starts ${fmtISO(weekStart)})">${wn}</div>
+        ${cellsInWeek.join('')}`);
+    }
+    const cellHTML = weekRowsHTML.join('');
+
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">${escapeHTML(proj.name)} — Calendar</div>
+          <div class="page-sub" id="calPageSub">${escapeHTML(monthLabel)} · scroll vertically for more weeks · ← / → for months</div>
+        </div>
+        <div class="page-actions">
+          <div class="seg" role="tablist" aria-label="Calendar format">
+            <button type="button" class="seg-btn ${calState.format === 'month'    ? 'active' : ''}" data-cal-format="month"    title="Calendar view (vertical week grid)">Calendar</button>
+            <button type="button" class="seg-btn ${calState.format === 'timeline' ? 'active' : ''}" data-cal-format="timeline" title="Horizontal timeline view">Timeline</button>
+            <button type="button" class="seg-btn ${calState.format === 'table'    ? 'active' : ''}" data-cal-format="table"    title="Sortable table of dated items">Table</button>
+          </div>
+          ${isMerged ? '' : `
+            <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
+            <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
+            <button class="ghost" id="calAddMtg"  title="Add a meeting (one-off or recurring)">+ Meeting</button>
+          `}
+          <button class="icon-btn" id="calPrev" title="Previous month (←)">‹</button>
+          <button class="ghost"   id="calToday" title="Jump to current month">Today</button>
+          <button class="icon-btn" id="calNext" title="Next month (→)">›</button>
+        </div>
+      </div>
+      <div class="cal-legend" role="group" aria-label="Show / hide on calendar">
+        <button type="button" class="cal-legend-item ${calState.visible.milestone   ? 'on' : 'off'}" data-toggle-kind="milestone"   title="Show / hide milestones">
+          <span class="cal-chip-icon kind-milestone">◇</span> Milestones <span class="cal-legend-count">${kindCounts.milestone}</span>
+        </button>
+        <button type="button" class="cal-legend-item ${calState.visible.deliverable ? 'on' : 'off'}" data-toggle-kind="deliverable" title="Show / hide deliverables">
+          <span class="cal-chip-icon kind-deliverable">◆</span> Deliverables <span class="cal-legend-count">${kindCounts.deliverable}</span>
+        </button>
+        <button type="button" class="cal-legend-item ${calState.visible.action      ? 'on' : 'off'}" data-toggle-kind="action"      title="Show / hide actions">
+          <span class="cal-chip-icon kind-action">☐</span> Actions <span class="cal-legend-count">${kindCounts.action}</span>
+        </button>
+        <button type="button" class="cal-legend-item ${calState.visible.meeting     ? 'on' : 'off'}" data-toggle-kind="meeting"     title="Show / hide meetings">
+          <span class="cal-chip-icon kind-meeting">⊕</span> Meetings <span class="cal-legend-count">${kindCounts.meeting}</span>
+        </button>
+        <button type="button" class="cal-legend-item ${calState.visible.cr          ? 'on' : 'off'}" data-toggle-kind="cr"          title="Show / hide CR decisions">
+          <span class="cal-chip-icon kind-cr">⇆</span> CRs <span class="cal-legend-count">${kindCounts.cr}</span>
+        </button>
+      </div>
+      ${calState.format === 'month' ? `
+        <div class="calendar">
+          <div class="cal-head">
+            <div class="cal-head-cell cal-head-wk" title="ISO week number">Wk</div>
+            ${dayHeaders.map((h) => `<div class="cal-head-cell">${h}</div>`).join('')}
+          </div>
+          <div class="cal-grid" id="calGrid">${cellHTML}</div>
+        </div>
+      ` : calState.format === 'table'
+          ? renderCalendarTable()
+          : renderCalendarTimelineV2()}`;
+    root.appendChild(view);
+
+    $('#calPrev').addEventListener('click', () => { calState.monthOffset -= 1; render(); });
+    $('#calNext').addEventListener('click', () => { calState.monthOffset += 1; render(); });
+    $('#calToday').addEventListener('click', () => {
+      // Always re-anchor to today's month, even if monthOffset is already
+      // 0 (the user may have scrolled away and 'Today' must still snap
+      // them back). Forcing firstWeekStart to null re-runs the
+      // ensureCalendarWindow re-center.
+      calState.monthOffset = 0;
+      calState.firstWeekStart = null;
+      calState.scrollToTodayPending = true;
+      render();
+    });
+    $('#calAddMile')?.addEventListener('click', () => openQuickAdd('milestone'));
+    $('#calAddDel')?.addEventListener('click', () => openQuickAdd('deliverable'));
+    $('#calAddMtg')?.addEventListener('click', () => openQuickAdd('meeting'));
+
+    // Format toggle (Month / Timeline)
+    view.querySelectorAll('[data-cal-format]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const f = btn.dataset.calFormat;
+        if (calState.format === f) return;
+        calState.format = f;
+        render();
+      });
+    });
+
+    // Timeline zoom — continuous via Ctrl/Cmd + scroll-wheel. Granularity
+    // (day / week / month) auto-derives from pxPerDay during render.
+
+    // Ctrl/Cmd + wheel anchors zoom at the cursor position so the date
+    // under the pointer stays put. Plain wheel still scrolls the timeline
+    // horizontally (browser default for an overflow-x container).
+    if (calState.format === 'timeline') {
+      const scroll = view.querySelector('.tl-scroll');
+      if (scroll) {
+        scroll.addEventListener('wheel', (e) => {
+          if (!(e.ctrlKey || e.metaKey)) return;
+          e.preventDefault();
+          const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+          const cur = clamp(calState.tlPxPerDay || 26, 0.5, 80);
+          const next = clamp(cur * factor, 0.5, 80);
+          if (Math.abs(next - cur) < 1e-3) return;
+          // Pin the date under the cursor
+          const rect = scroll.getBoundingClientRect();
+          const xInScroll = e.clientX - rect.left + scroll.scrollLeft;
+          const dayAtCursor = xInScroll / cur;
+          calState.tlPxPerDay = next;
+          render();
+          const newScroll = $('.tl-scroll');
+          if (newScroll) {
+            const newX = dayAtCursor * next;
+            newScroll.scrollLeft = Math.max(0, newX - (e.clientX - rect.left));
+          }
+        }, { passive: false });
+      }
+    }
+
+    // Legend pills double as visibility filters
+    view.querySelectorAll('[data-toggle-kind]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const k = btn.dataset.toggleKind;
+        calState.visible[k] = !calState.visible[k];
+        render();
+      });
+    });
+
+    // Timeline-mode chip / Table-mode row wiring — both populate
+    // calState._tlRunMap, so a single resolver works for both. Each
+    // map entry is { run, drag }; click invokes run.
+    if (calState.format === 'timeline' || calState.format === 'table') {
+      view.querySelectorAll('[data-tl-run-key]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          if (calState._tlSuppressNextClick) {
+            calState._tlSuppressNextClick = false;
+            e.stopPropagation();
+            e.preventDefault();
+            return;
+          }
+          e.stopPropagation();
+          const entry = calState._tlRunMap?.get(el.dataset.tlRunKey);
+          const run = entry && (entry.run || entry); // back-compat: also accept raw fns
+          if (typeof run === 'function') run();
+        });
+      });
+    }
+    // Table-mode column sorting
+    if (calState.format === 'table') {
+      view.querySelectorAll('[data-tbl-sort]').forEach((th) => {
+        th.addEventListener('click', () => {
+          const col = th.dataset.tblSort;
+          if (tableState.sortBy === col) {
+            tableState.sortDir = tableState.sortDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            tableState.sortBy = col;
+            tableState.sortDir = 'asc';
+          }
+          render();
+        });
+      });
+    }
+
+    // Per-chip click: dispatch to the item's run() callback. We store
+    // (cell, item) indices on the button so the data closure stays simple.
+    view.querySelectorAll('.cal-chip').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cellIdx = +btn.dataset.cellIdx;
+        const itemIdx = +btn.dataset.itemIdx;
+        const iso = fmtISO(cells[cellIdx]);
+        const it = (byDate.get(iso) || [])[itemIdx];
+        if (it && typeof it.run === 'function') it.run();
+      });
+    });
+    // "+ N more" expands into a quick popover listing every chip for the day
+    view.querySelectorAll('.cal-more').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cellIdx = +btn.dataset.cellIdx;
+        const iso = fmtISO(cells[cellIdx]);
+        const list = byDate.get(iso) || [];
+        const r = btn.getBoundingClientRect();
+        showContextMenu(r.left, r.bottom + 4, list.map((it) => ({
+          icon: it.icon || '·',
+          label: it.label,
+          onClick: it.run || (() => {}),
+        })));
+      });
+    });
+
+    // Wire arrow-key navigation once globally (re-renders share state)
+    if (!calState.keyWired) {
+      calState.keyWired = true;
+      document.addEventListener('keydown', (e) => {
+        if (state.currentView !== 'calendar') return;
+        const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
+        if (inField) return;
+        if (e.key === 'ArrowLeft')  { e.preventDefault(); calState.monthOffset -= 1; render(); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); calState.monthOffset += 1; render(); }
+      });
+    }
+
+    // Drag-to-pan time. Both formats accept click-and-drag on empty
+    // body space (chips and buttons opt out). Month view lives-translates
+    // the grid then snaps to whole months on release; Timeline view
+    // drag-scrolls within the existing horizontally-scrollable container,
+    // and any over-pull at the edges accumulates into a month-shift on
+    // release so the user can pan continuously past the visible window.
+    if (calState.format === 'month') wireMonthGridDrag(view);
+    else if (calState.format === 'timeline') {
+      wireTimelineDragPan(view);
+      wireTimelineHoverMarker(view);
+      wireTimelineEventDrag(view);
+    }
+
+    // Month view: vertical scroll-to-reveal-more-weeks. When the user
+    // scrolls within ~200 px of the top or bottom edge, prepend / append
+    // 4 more weeks and adjust scrollTop so the visual position holds
+    // steady — no jump under the cursor. Also keep the page-sub label
+    // tracking the dominant month in the viewport.
+    if (calState.format === 'month') wireMonthGridScroll(view);
+  }
+  function wireMonthGridScroll(viewEl) {
+    const grid = viewEl.querySelector('#calGrid');
+    if (!grid) return;
+    const sub = viewEl.querySelector('#calPageSub');
+    function rowHeight() {
+      const first = grid.querySelector('.cal-cell');
+      return first ? first.getBoundingClientRect().height : 110;
+    }
+    function visibleCenterDate() {
+      const rh = rowHeight();
+      if (!rh) return null;
+      const rowsFromTop = Math.floor((grid.scrollTop + grid.clientHeight / 2) / rh);
+      const idx = clamp(rowsFromTop * 7, 0, calState.weekCount * 7 - 1);
+      const d = new Date(calState.firstWeekStart);
+      d.setDate(calState.firstWeekStart.getDate() + idx);
+      return d;
+    }
+    function refreshSub() {
+      const d = visibleCenterDate();
+      if (!d || !sub) return;
+      const lbl = d.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+      sub.textContent = `${lbl} · scroll vertically for more weeks · ← / → for months`;
+    }
+    function extendTop() {
+      if (calState.calExtending) return;
+      calState.calExtending = true;
+      const ADD = 4;
+      const beforeH = grid.scrollHeight;
+      const newStart = new Date(calState.firstWeekStart);
+      newStart.setDate(newStart.getDate() - ADD * 7);
+      calState.firstWeekStart = newStart;
+      calState.weekCount += ADD;
+      const prevTop = grid.scrollTop;
+      // Cache the scroll target so the next wireMonthGridScroll mount
+      // (which runs as part of render()) can apply it without re-doing
+      // a scroll-to-today and without firing a recursive extend.
+      calState.suppressNextExtendUntilScrollTop = true;
+      render();
+      const newGrid = $('#calGrid');
+      if (newGrid) {
+        const afterH = newGrid.scrollHeight;
+        newGrid.scrollTop = prevTop + (afterH - beforeH);
+      }
+      calState.calExtending = false;
+    }
+    function extendBottom() {
+      if (calState.calExtending) return;
+      calState.calExtending = true;
+      const ADD = 4;
+      calState.weekCount += ADD;
+      const prevTop = grid.scrollTop;
+      calState.suppressNextExtendUntilScrollTop = true;
+      render();
+      const newGrid = $('#calGrid');
+      if (newGrid) newGrid.scrollTop = prevTop;
+      calState.calExtending = false;
+    }
+    grid.addEventListener('scroll', () => {
+      // Suppress one round of edge-detection when the scrollTop was set
+      // programmatically (during extend / scroll-to-today). Without this
+      // guard, the synthetic scroll event re-triggers extendTop and we
+      // loop forever.
+      if (calState.suppressNextExtendUntilScrollTop) {
+        calState.suppressNextExtendUntilScrollTop = false;
+        calState.lastScrollTop = grid.scrollTop;
+        refreshSub();
+        return;
+      }
+      calState.lastScrollTop = grid.scrollTop;
+      const max = grid.scrollHeight - grid.clientHeight;
+      if (grid.scrollTop < 200) extendTop();
+      else if (grid.scrollTop > max - 200) extendBottom();
+      refreshSub();
+    });
+    // Scroll-to-today only when the window was just (re-)anchored —
+    // i.e. on first mount, after Today, after ‹ / ›, or after the format
+    // toggle. Re-renders triggered by extendTop / extendBottom keep
+    // their explicit scrollTop set by the extend caller.
+    if (calState.scrollToTodayPending) {
+      // Show the WHOLE anchor month: scroll so the row holding the
+      // 1st-of-month is at the top of the viewport. Anchor =
+      // today's month + monthOffset, so:
+      //   Today  (monthOffset=0)   → today's month at top
+      //   ‹      (monthOffset-=1)  → previous month at top
+      //   ›      (monthOffset+=1)  → next month at top
+      // Use getBoundingClientRect-relative math because the grid
+      // doesn't have position:relative and offsetTop would resolve
+      // against a far ancestor.
+      const today = new Date();
+      const anchor = new Date(today.getFullYear(), today.getMonth() + calState.monthOffset, 1);
+      const ymPrefix = `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}-01`;
+      const targetCell = grid.querySelector(`.cal-cell[data-iso="${ymPrefix}"]`)
+                       || grid.querySelector('.cal-cell.today');
+      if (targetCell) {
+        const gridTop = grid.getBoundingClientRect().top;
+        const cellTop = targetCell.getBoundingClientRect().top;
+        const delta = cellTop - gridTop;
+        const max = Math.max(0, grid.scrollHeight - grid.clientHeight);
+        calState.suppressNextExtendUntilScrollTop = true;
+        grid.scrollTop = clamp(grid.scrollTop + delta, 0, max);
+        calState.lastScrollTop = grid.scrollTop;
+      }
+      calState.scrollToTodayPending = false;
+    } else if (typeof calState.lastScrollTop === 'number') {
+      // Preserve scroll position across re-renders that don't re-anchor
+      // the window. Without this, switching to the calendar view resets
+      // scrollTop to 0 and the user loses their place.
+      calState.suppressNextExtendUntilScrollTop = true;
+      grid.scrollTop = calState.lastScrollTop;
+    }
+    refreshSub();
+  }
+
+  // — Drag-pan helpers —
+  // Common rule: ignore drags that started on a chip / button / link /
+  // form control so click-throughs still work.
+  function _dragIgnoreTarget(t) {
+    return !!t.closest('.cal-chip, .tl-chip, .cal-more, button, a, input, select, textarea, [contenteditable="true"]');
+  }
+  function wireMonthGridDrag(viewEl) {
+    const grid = viewEl.querySelector('.cal-grid');
+    if (!grid) return;
+    let active = false;
+    let startX = 0;
+    let dx = 0;
+    const PX_PER_MONTH = 200; // sensitivity — ~200 px of horizontal drag = 1 month
+    grid.style.cursor = 'grab';
+    grid.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (_dragIgnoreTarget(e.target)) return;
+      active = true; startX = e.clientX; dx = 0;
+      grid.style.cursor = 'grabbing';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    // Attach move/up at render time and leave them attached for the
+    // lifetime of this view's render. They no-op when `active` is false,
+    // which is the rest state. (Earlier we used { once: true } for mouseup
+    // — that broke after the first drag because the listener was removed.)
+    function onMove(e) {
+      if (!active) return;
+      dx = e.clientX - startX;
+      grid.style.transform = `translateX(${dx}px)`;
+    }
+    function onUp() {
+      if (!active) return;
+      active = false;
+      grid.style.cursor = 'grab';
+      grid.style.transform = '';
+      document.body.style.userSelect = '';
+      const months = Math.round(-dx / PX_PER_MONTH);
+      if (months !== 0) {
+        calState.monthOffset += months;
+        render();
+      }
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+  function wireTimelineDragPan(viewEl) {
+    const scroll = viewEl.querySelector('.tl-scroll');
+    if (!scroll) return;
+    let active = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+    let overflowPx = 0; // accumulated pull past the edges, used for month-shift on release
+    const PX_PER_MONTH = 220;
+    scroll.style.cursor = 'grab';
+    scroll.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (_dragIgnoreTarget(e.target)) return;
+      active = true;
+      startX = e.clientX;
+      startScrollLeft = scroll.scrollLeft;
+      overflowPx = 0;
+      scroll.style.cursor = 'grabbing';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    function onMove(e) {
+      if (!active) return;
+      const dx = e.clientX - startX;
+      const desired = startScrollLeft - dx;
+      const max = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
+      // Clamp scroll to [0, max] and remember any overflow so we can
+      // convert it to a month-shift on release.
+      if (desired < 0)        { scroll.scrollLeft = 0;   overflowPx = desired; }
+      else if (desired > max) { scroll.scrollLeft = max; overflowPx = desired - max; }
+      else                    { scroll.scrollLeft = desired; overflowPx = 0; }
+    }
+    function onUp() {
+      if (!active) return;
+      active = false;
+      scroll.style.cursor = 'grab';
+      document.body.style.userSelect = '';
+      // If the user pulled past either edge, convert the overflow to
+      // a month shift so panning feels continuous past the visible window.
+      const months = Math.round(overflowPx / PX_PER_MONTH);
+      if (months !== 0) {
+        calState.monthOffset += months;
+        render();
+      }
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+
+  // — Hover indicator on the timeline. Shows a small vertical mark + a
+  //   date label that follows the cursor. Suppressed during drag so the
+  //   visuals don't fight each other.
+  function wireTimelineHoverMarker(viewEl) {
+    const scroll = viewEl.querySelector('.tl-scroll');
+    const stage  = viewEl.querySelector('.tl-stage');
+    if (!scroll || !stage) return;
+    const marker = document.createElement('div');
+    marker.className = 'tl-hover-marker';
+    marker.innerHTML = '<div class="tl-hover-line"></div><div class="tl-hover-label"></div>';
+    marker.style.display = 'none';
+    stage.appendChild(marker);
+    const label = marker.querySelector('.tl-hover-label');
+    function updateFromEvent(e) {
+      if (calState._tlDragging) { marker.style.display = 'none'; return; }
+      const stageRect = stage.getBoundingClientRect();
+      const xInStage = e.clientX - stageRect.left;
+      if (xInStage < 0 || xInStage > stage.clientWidth) { marker.style.display = 'none'; return; }
+      const pxPerDay = clamp(calState.tlPxPerDay || 26, 0.5, 80);
+      const dayOffset = xInStage / pxPerDay;
+      const ms = (calState._tlWindowStartMs || 0) + dayOffset * dayMs;
+      const d = new Date(ms);
+      const txt = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      marker.style.left = xInStage + 'px';
+      label.textContent = txt;
+      marker.style.display = 'block';
+    }
+    scroll.addEventListener('mousemove', updateFromEvent);
+    scroll.addEventListener('mouseleave', () => { marker.style.display = 'none'; });
+  }
+
+  // — Drag-to-move (and edge-resize for milestone ranges) on the timeline.
+  //   Click without movement still opens the editor (the click event fires
+  //   normally); a real drag updates the underlying record's date(s) and
+  //   commits, suppressing the trailing click so the editor doesn't pop up.
+  function wireTimelineEventDrag(viewEl) {
+    const stage = viewEl.querySelector('.tl-stage');
+    if (!stage) return;
+    const RESIZE_HANDLE_PX = 8;
+    function shiftIso(iso, days) {
+      if (!iso) return iso;
+      const d = parseDate(iso);
+      d.setDate(d.getDate() + days);
+      return fmtISO(d);
+    }
+    stage.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const target = e.target.closest('.tl-marker, .tl-range-bar');
+      if (!target) return;
+      const key = target.dataset.tlRunKey;
+      const entry = calState._tlRunMap?.get(key);
+      if (!entry?.drag) return;
+      const drag = entry.drag;
+
+      // Determine drag mode for range bars: edges resize, middle moves.
+      let mode = 'move';
+      const isRange = target.classList.contains('tl-range-bar');
+      if (isRange) {
+        const r = target.getBoundingClientRect();
+        if (e.clientX - r.left < RESIZE_HANDLE_PX) mode = 'resize-left';
+        else if (r.right - e.clientX < RESIZE_HANDLE_PX) mode = 'resize-right';
+      }
+
+      e.stopPropagation();
+      e.preventDefault();
+      calState._tlDragging = true;
+      const startX = e.clientX;
+      const initialLeft  = parseFloat(target.style.left)  || 0;
+      const initialWidth = isRange ? (parseFloat(target.style.width) || 0) : 0;
+      const pxPerDay = clamp(calState.tlPxPerDay || 26, 0.5, 80);
+      const prevCursor = document.body.style.cursor;
+      document.body.style.cursor = (mode === 'move') ? 'grabbing' : 'ew-resize';
+      target.style.zIndex = 10;
+      let movedEnough = false;
+
+      function onMove(em) {
+        const dx = em.clientX - startX;
+        if (Math.abs(dx) >= 4) movedEnough = true;
+        if (mode === 'move') {
+          target.style.left = (initialLeft + dx) + 'px';
+        } else if (mode === 'resize-right') {
+          target.style.width = Math.max(20, initialWidth + dx) + 'px';
+        } else if (mode === 'resize-left') {
+          const newWidth = initialWidth - dx;
+          if (newWidth >= 20) {
+            target.style.left  = (initialLeft + dx) + 'px';
+            target.style.width = newWidth + 'px';
+          }
+        }
+      }
+      function onUp(em) {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = prevCursor;
+        calState._tlDragging = false;
+        if (!movedEnough) return; // pure click — let the click handler open the editor
+
+        // Suppress the trailing click on this marker (otherwise the editor
+        // would open after every drag).
+        calState._tlSuppressNextClick = true;
+        // Reset for next render
+        setTimeout(() => { calState._tlSuppressNextClick = false; }, 200);
+
+        const dx = em.clientX - startX;
+        const dDays = Math.round(dx / pxPerDay);
+        if (dDays === 0) return;
+
+        const r = drag.record;
+        const today = todayISO();
+        if (mode === 'move') {
+          if (drag.kind === 'action') {
+            const oldDue = r.due;
+            if (r.due) r.due = shiftIso(r.due, dDays);
+            r.updatedAt = today;
+            r.history = r.history || [];
+            r.history.push({ at: today, what: `Due: ${oldDue || '—'} → ${r.due || '—'} (timeline drag)` });
+          } else if (drag.kind === 'deliverable') {
+            if (r.dueDate) r.dueDate = shiftIso(r.dueDate, dDays);
+          } else if (drag.kind === 'milestone') {
+            if (r.date) r.date = shiftIso(r.date, dDays);
+            if (r.endDate) r.endDate = shiftIso(r.endDate, dDays);
+          }
+        } else if (mode === 'resize-right' && drag.kind === 'milestone') {
+          if (r.endDate) {
+            const ne = shiftIso(r.endDate, dDays);
+            if (ne >= r.date) r.endDate = ne;
+          }
+        } else if (mode === 'resize-left' && drag.kind === 'milestone') {
+          if (r.date) {
+            const ns = shiftIso(r.date, dDays);
+            if (!r.endDate || ns <= r.endDate) r.date = ns;
+          }
+        }
+        // commit() rebuilds the calendar DOM, which makes the new
+        // .tl-scroll start at scrollLeft=0. Capture the user's current
+        // horizontal scroll and restore it on the new element so the
+        // drag doesn't auto-pan the view.
+        const liveScroll = stage.closest('.tl-scroll');
+        const savedScrollLeft = liveScroll ? liveScroll.scrollLeft : 0;
+        commit('timeline-drag');
+        const newScroll = $('.tl-scroll');
+        if (newScroll) newScroll.scrollLeft = savedScrollLeft;
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
+
+  /* ---------------------- Phase C: command palette --------------------- */
+  // Universal Cmd+K palette. Indexes everything searchable + a small menu of
+  // "slash commands" (action you can take). Up/Down + Enter to navigate +
+  // open. Type `/` to filter to commands only.
+  const paletteState = { items: [], idx: 0, query: '' };
+
+  // Build a flat searchable index from current state. Cheap to rebuild on
+  // each open since project data is in-memory.
+  function buildPaletteIndex() {
+    const out = [];
+    // Slash-commands always available
+    const sc = (label, hint, run) => out.push({ kind: 'cmd', label, hint, run, sortBoost: 5 });
+    sc('+ New action',          'Open Quick Add',    () => openQuickAdd('action'));
+    sc('+ New deliverable',     'Open Quick Add',    () => openQuickAdd('deliverable'));
+    sc('+ New milestone',       'Open Quick Add',    () => openQuickAdd('milestone'));
+    sc('+ New risk',            'Open Quick Add',    () => openQuickAdd('risk', { kind: 'risk' }));
+    sc('+ New opportunity',     'Open Quick Add',    () => openQuickAdd('risk', { kind: 'opportunity' }));
+    sc('+ New decision',        'Open Quick Add',    () => openQuickAdd('decision'));
+    sc('+ New change request',  'Open editor',       () => openQuickAdd('change'));
+    sc('+ New link',            'Open Quick Add',    () => openQuickAdd('link'));
+    sc('+ New meeting',         'Open Quick Add',    () => openQuickAdd('meeting'));
+    sc('+ New person',          'Open Quick Add',    () => openQuickAdd('person'));
+    sc('+ New project',         'Open Quick Add',    () => openQuickAdd('project'));
+    sc('Save current project as template', 'Project skeleton',
+      () => { const p = curProject(); if (!p || curProjectIsMerged()) { toast('Pick a single project'); return; } saveProjectAsTemplate(p.id); });
+    sc('Open Inbox',            'Reminders + alerts',() => { state.currentView = 'inbox'; render(); });
+    sc('Open Calendar',         'Month view',        () => { state.currentView = 'calendar'; render(); });
+    sc('Open Review (walk-through)', 'Live review wizard', () => { reviewModeState.mode = 'walkthrough'; state.currentView = 'review'; render(); });
+    sc('Open Status report',         'Single-page snapshot', () => { reviewModeState.mode = 'full';        state.currentView = 'review'; render(); });
+    sc('Toggle theme',          'Light / dark',      () => $('#btnTheme')?.click());
+    sc('Toggle notes',          'Side panel',        () => $('#btnNotesToggle')?.click());
+    sc('Run tour',              '5-step intro',      () => runTour(0));
+
+    state.projects.forEach((proj) => {
+      // Project itself
+      out.push({ kind: 'project', label: proj.name, hint: 'Project', run: () => {
+        state.currentProjectId = proj.id;
+        state.currentView = 'board';
+        saveState(); render();
+      }});
+      (proj.actions || []).forEach((a) => {
+        if (a.deletedAt) return;
+        const haystack = [a.title, personName(a.owner), a.notes || '', a.description || ''].join(' ');
+        out.push({ kind: 'action', label: a.title, hint: `${proj.name} · ${personName(a.owner)} · ${a.due ? fmtDate(a.due) : 'no date'}`, hay: haystack, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'board';
+          render();
+          setTimeout(() => openDrawer(a.id), 30);
+        }});
+      });
+      (proj.openPoints || []).forEach((op) => {
+        const hay = [op.title, op.notes || '', (op.steps || []).map((s) => s.text).join(' ')].join(' ');
+        out.push({ kind: 'open-point', label: op.title, hint: `${proj.name} · open point`, hay, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'openpoints';
+          render();
+        }});
+      });
+      (proj.changes || []).forEach((c) => {
+        const hay = [c.title, c.rationale, c.analysis, c.description].join(' ');
+        out.push({ kind: 'change', label: c.title, hint: `${proj.name} · ${c.status}`, hay, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'changes';
+          render();
+          setTimeout(() => openChangeRequestEditor(c.id), 30);
+        }});
+      });
+      (proj.decisions || []).forEach((d) => {
+        out.push({ kind: 'decision', label: d.title, hint: `${proj.name} · decision · ${d.date || ''}`, hay: d.title + ' ' + (d.rationale || ''), run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'decisions';
+          render();
+        }});
+      });
+      (proj.risks || []).forEach((r) => {
+        out.push({ kind: 'risk', label: r.title, hint: `${proj.name} · ${r.kind || 'risk'}`, hay: r.title + ' ' + (r.mitigation || ''), run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'risks';
+          render();
+          setTimeout(() => openRiskEditor(r.id), 30);
+        }});
+      });
+      (proj.deliverables || []).forEach((d) => {
+        out.push({ kind: 'deliverable', label: d.name, hint: `${proj.name} · deliverable · ${d.dueDate ? fmtDate(d.dueDate) : 'no date'}`, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'deliverables';
+          render();
+        }});
+      });
+      (proj.milestones || []).forEach((m) => {
+        out.push({ kind: 'milestone', label: m.name, hint: `${proj.name} · milestone · ${m.date ? fmtDate(m.date) : 'no date'}`, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'milestones';
+          render();
+        }});
+      });
+      (proj.components || []).forEach((cmp) => {
+        out.push({ kind: 'component', label: cmp.name, hint: `${proj.name} · component`, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'components';
+          render();
+        }});
+      });
+      (proj.links || []).forEach((l) => {
+        const hay = [l.title, l.description, l.url].join(' ');
+        out.push({ kind: 'link', label: l.title || l.url, hint: `${proj.name} · link`, hay, run: () => {
+          window.open(l.url, '_blank', 'noopener,noreferrer');
+        }});
+      });
+      // Project notes — searchable as one big chunk
+      const notesHTML = state.notes?.[proj.id] || '';
+      if (notesHTML) {
+        const text = notesHTML.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+        if (text) out.push({ kind: 'notes', label: 'Meeting notes — ' + proj.name, hint: 'Project notes', hay: text, run: () => {
+          state.currentProjectId = proj.id;
+          if (!state.notesOpen) { state.notesOpen = true; saveState(); applyNotesPanel(); loadNotesForCurrentProject(); }
+          render();
+        }});
+      }
+    });
+    state.people.forEach((p) => {
+      out.push({ kind: 'person', label: p.name, hint: `${p.role || 'Person'} · ${p.capacity || 100}% FTE`, run: () => {
+        state.currentView = 'people';
+        render();
+      }});
+    });
+    return out;
+  }
+
+  function paletteRank(items, query) {
+    if (!query) {
+      // Default — slash-commands first, then alphabetical
+      return items.slice().sort((a, b) => {
+        const sa = (a.kind === 'cmd' ? 1 : 0);
+        const sb = (b.kind === 'cmd' ? 1 : 0);
+        if (sa !== sb) return sb - sa;
+        return a.label.localeCompare(b.label);
+      }).slice(0, 60);
+    }
+    const isCmdOnly = query.startsWith('/');
+    const q = (isCmdOnly ? query.slice(1) : query).trim();
+    const scored = items
+      .filter((it) => !isCmdOnly || it.kind === 'cmd')
+      .map((it) => {
+        const labelScore = fuzzyScore(q, it.label) * 3;
+        const hayScore   = fuzzyScore(q, it.hay || '') * 1;
+        const hintScore  = fuzzyScore(q, it.hint || '') * 0.5;
+        const total = labelScore + hayScore + hintScore + (it.sortBoost || 0);
+        return { it, total };
+      })
+      .filter((x) => x.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 40)
+      .map((x) => x.it);
+    return scored;
+  }
+
+  function renderPalette() {
+    const list = $('#paletteResults');
+    if (!list) return;
+    const { items, idx } = paletteState;
+    if (!items.length) {
+      list.innerHTML = '<div class="palette-empty">No matches. Try fewer characters or remove the leading <kbd>/</kbd>.</div>';
+      return;
+    }
+    const kindIcon = {
+      cmd: '⌘', action: '✓', 'open-point': '⚐', change: '⇆', decision: '⬡',
+      risk: '△', deliverable: '◆', milestone: '◇', component: '▣',
+      link: '↗', notes: '✎', project: '▦', person: '◔',
+    };
+    list.innerHTML = items.map((it, i) => `
+      <button class="palette-item ${i === idx ? 'active' : ''}" data-idx="${i}" role="option">
+        <span class="palette-kind">${kindIcon[it.kind] || '·'}</span>
+        <span class="palette-label">${escapeHTML(it.label)}</span>
+        <span class="palette-hint">${escapeHTML(it.hint || '')}</span>
+      </button>`).join('');
+    // Scroll active into view
+    list.querySelector('.palette-item.active')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function openPalette() {
+    const overlay = $('#paletteOverlay');
+    if (!overlay) return;
+    overlay.hidden = false;
+    paletteState.items = paletteRank(buildPaletteIndex(), '');
+    paletteState.idx = 0;
+    paletteState.query = '';
+    const inp = $('#paletteInput');
+    inp.value = '';
+    renderPalette();
+    setTimeout(() => inp.focus(), 30);
+  }
+  function closePalette() {
+    const overlay = $('#paletteOverlay');
+    if (overlay) overlay.hidden = true;
+    paletteState.items = [];
+  }
+  function paletteRunSelected() {
+    const it = paletteState.items[paletteState.idx];
+    if (!it) return;
+    closePalette();
+    setTimeout(() => { try { it.run(); } catch (e) { /* ignore */ } }, 0);
+  }
+
+  function wirePalette() {
+    const overlay = $('#paletteOverlay');
+    const inp = $('#paletteInput');
+    const list = $('#paletteResults');
+    if (!overlay || !inp) return;
+    inp.addEventListener('input', () => {
+      paletteState.query = inp.value;
+      paletteState.items = paletteRank(buildPaletteIndex(), paletteState.query);
+      paletteState.idx = 0;
+      renderPalette();
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); paletteState.idx = (paletteState.idx + 1) % Math.max(1, paletteState.items.length); renderPalette(); }
+      else if (e.key === 'ArrowUp')   { e.preventDefault(); paletteState.idx = (paletteState.idx - 1 + paletteState.items.length) % Math.max(1, paletteState.items.length); renderPalette(); }
+      else if (e.key === 'Enter')     { e.preventDefault(); paletteRunSelected(); }
+      else if (e.key === 'Escape')    { e.preventDefault(); closePalette(); }
+    });
+    list.addEventListener('mousedown', (e) => {
+      const btn = e.target.closest('.palette-item[data-idx]');
+      if (!btn) return;
+      e.preventDefault();
+      paletteState.idx = parseInt(btn.dataset.idx, 10);
+      paletteRunSelected();
+    });
+    list.addEventListener('mouseover', (e) => {
+      const btn = e.target.closest('.palette-item[data-idx]');
+      if (!btn) return;
+      const i = parseInt(btn.dataset.idx, 10);
+      if (i !== paletteState.idx) { paletteState.idx = i; renderPalette(); }
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closePalette(); });
+    $('#paletteClose')?.addEventListener('click', closePalette);
+  }
+
+  /* --------------------- Phase B: sidebar groups + help ---------------- */
+  function wireSidebarGroups() {
+    document.querySelectorAll('.nav-section-toggle').forEach((toggle) => {
+      const group = toggle.dataset.group;
+      const body = document.querySelector(`[data-group-body="${group}"]`);
+      if (!body) return;
+      // Apply persisted state
+      const open = state.settings.sidebarGroups?.[group] !== false;
+      body.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.classList.toggle('collapsed', !open);
+      toggle.addEventListener('click', () => {
+        const isOpen = toggle.getAttribute('aria-expanded') === 'true';
+        const next = !isOpen;
+        body.hidden = !next;
+        toggle.setAttribute('aria-expanded', String(next));
+        toggle.classList.toggle('collapsed', !next);
+        state.settings.sidebarGroups = state.settings.sidebarGroups || {};
+        state.settings.sidebarGroups[group] = next;
+        saveState();
+      });
+    });
+  }
+
+  // Keyboard cheatsheet
+  function wireHelpModal() {
+    const overlay = $('#helpOverlay');
+    const btn = $('#btnHelp');
+    if (!overlay || !btn) return;
+    const close = () => { overlay.hidden = true; };
+    btn.addEventListener('click', () => openHelp());
+    $('#helpClose')?.addEventListener('click', close);
+    $('#helpDone')?.addEventListener('click', close);
+    // ? to open from anywhere outside an input
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== '?' && !(e.shiftKey && e.key === '/')) return;
+      const inField = ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
+      if (inField) return;
+      e.preventDefault();
+      overlay.hidden ? openHelp() : close();
+    });
+  }
+  function openHelp() {
+    const overlay = $('#helpOverlay');
+    const body = $('#helpBody');
+    if (!overlay || !body) return;
+    const isMac = navigator.platform.toLowerCase().includes('mac');
+    const mod = isMac ? '⌘' : 'Ctrl';
+    const sections = [
+      ['Global', [
+        [`${mod}+K`,             'Open command palette'],
+        [`${mod}+Z`,             'Undo'],
+        [`${mod}+Shift+Z`,       'Redo'],
+        [`${mod}+\\`,            'Toggle meeting notes'],
+        [`/`,                    'Focus search'],
+        [`?`,                    'Open this cheatsheet'],
+        [`← / →`,                'Calendar: previous / next month'],
+      ]],
+      ['Editing', [
+        ['Right-click any row',  'Edit / status / delete menu'],
+        ['Double-click any row', 'Open editor'],
+        ['Drag the ⋮⋮ grip',     'Reorder rows'],
+        ['Backspace on empty',   'Delete the current step / todo / row'],
+        ['×',                    'Always closes the modal — click-outside is intentionally disabled'],
+      ]],
+      ['Notes', [
+        ['@ then type',          'Mention a person'],
+        ['# then type',          'Insert an existing action'],
+        [`${mod}+Shift+A`,       'Create + insert a new action'],
+        [`${mod}+B / I / U`,     'Bold / italic / underline'],
+      ]],
+      ['Lists & boards', [
+        ['Drag card / row',      'Move within or across columns / folders'],
+        ['Drop on Done bin',     'Mark done from the board'],
+        ['Drop on Archive bin',  'Soft-delete'],
+      ]],
+    ];
+    body.innerHTML = sections.map(([title, rows]) => `
+      <div class="help-section">
+        <div class="help-section-title">${escapeHTML(title)}</div>
+        <div class="help-rows">
+          ${rows.map(([k, v]) => `
+            <div class="help-row"><kbd>${escapeHTML(k)}</kbd><span>${escapeHTML(v)}</span></div>
+          `).join('')}
+        </div>
+      </div>`).join('') + `
+      <div class="help-section">
+        <div class="help-section-title">Re-run intro</div>
+        <div class="help-row"><button class="ghost" id="btnHelpRunTour" style="padding:5px 10px;font-size:12px;">Run 5-step tour</button><span>Get the guided introduction again.</span></div>
+      </div>`;
+    overlay.hidden = false;
+    $('#btnHelpRunTour')?.addEventListener('click', () => {
+      $('#helpOverlay').hidden = true;
+      runTour(0);
+    });
+  }
+
   /* ----------------------------- wire-up ----------------------------- */
+
+  /* ----------------------- Phase L: first-run tour --------------------- */
+  // 5-step Shepherd-style overlay. Pinned to the most stable selectors
+  // available; if a target isn't on screen (rare), we still show the
+  // step's body in a centered card. Sets state.settings.tourSeen on
+  // skip / finish so it never auto-fires twice.
+  const TOUR_STEPS = [
+    {
+      target: '#sidebar .nav, .sidebar nav',
+      side: 'right',
+      title: 'Navigate the project',
+      body: 'Switch views from here — Board, Register, Gantt, Calendar, Reports, plus engineering side-views like Risks and Change Requests.',
+    },
+    {
+      target: '#btnQuickAdd',
+      side: 'bottom',
+      title: 'One palette for everything',
+      body: 'Press <b>⌘K</b> (or click here) to open the universal palette. Type to search across actions, links, decisions, risks — or run quick commands like <i>+ action</i>, <i>report</i>, <i>today</i>.',
+    },
+    {
+      target: '.card[data-id]',
+      side: 'right',
+      title: 'Edit anywhere',
+      body: 'Click any card to open its drawer. Drag between columns to change status. Hover to reveal a <b>⋯</b> menu with quick actions like Mark blocked / Add note / Archive.',
+    },
+    {
+      target: '#btnInbox',
+      side: 'bottom',
+      title: 'Stay on top of what\'s slipping',
+      body: 'The bell aggregates late actions, due-soon items, aging change requests and uncovered risks. Click an item to jump to it; dismissals stick.',
+    },
+    {
+      target: '#btnHelp',
+      side: 'bottom',
+      title: 'Keyboard shortcuts',
+      body: 'Press <b>?</b> any time for the full shortcut cheatsheet. You can re-run this tour from there.',
+    },
+  ];
+  function maybeRunFirstRunTour() {
+    if (state.settings?.tourSeen) return;
+    setTimeout(() => runTour(0), 600); // wait for first render
+  }
+  function runTour(stepIdx) {
+    closeTour();
+    if (stepIdx < 0 || stepIdx >= TOUR_STEPS.length) {
+      finishTour();
+      return;
+    }
+    const step = TOUR_STEPS[stepIdx];
+    const target = document.querySelector(step.target);
+    const overlay = document.createElement('div');
+    overlay.className = 'tour-overlay';
+    overlay.innerHTML = `
+      <div class="tour-mask" id="tourMask"></div>
+      <div class="tour-card" id="tourCard">
+        <div class="tour-step">Step ${stepIdx + 1} of ${TOUR_STEPS.length}</div>
+        <div class="tour-title">${escapeHTML(step.title)}</div>
+        <div class="tour-body">${step.body}</div>
+        <div class="tour-foot">
+          <button class="ghost" id="tourSkip">Skip tour</button>
+          <button class="primary" id="tourNext">${stepIdx === TOUR_STEPS.length - 1 ? 'Finish' : 'Next →'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const card = overlay.querySelector('#tourCard');
+    const mask = overlay.querySelector('#tourMask');
+    if (target) {
+      target.classList.add('tour-highlight');
+      const r = target.getBoundingClientRect();
+      // Soft-spot the highlighted region with a ring on the mask
+      mask.style.setProperty('--spot-x', (r.left + r.width / 2) + 'px');
+      mask.style.setProperty('--spot-y', (r.top + r.height / 2) + 'px');
+      mask.style.setProperty('--spot-r', (Math.max(r.width, r.height) / 2 + 12) + 'px');
+      // Place the card to the side requested by the step (clamp to viewport)
+      const W = card.getBoundingClientRect().width || 320;
+      const H = card.getBoundingClientRect().height || 160;
+      const margin = 16;
+      let x = r.right + margin, y = r.top;
+      if (step.side === 'bottom') { x = Math.max(margin, r.left); y = r.bottom + margin; }
+      if (step.side === 'left')   { x = Math.max(margin, r.left - W - margin); y = r.top; }
+      if (step.side === 'right')  { x = r.right + margin; y = Math.max(margin, r.top); }
+      x = clamp(x, margin, innerWidth - W - margin);
+      y = clamp(y, margin, innerHeight - H - margin);
+      card.style.left = x + 'px';
+      card.style.top = y + 'px';
+    } else {
+      // No anchor — center the card and fade the mask uniformly
+      mask.classList.add('full');
+      card.style.left = '50%';
+      card.style.top = '50%';
+      card.style.transform = 'translate(-50%, -50%)';
+    }
+    overlay.querySelector('#tourSkip').addEventListener('click', () => { closeTour(); finishTour(); });
+    overlay.querySelector('#tourNext').addEventListener('click', () => runTour(stepIdx + 1));
+  }
+  function closeTour() {
+    document.querySelectorAll('.tour-highlight').forEach((el) => el.classList.remove('tour-highlight'));
+    document.querySelectorAll('.tour-overlay').forEach((el) => el.remove());
+  }
+  function finishTour() {
+    state.settings = state.settings || {};
+    state.settings.tourSeen = true;
+    saveState();
+    toast('Tour finished — press ? for shortcuts');
+  }
 
   function init() {
     state = loadState();
@@ -8932,12 +12900,16 @@
 
     $('#btnUndo').addEventListener('click', undo);
     $('#btnRedo').addEventListener('click', redo);
-    $('#btnQuickAdd').addEventListener('click', () => openQuickAdd('action'));
+    $('#btnQuickAdd').addEventListener('click', () => openPalette());
 
     $('#btnNotesToggle').addEventListener('click', () => {
       state.notesOpen = !state.notesOpen;
       saveState();
       applyNotesPanel();
+    });
+    $('#btnInbox').addEventListener('click', () => {
+      state.currentView = 'inbox';
+      saveState(); render();
     });
     wireNotesPanel();
     applyNotesPanel();
@@ -8946,9 +12918,13 @@
     wireTodoWidget();
     wireAutoBackup();
     initAutoBackup();
+    wireSidebarGroups();
+    wireHelpModal();
+    wirePalette();
 
     $('#btnExport').addEventListener('click', exportJSON);
     $('#btnImport').addEventListener('click', importJSON);
+    $('#btnMerge').addEventListener('click', openMergeOverlay);
     $('#btnReset').addEventListener('click', () => {
       if (!confirm('Replace the current data with the sample dataset?\n\nYou can Export first if you want to keep what\'s here.')) return;
       undoStack.push(JSON.stringify(state));
@@ -9034,7 +13010,7 @@
       // search-focus shortcut, and Cmd+Z would undo app state instead of text.
       const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault(); openQuickAdd('action');
+        e.preventDefault(); openPalette();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         if (!inField) { e.preventDefault(); undo(); }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && e.shiftKey) {
@@ -9060,7 +13036,14 @@
     });
     setInterval(flushPendingSaves, 10000);
 
+    // Phase D — refresh the bell once per minute so day-rollover late-actions
+    // surface without needing a manual reload, and try the daily notification
+    // once per app load.
+    setInterval(refreshBell, 60000);
+    setTimeout(maybeNotifyInbox, 1500);
+
     render();
+    maybeRunFirstRunTour();
   }
 
   document.addEventListener('DOMContentLoaded', init);
