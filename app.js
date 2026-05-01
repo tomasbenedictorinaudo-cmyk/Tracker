@@ -8705,11 +8705,6 @@
         status: $('#qStatus').value,
         component: $('#qComp')?.value || null,
       });
-      // Invalidate the calendar window so the auto-extension picks up
-      // the new record on the next render (the new date may be outside
-      // the cached window).
-      calState.windowAnchorOffset = null;
-      calState.firstWeekStart = null;
     } else if (qaType === 'milestone') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
@@ -8726,11 +8721,6 @@
         status: 'todo',
         component: $('#qComp')?.value || null,
       });
-      // Invalidate the calendar window so the auto-extension picks up
-      // the new record on the next render (its date may be outside
-      // the cached window).
-      calState.windowAnchorOffset = null;
-      calState.firstWeekStart = null;
     } else if (qaType === 'risk') {
       const title = $('#qTitle').value.trim();
       if (!title) return toast('Title required');
@@ -8833,6 +8823,12 @@
     if (qaType === 'action') createdAction = proj.actions[proj.actions.length - 1];
     const cb = qaSaveCallback;
     qaSaveCallback = null;
+    // Invalidate the cached calendar window so the next render
+    // re-runs ensureCalendarWindow and auto-extends to include the
+    // new record's date — important for items dated outside the
+    // current window (e.g. far-future actions / milestones / CRs).
+    calState.windowAnchorOffset = null;
+    calState.firstWeekStart = null;
     commit('add');
     closeQuickAdd();
     const addedLabel = qaType === 'risk'
@@ -11101,23 +11097,30 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       let firstWeekStart = new Date(monthGridStart.getTime() - 4 * 7 * dayMs);
       let weekCount = 12;
 
-      // Auto-extend the initial window so every milestone + deliverable
-      // in the project is visible without manual scrolling. Capped at
-      // ±18 months from today so very long-lived projects don't render
-      // a runaway window. The user can still scroll past these bounds
-      // — extension is only on initial paint after a re-anchor.
+      // Auto-extend the window so every dated record in the project is
+      // visible regardless of how far in the past or future it sits.
+      // Covers milestones (start + endDate), deliverables (dueDate),
+      // actions (due), and decided change requests (decisionDate).
       const proj = curProject();
       if (proj) {
-        const todayMs    = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
-        const MAX_PAST   = todayMs - 18 * 30 * dayMs;
-        const MAX_FUT    = todayMs + 18 * 30 * dayMs;
         const dates = [];
-        (proj.milestones   || []).forEach((m) => { if (m.date)    dates.push(parseDate(m.date).getTime()); if (m.endDate) dates.push(parseDate(m.endDate).getTime()); });
-        (proj.deliverables || []).forEach((d) => { const dt = d.dueDate || d.date; if (dt) dates.push(parseDate(dt).getTime()); });
-        const inBounds = dates.filter((t) => t >= MAX_PAST && t <= MAX_FUT);
-        if (inBounds.length) {
-          const minMs = Math.min(...inBounds);
-          const maxMs = Math.max(...inBounds);
+        (proj.milestones   || []).forEach((m) => {
+          if (m.date)    dates.push(parseDate(m.date).getTime());
+          if (m.endDate) dates.push(parseDate(m.endDate).getTime());
+        });
+        (proj.deliverables || []).forEach((d) => {
+          const dt = d.dueDate || d.date;
+          if (dt) dates.push(parseDate(dt).getTime());
+        });
+        (proj.actions || []).forEach((a) => {
+          if (!a.deletedAt && a.due) dates.push(parseDate(a.due).getTime());
+        });
+        (proj.changes || []).forEach((c) => {
+          if (c.decisionDate) dates.push(parseDate(c.decisionDate).getTime());
+        });
+        if (dates.length) {
+          const minMs = Math.min(...dates);
+          const maxMs = Math.max(...dates);
           // Extend backward if any date is before the current window start
           const winStartMs = firstWeekStart.getTime();
           if (minMs < winStartMs) {
@@ -11309,10 +11312,34 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const proj = curProject();
     const todayD = new Date();
     const todayISO_ = todayISO();
-    // 12-month window centred on the anchor month (~6 before, ~6 after).
     const anchor = new Date(todayD.getFullYear(), todayD.getMonth() + calState.monthOffset, 1);
-    const startDate = new Date(anchor.getFullYear(), anchor.getMonth() - 6, 1);
-    const endDate   = new Date(anchor.getFullYear(), anchor.getMonth() + 7, 0);
+
+    // Window covers every dated record in the project so no row is
+    // hidden by an arbitrary period cap. Falls back to anchor ± 6
+    // months when the project has nothing dated yet.
+    const dates = [];
+    (proj.milestones   || []).forEach((m) => {
+      if (m.date)    dates.push(parseDate(m.date).getTime());
+      if (m.endDate) dates.push(parseDate(m.endDate).getTime());
+    });
+    (proj.deliverables || []).forEach((d) => {
+      const dt = d.dueDate || d.date;
+      if (dt) dates.push(parseDate(dt).getTime());
+    });
+    (proj.actions || []).forEach((a) => {
+      if (!a.deletedAt && a.due) dates.push(parseDate(a.due).getTime());
+    });
+    (proj.changes || []).forEach((c) => {
+      if (c.decisionDate) dates.push(parseDate(c.decisionDate).getTime());
+    });
+    let startDate, endDate;
+    if (dates.length) {
+      startDate = new Date(Math.min(...dates) - 30 * dayMs);
+      endDate   = new Date(Math.max(...dates) + 30 * dayMs);
+    } else {
+      startDate = new Date(anchor.getFullYear(), anchor.getMonth() - 6, 1);
+      endDate   = new Date(anchor.getFullYear(), anchor.getMonth() + 7, 0);
+    }
     const startISO  = fmtISO(startDate);
     const endISO    = fmtISO(endDate);
 
@@ -11424,13 +11451,48 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const todayD = parseDate(todayISO_);
     const pxPerDay = clamp(calState.tlPxPerDay || 26, TL_ZOOM_MIN, TL_ZOOM_MAX);
     const granularity = tlGranularityFor(pxPerDay);
-    const windowDays = tlWindowDaysFor(pxPerDay);
+    let windowDays = tlWindowDaysFor(pxPerDay);
 
     // Anchor near a Monday so axis ticks land cleanly. Lead the window
     // with ~30% behind the anchor month so a bit of history is visible.
     const anchor = new Date(todayD.getFullYear(), todayD.getMonth() + calState.monthOffset, 1);
     let windowStart = new Date(anchor.getTime() - Math.floor(windowDays * 0.3) * dayMs);
     while (windowStart.getDay() !== 1) windowStart = new Date(windowStart.getTime() - dayMs);
+
+    // Extend to cover every dated record (milestone / deliverable /
+    // action / decided CR) so nothing falls outside the timeline.
+    const allDates = [];
+    (proj.milestones   || []).forEach((m) => {
+      if (m.date)    allDates.push(parseDate(m.date).getTime());
+      if (m.endDate) allDates.push(parseDate(m.endDate).getTime());
+    });
+    (proj.deliverables || []).forEach((d) => {
+      const dt = d.dueDate || d.date;
+      if (dt) allDates.push(parseDate(dt).getTime());
+    });
+    (proj.actions || []).forEach((a) => {
+      if (!a.deletedAt && a.due) allDates.push(parseDate(a.due).getTime());
+    });
+    (proj.changes || []).forEach((c) => {
+      if (c.decisionDate) allDates.push(parseDate(c.decisionDate).getTime());
+    });
+    if (allDates.length) {
+      const minMs = Math.min(...allDates);
+      const maxMs = Math.max(...allDates);
+      // Extend windowStart back to a Monday before/at the earliest date
+      if (minMs < windowStart.getTime()) {
+        let newStart = new Date(minMs);
+        while (newStart.getDay() !== 1) newStart = new Date(newStart.getTime() - dayMs);
+        newStart = new Date(newStart.getTime() - 7 * dayMs); // 1-week buffer
+        windowStart = newStart;
+      }
+      // Extend windowDays so the latest date is within the window
+      const winEndMs = windowStart.getTime() + windowDays * dayMs;
+      if (maxMs > winEndMs) {
+        windowDays += Math.ceil((maxMs - winEndMs) / dayMs) + 7;
+      }
+    }
+
     const totalDays = windowDays;
     const windowEnd = new Date(windowStart.getTime() + (totalDays - 1) * dayMs);
     const totalPx = Math.round(totalDays * pxPerDay);
