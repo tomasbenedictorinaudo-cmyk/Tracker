@@ -30,15 +30,18 @@
       </div>
 
       <nav class="nav">
-        <div class="nav-section">Workspace</div>
-        <button class="nav-item" data-view="portfolio">
-          <span class="nav-icon">▦</span><span>Portfolio</span>
-        </button>
-        <button class="nav-item" data-view="people">
-          <span class="nav-icon">◔</span><span>People</span>
-        </button>
+        <button class="nav-section nav-section-toggle" data-group="workspace" aria-expanded="true">Workspace<span class="nav-section-caret">▾</span></button>
+        <div class="nav-group" data-group-body="workspace">
+          <button class="nav-item" data-view="portfolio">
+            <span class="nav-icon">▦</span><span>Portfolio</span>
+          </button>
+          <button class="nav-item" data-view="people">
+            <span class="nav-icon">◔</span><span>People</span>
+          </button>
+        </div>
 
-        <div class="nav-section">Project</div>
+        <button class="nav-section nav-section-toggle" data-group="project" aria-expanded="true">Project<span class="nav-section-caret">▾</span></button>
+        <div class="nav-group" data-group-body="project">
         <button class="nav-item" data-view="board">
           <span class="nav-icon">▤</span><span>Board</span>
         </button>
@@ -66,8 +69,10 @@
         <button class="nav-item" data-view="links">
           <span class="nav-icon">↗</span><span>Links</span>
         </button>
+        </div>
 
-        <div class="nav-section">Engineering</div>
+        <button class="nav-section nav-section-toggle" data-group="engineering" aria-expanded="true">Engineering<span class="nav-section-caret">▾</span></button>
+        <div class="nav-group" data-group-body="engineering">
         <button class="nav-item" data-view="components">
           <span class="nav-icon">▣</span><span>Components</span>
         </button>
@@ -89,6 +94,7 @@
         <button class="nav-item" data-view="changes">
           <span class="nav-icon">⇆</span><span>Change requests</span>
         </button>
+        </div>
       </nav>
 
       <div class="sidebar-foot">
@@ -137,6 +143,7 @@
         <button class="icon-btn" id="btnUndo" title="Undo (Cmd/Ctrl+Z)">↶</button>
         <button class="icon-btn" id="btnRedo" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
         <button class="icon-btn" id="btnNotesToggle" title="Toggle meeting notes (Cmd/Ctrl+\\)">✎</button>
+        <button class="icon-btn" id="btnHelp" title="Keyboard shortcuts (?)">?</button>
         <button class="primary" id="btnQuickAdd" title="Quick add (Cmd/Ctrl+K)">+ Quick add</button>
       </div>
     </header>
@@ -222,6 +229,21 @@
         <button class="icon-btn" id="drawerClose">×</button>
       </div>
       <div class="drawer-body" id="drawerBody"></div>
+    </div>
+  </div>
+
+  <!-- Keyboard cheatsheet modal (Phase B) -->
+  <div class="overlay desc-overlay" id="helpOverlay" hidden>
+    <div class="desc-modal" style="width:520px;">
+      <div class="desc-head">
+        <div class="desc-title">Keyboard &amp; mouse shortcuts</div>
+        <button class="icon-btn" id="helpClose" title="Close">×</button>
+      </div>
+      <div class="help-body" id="helpBody"></div>
+      <div class="desc-foot">
+        <span class="hint" style="margin-right:auto; color:var(--text-faint); font-size:11px;">Tip: open this any time with <kbd>?</kbd></span>
+        <button class="primary" id="helpDone">Got it</button>
+      </div>
     </div>
   </div>
 

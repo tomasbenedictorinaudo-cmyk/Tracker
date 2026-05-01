@@ -9003,6 +9003,94 @@
     refreshTodoFab();
   }
 
+  /* --------------------- Phase B: sidebar groups + help ---------------- */
+  function wireSidebarGroups() {
+    document.querySelectorAll('.nav-section-toggle').forEach((toggle) => {
+      const group = toggle.dataset.group;
+      const body = document.querySelector(`[data-group-body="${group}"]`);
+      if (!body) return;
+      // Apply persisted state
+      const open = state.settings.sidebarGroups?.[group] !== false;
+      body.hidden = !open;
+      toggle.setAttribute('aria-expanded', String(open));
+      toggle.classList.toggle('collapsed', !open);
+      toggle.addEventListener('click', () => {
+        const isOpen = toggle.getAttribute('aria-expanded') === 'true';
+        const next = !isOpen;
+        body.hidden = !next;
+        toggle.setAttribute('aria-expanded', String(next));
+        toggle.classList.toggle('collapsed', !next);
+        state.settings.sidebarGroups = state.settings.sidebarGroups || {};
+        state.settings.sidebarGroups[group] = next;
+        saveState();
+      });
+    });
+  }
+
+  // Keyboard cheatsheet
+  function wireHelpModal() {
+    const overlay = $('#helpOverlay');
+    const btn = $('#btnHelp');
+    if (!overlay || !btn) return;
+    const close = () => { overlay.hidden = true; };
+    btn.addEventListener('click', () => openHelp());
+    $('#helpClose')?.addEventListener('click', close);
+    $('#helpDone')?.addEventListener('click', close);
+    // ? to open from anywhere outside an input
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== '?' && !(e.shiftKey && e.key === '/')) return;
+      const inField = ['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
+      if (inField) return;
+      e.preventDefault();
+      overlay.hidden ? openHelp() : close();
+    });
+  }
+  function openHelp() {
+    const overlay = $('#helpOverlay');
+    const body = $('#helpBody');
+    if (!overlay || !body) return;
+    const isMac = navigator.platform.toLowerCase().includes('mac');
+    const mod = isMac ? '⌘' : 'Ctrl';
+    const sections = [
+      ['Global', [
+        [`${mod}+K`,             'Open Quick Add'],
+        [`${mod}+Z`,             'Undo'],
+        [`${mod}+Shift+Z`,       'Redo'],
+        [`${mod}+\\`,            'Toggle meeting notes'],
+        [`/`,                    'Focus search'],
+        [`?`,                    'Open this cheatsheet'],
+      ]],
+      ['Editing', [
+        ['Right-click any row',  'Edit / status / delete menu'],
+        ['Double-click any row', 'Open editor'],
+        ['Drag the ⋮⋮ grip',     'Reorder rows'],
+        ['Backspace on empty',   'Delete the current step / todo / row'],
+        ['×',                    'Always closes the modal — click-outside is intentionally disabled'],
+      ]],
+      ['Notes', [
+        ['@ then type',          'Mention a person'],
+        ['# then type',          'Insert an existing action'],
+        [`${mod}+Shift+A`,       'Create + insert a new action'],
+        [`${mod}+B / I / U`,     'Bold / italic / underline'],
+      ]],
+      ['Lists & boards', [
+        ['Drag card / row',      'Move within or across columns / folders'],
+        ['Drop on Done bin',     'Mark done from the board'],
+        ['Drop on Archive bin',  'Soft-delete'],
+      ]],
+    ];
+    body.innerHTML = sections.map(([title, rows]) => `
+      <div class="help-section">
+        <div class="help-section-title">${escapeHTML(title)}</div>
+        <div class="help-rows">
+          ${rows.map(([k, v]) => `
+            <div class="help-row"><kbd>${escapeHTML(k)}</kbd><span>${escapeHTML(v)}</span></div>
+          `).join('')}
+        </div>
+      </div>`).join('');
+    overlay.hidden = false;
+  }
+
   /* ----------------------------- wire-up ----------------------------- */
 
   function init() {
@@ -9051,6 +9139,8 @@
     wireTodoWidget();
     wireAutoBackup();
     initAutoBackup();
+    wireSidebarGroups();
+    wireHelpModal();
 
     $('#btnExport').addEventListener('click', exportJSON);
     $('#btnImport').addEventListener('click', importJSON);

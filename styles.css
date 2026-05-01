@@ -149,6 +149,61 @@ input, select, textarea { font: inherit; color: inherit; }
   color: var(--text-faint);
   padding: 12px 12px 6px;
 }
+.nav-section-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font-family: inherit;
+}
+.nav-section-toggle:hover { color: var(--text-dim); }
+.nav-section-caret {
+  font-size: 9px;
+  opacity: .6;
+  transition: transform var(--transition);
+}
+.nav-section-toggle.collapsed .nav-section-caret { transform: rotate(-90deg); }
+.nav-group { display: flex; flex-direction: column; }
+
+/* Phase B — keyboard cheatsheet */
+.help-body {
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.help-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.help-rows {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 14px;
+  align-items: center;
+  font-size: 12px;
+}
+.help-row { display: contents; }
+.help-row kbd {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.help-row span { color: var(--text-dim); }
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   width: 100%;
