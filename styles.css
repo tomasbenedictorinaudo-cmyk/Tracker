@@ -1060,23 +1060,61 @@ input, select, textarea { font: inherit; color: inherit; }
   min-width: 0;
 }
 .cal-chip:hover { background: var(--bg-3); }
-.cal-chip-dot {
+.cal-chip-icon {
   flex-shrink: 0;
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--text-faint);
+  width: 12px;
+  display: inline-block;
+  text-align: center;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-faint);
+  font-variant: normal;
 }
 .cal-chip-label {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   flex: 1; min-width: 0;
 }
-.cal-chip-accent      .cal-chip-dot { background: var(--accent); }
-.cal-chip-bad         .cal-chip-dot { background: var(--bad); }
-.cal-chip-good        .cal-chip-dot { background: var(--ok, #34d399); }
-.cal-chip-muted       .cal-chip-dot { background: var(--text-faint); }
-.cal-chip-milestone   .cal-chip-dot { background: rgb(179, 137, 255); }
-.cal-chip-deliverable .cal-chip-dot { background: rgb(251, 191, 36); }
-.cal-chip-meeting     .cal-chip-dot { background: rgb(20, 184, 166); }
+.cal-chip-accent      .cal-chip-icon { color: var(--accent); }
+.cal-chip-bad         .cal-chip-icon { color: var(--bad); }
+.cal-chip-good        .cal-chip-icon { color: var(--ok, #34d399); }
+.cal-chip-muted       .cal-chip-icon { color: var(--text-faint); }
+.cal-chip-milestone   .cal-chip-icon { color: rgb(179, 137, 255); font-weight: 700; }
+.cal-chip-deliverable .cal-chip-icon { color: rgb(251, 191, 36); }
+.cal-chip-meeting     .cal-chip-icon { color: rgb(20, 184, 166); }
+
+/* Ranged-milestone visual band: chips on consecutive days share the
+   same color and connect via a faint background tint, while the
+   start / middle / end positions get rounded corners only on their
+   outer side so a multi-day range reads as a continuous bar. */
+.cal-chip.kind-milestone.is-start,
+.cal-chip.kind-milestone.is-middle,
+.cal-chip.kind-milestone.is-end {
+  background: rgba(179, 137, 255, .14);
+}
+.cal-chip.kind-milestone.is-start  { border-radius: 8px 0 0 8px; }
+.cal-chip.kind-milestone.is-middle { border-radius: 0; }
+.cal-chip.kind-milestone.is-end    { border-radius: 0 8px 8px 0; }
+.cal-chip.kind-milestone.is-start:hover,
+.cal-chip.kind-milestone.is-middle:hover,
+.cal-chip.kind-milestone.is-end:hover {
+  background: rgba(179, 137, 255, .28);
+}
+
+/* Legend strip above the grid */
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 4px 4px 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.cal-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.cal-legend .cal-chip-icon { width: 12px; }
 .cal-more {
   background: transparent; border: 0;
   padding: 1px 6px;

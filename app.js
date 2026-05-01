@@ -5003,7 +5003,8 @@
         <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
           <div class="field"><label>Name</label><input id="msName" value="${escapeHTML(m.name)}" /></div>
           <div class="qa-row">
-            <div class="field"><label>Date</label><input id="msDate" type="date" value="${m.date || ''}" /></div>
+            <div class="field"><label>Start date</label><input id="msDate" type="date" value="${m.date || ''}" /></div>
+            <div class="field"><label>End date <span class="muted">— leave empty for a single day</span></label><input id="msEndDate" type="date" value="${m.endDate || ''}" /></div>
             <div class="field"><label>Status</label>
               <select id="msStatus">
                 <option value="todo" ${m.status === 'todo' ? 'selected' : ''}>Not started</option>
@@ -5030,6 +5031,10 @@
     overlay.querySelector('#msSave').addEventListener('click', () => {
       m.name = document.getElementById('msName').value.trim() || m.name;
       m.date = document.getElementById('msDate').value || null;
+      const ed = document.getElementById('msEndDate').value || null;
+      // Reject end-before-start; treat equal as single-day (clear endDate).
+      if (ed && m.date && ed < m.date) { toast('End date can\'t be before start date'); return; }
+      m.endDate = (ed && ed !== m.date) ? ed : null;
       m.status = document.getElementById('msStatus').value;
       commit('milestone-edit');
       close();
@@ -9168,6 +9173,10 @@
         m.id = m.id || uid('m');
         m.name = m.name || '';
         m.date = m.date || null;
+        // Optional range end-date. When null, the milestone is a single-day
+        // event (legacy behaviour); when set, the milestone spans
+        // [date … endDate] inclusive in the calendar.
+        if (m.endDate === undefined) m.endDate = null;
         m.status = m.status || 'todo';
       });
 
@@ -10525,7 +10534,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   }
   function buildCalendarItems(proj, year, month, gridStartISO, gridEndISO) {
     const inRange = (d) => d && d >= gridStartISO && d <= gridEndISO;
-    const items = []; // { date, kind, label, tone, run }
+    const items = []; // { date, kind, label, tone, run, icon, rangePos }
     const acts = (proj.actions || []).filter((a) => !a.deletedAt);
     acts.forEach((a) => {
       if (!a.due || !inRange(a.due)) return;
@@ -10535,19 +10544,41 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         tone: a.status === 'done' ? 'muted' : (a.status === 'blocked' ? 'bad' : 'accent'),
         label: a.title,
         sub: personName(a.owner),
+        icon: '·',
         run: () => openDrawer(a.id),
       });
     });
     (proj.milestones || []).forEach((m) => {
-      if (!m.date || !inRange(m.date)) return;
-      items.push({
-        date: m.date,
-        kind: 'milestone',
-        tone: 'milestone',
-        label: m.name,
-        sub: 'Milestone',
-        run: () => { state.currentView = 'milestones'; render(); },
-      });
+      if (!m.date) return;
+      // Ranged milestones expand into one chip per day in [date … endDate],
+      // each tagged with its position (start / middle / end / single) so the
+      // calendar can paint a connected band across cells.
+      const start = m.date;
+      const end = m.endDate || m.date;
+      if (!inRange(start) && !inRange(end) && !(start <= gridStartISO && end >= gridEndISO)) return;
+      const startT = parseDate(start).getTime();
+      const endT   = parseDate(end).getTime();
+      const isRange = endT > startT;
+      for (let t = startT; t <= endT; t += dayMs) {
+        const iso = fmtISO(new Date(t));
+        if (!inRange(iso)) continue;
+        const isStart = iso === start;
+        const isEnd   = iso === end;
+        const rangePos = !isRange ? 'single' : isStart ? 'start' : isEnd ? 'end' : 'middle';
+        const icon = !isRange ? '◇' : isStart ? '▷' : isEnd ? '▭' : '─';
+        items.push({
+          date: iso,
+          kind: 'milestone',
+          tone: 'milestone',
+          label: m.name,
+          sub: isRange
+            ? (isStart ? `Milestone start · ends ${end}` : isEnd ? `Milestone end · started ${start}` : 'Milestone in progress')
+            : 'Milestone',
+          icon,
+          rangePos,
+          run: () => openMilestoneEditor(m.id),
+        });
+      }
     });
     (proj.deliverables || []).forEach((d) => {
       const dt = d.dueDate || d.date;
@@ -10558,7 +10589,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         tone: 'deliverable',
         label: d.name,
         sub: 'Deliverable',
-        run: () => { state.currentView = 'deliverables'; render(); },
+        icon: '◆',
+        run: () => openDeliverableEditor(d.id),
       });
     });
     (proj.changes || []).forEach((c) => {
@@ -10571,6 +10603,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         tone: c.status === 'rejected' || c.status === 'cancelled' ? 'bad' : 'good',
         label: c.title,
         sub: 'CR ' + c.status,
+        icon: '⇆',
         run: () => openChangeRequestEditor(c.id),
       });
     });
@@ -10582,6 +10615,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           tone: 'meeting',
           label: m.title,
           sub: m.time ? 'Meeting · ' + m.time : 'Meeting',
+          icon: '⊕',
           run: null,
         });
       } else if (m.kind === 'weekly' && typeof m.dayOfWeek === 'number') {
@@ -10599,6 +10633,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
               tone: 'meeting',
               label: m.title,
               sub: m.time ? 'Weekly · ' + m.time : 'Weekly',
+              icon: '⊕',
               run: null,
             });
           }
@@ -10646,11 +10681,18 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const VISIBLE = 4;
       const shown = cellItems.slice(0, VISIBLE);
       const hidden = cellItems.length - shown.length;
-      const chipsHTML = shown.map((it, idx) => `
-        <button class="cal-chip cal-chip-${it.tone}" data-cell-idx="${i}" data-item-idx="${idx}" title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
-          <span class="cal-chip-dot"></span>
-          <span class="cal-chip-label">${escapeHTML(it.label)}</span>
-        </button>`).join('');
+      const chipsHTML = shown.map((it, idx) => {
+        // Kind-specific icon prefix; ranged-milestone middle days use a thin
+        // connector glyph + 'is-middle' so the chip-row reads as a band.
+        const icon = it.icon || '·';
+        const rangeCls = it.kind === 'milestone' && it.rangePos
+          ? ` is-${it.rangePos}` : '';
+        return `
+          <button class="cal-chip cal-chip-${it.tone} kind-${it.kind}${rangeCls}" data-cell-idx="${i}" data-item-idx="${idx}" title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+            <span class="cal-chip-icon" aria-hidden="true">${escapeHTML(icon)}</span>
+            <span class="cal-chip-label">${escapeHTML(it.label)}</span>
+          </button>`;
+      }).join('');
       const moreHTML = hidden > 0
         ? `<button class="cal-more" data-cell-idx="${i}">+ ${hidden} more</button>`
         : '';
@@ -10668,10 +10710,19 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           <div class="page-sub">${escapeHTML(monthLabel)} · arrow keys to switch months</div>
         </div>
         <div class="page-actions">
+          <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
+          <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
           <button class="icon-btn" id="calPrev" title="Previous month (←)">‹</button>
           <button class="ghost"   id="calToday" title="Jump to current month">Today</button>
           <button class="icon-btn" id="calNext" title="Next month (→)">›</button>
         </div>
+      </div>
+      <div class="cal-legend" aria-hidden="true">
+        <span class="cal-legend-item"><span class="cal-chip-icon kind-milestone">◇</span> Milestone</span>
+        <span class="cal-legend-item"><span class="cal-chip-icon kind-deliverable">◆</span> Deliverable</span>
+        <span class="cal-legend-item"><span class="cal-chip-icon kind-action">·</span> Action due</span>
+        <span class="cal-legend-item"><span class="cal-chip-icon kind-cr">⇆</span> CR decided</span>
+        <span class="cal-legend-item"><span class="cal-chip-icon kind-meeting">⊕</span> Meeting</span>
       </div>
       <div class="calendar">
         <div class="cal-head">
@@ -10684,6 +10735,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     $('#calPrev').addEventListener('click', () => { calState.monthOffset -= 1; render(); });
     $('#calNext').addEventListener('click', () => { calState.monthOffset += 1; render(); });
     $('#calToday').addEventListener('click', () => { calState.monthOffset = 0; render(); });
+    $('#calAddMile').addEventListener('click', () => openQuickAdd('milestone'));
+    $('#calAddDel').addEventListener('click', () => openQuickAdd('deliverable'));
 
     // Per-chip click: dispatch to the item's run() callback. We store
     // (cell, item) indices on the button so the data closure stays simple.
@@ -10706,7 +10759,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         const list = byDate.get(iso) || [];
         const r = btn.getBoundingClientRect();
         showContextMenu(r.left, r.bottom + 4, list.map((it) => ({
-          icon: it.kind === 'milestone' ? '◇' : it.kind === 'deliverable' ? '◆' : it.kind === 'cr' ? '⇆' : it.kind === 'meeting' ? '⊕' : '·',
+          icon: it.icon || '·',
           label: it.label,
           onClick: it.run || (() => {}),
         })));
