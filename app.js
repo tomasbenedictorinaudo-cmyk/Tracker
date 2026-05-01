@@ -9003,6 +9003,240 @@
     refreshTodoFab();
   }
 
+  /* ---------------------- Phase C: command palette --------------------- */
+  // Universal Cmd+K palette. Indexes everything searchable + a small menu of
+  // "slash commands" (action you can take). Up/Down + Enter to navigate +
+  // open. Type `/` to filter to commands only.
+  const paletteState = { items: [], idx: 0, query: '' };
+
+  // Build a flat searchable index from current state. Cheap to rebuild on
+  // each open since project data is in-memory.
+  function buildPaletteIndex() {
+    const out = [];
+    // Slash-commands always available
+    const sc = (label, hint, run) => out.push({ kind: 'cmd', label, hint, run, sortBoost: 5 });
+    sc('+ New action',          'Open Quick Add',    () => openQuickAdd('action'));
+    sc('+ New deliverable',     'Open Quick Add',    () => openQuickAdd('deliverable'));
+    sc('+ New milestone',       'Open Quick Add',    () => openQuickAdd('milestone'));
+    sc('+ New risk',            'Open Quick Add',    () => openQuickAdd('risk', { kind: 'risk' }));
+    sc('+ New opportunity',     'Open Quick Add',    () => openQuickAdd('risk', { kind: 'opportunity' }));
+    sc('+ New decision',        'Open Quick Add',    () => openQuickAdd('decision'));
+    sc('+ New change request',  'Open editor',       () => openQuickAdd('change'));
+    sc('+ New link',            'Open Quick Add',    () => openQuickAdd('link'));
+    sc('+ New meeting',         'Open Quick Add',    () => openQuickAdd('meeting'));
+    sc('+ New person',          'Open Quick Add',    () => openQuickAdd('person'));
+    sc('+ New project',         'Open Quick Add',    () => openQuickAdd('project'));
+    sc('Open Inbox',            'Reminders + alerts',() => { state.currentView = 'inbox'; render(); });
+    sc('Open Calendar',         'Month view',        () => { state.currentView = 'calendar'; render(); });
+    sc('Open Reports',          'Status report',     () => { state.currentView = 'reports'; render(); });
+    sc('Toggle theme',          'Light / dark',      () => $('#btnTheme')?.click());
+    sc('Toggle notes',          'Side panel',        () => $('#btnNotesToggle')?.click());
+
+    state.projects.forEach((proj) => {
+      // Project itself
+      out.push({ kind: 'project', label: proj.name, hint: 'Project', run: () => {
+        state.currentProjectId = proj.id;
+        state.currentView = 'board';
+        saveState(); render();
+      }});
+      (proj.actions || []).forEach((a) => {
+        if (a.deletedAt) return;
+        const haystack = [a.title, personName(a.owner), a.notes || '', a.description || ''].join(' ');
+        out.push({ kind: 'action', label: a.title, hint: `${proj.name} · ${personName(a.owner)} · ${a.due ? fmtDate(a.due) : 'no date'}`, hay: haystack, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'board';
+          render();
+          setTimeout(() => openDrawer(a.id), 30);
+        }});
+      });
+      (proj.openPoints || []).forEach((op) => {
+        const hay = [op.title, op.notes || '', (op.steps || []).map((s) => s.text).join(' ')].join(' ');
+        out.push({ kind: 'open-point', label: op.title, hint: `${proj.name} · open point`, hay, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'openpoints';
+          render();
+        }});
+      });
+      (proj.changes || []).forEach((c) => {
+        const hay = [c.title, c.rationale, c.analysis, c.description].join(' ');
+        out.push({ kind: 'change', label: c.title, hint: `${proj.name} · ${c.status}`, hay, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'changes';
+          render();
+          setTimeout(() => openChangeRequestEditor(c.id), 30);
+        }});
+      });
+      (proj.decisions || []).forEach((d) => {
+        out.push({ kind: 'decision', label: d.title, hint: `${proj.name} · decision · ${d.date || ''}`, hay: d.title + ' ' + (d.rationale || ''), run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'decisions';
+          render();
+        }});
+      });
+      (proj.risks || []).forEach((r) => {
+        out.push({ kind: 'risk', label: r.title, hint: `${proj.name} · ${r.kind || 'risk'}`, hay: r.title + ' ' + (r.mitigation || ''), run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'risks';
+          render();
+          setTimeout(() => openRiskEditor(r.id), 30);
+        }});
+      });
+      (proj.deliverables || []).forEach((d) => {
+        out.push({ kind: 'deliverable', label: d.name, hint: `${proj.name} · deliverable · ${d.dueDate ? fmtDate(d.dueDate) : 'no date'}`, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'deliverables';
+          render();
+        }});
+      });
+      (proj.milestones || []).forEach((m) => {
+        out.push({ kind: 'milestone', label: m.name, hint: `${proj.name} · milestone · ${m.date ? fmtDate(m.date) : 'no date'}`, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'milestones';
+          render();
+        }});
+      });
+      (proj.components || []).forEach((cmp) => {
+        out.push({ kind: 'component', label: cmp.name, hint: `${proj.name} · component`, run: () => {
+          state.currentProjectId = proj.id;
+          state.currentView = 'components';
+          render();
+        }});
+      });
+      (proj.links || []).forEach((l) => {
+        const hay = [l.title, l.description, l.url].join(' ');
+        out.push({ kind: 'link', label: l.title || l.url, hint: `${proj.name} · link`, hay, run: () => {
+          window.open(l.url, '_blank', 'noopener,noreferrer');
+        }});
+      });
+      // Project notes — searchable as one big chunk
+      const notesHTML = state.notes?.[proj.id] || '';
+      if (notesHTML) {
+        const text = notesHTML.replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').trim();
+        if (text) out.push({ kind: 'notes', label: 'Meeting notes — ' + proj.name, hint: 'Project notes', hay: text, run: () => {
+          state.currentProjectId = proj.id;
+          if (!state.notesOpen) { state.notesOpen = true; saveState(); applyNotesPanel(); loadNotesForCurrentProject(); }
+          render();
+        }});
+      }
+    });
+    state.people.forEach((p) => {
+      out.push({ kind: 'person', label: p.name, hint: `${p.role || 'Person'} · ${p.capacity || 100}% FTE`, run: () => {
+        state.currentView = 'people';
+        render();
+      }});
+    });
+    return out;
+  }
+
+  function paletteRank(items, query) {
+    if (!query) {
+      // Default — slash-commands first, then alphabetical
+      return items.slice().sort((a, b) => {
+        const sa = (a.kind === 'cmd' ? 1 : 0);
+        const sb = (b.kind === 'cmd' ? 1 : 0);
+        if (sa !== sb) return sb - sa;
+        return a.label.localeCompare(b.label);
+      }).slice(0, 60);
+    }
+    const isCmdOnly = query.startsWith('/');
+    const q = (isCmdOnly ? query.slice(1) : query).trim();
+    const scored = items
+      .filter((it) => !isCmdOnly || it.kind === 'cmd')
+      .map((it) => {
+        const labelScore = fuzzyScore(q, it.label) * 3;
+        const hayScore   = fuzzyScore(q, it.hay || '') * 1;
+        const hintScore  = fuzzyScore(q, it.hint || '') * 0.5;
+        const total = labelScore + hayScore + hintScore + (it.sortBoost || 0);
+        return { it, total };
+      })
+      .filter((x) => x.total > 0)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 40)
+      .map((x) => x.it);
+    return scored;
+  }
+
+  function renderPalette() {
+    const list = $('#paletteResults');
+    if (!list) return;
+    const { items, idx } = paletteState;
+    if (!items.length) {
+      list.innerHTML = '<div class="palette-empty">No matches. Try fewer characters or remove the leading <kbd>/</kbd>.</div>';
+      return;
+    }
+    const kindIcon = {
+      cmd: '⌘', action: '✓', 'open-point': '⚐', change: '⇆', decision: '⬡',
+      risk: '△', deliverable: '◆', milestone: '◇', component: '▣',
+      link: '↗', notes: '✎', project: '▦', person: '◔',
+    };
+    list.innerHTML = items.map((it, i) => `
+      <button class="palette-item ${i === idx ? 'active' : ''}" data-idx="${i}" role="option">
+        <span class="palette-kind">${kindIcon[it.kind] || '·'}</span>
+        <span class="palette-label">${escapeHTML(it.label)}</span>
+        <span class="palette-hint">${escapeHTML(it.hint || '')}</span>
+      </button>`).join('');
+    // Scroll active into view
+    list.querySelector('.palette-item.active')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function openPalette() {
+    const overlay = $('#paletteOverlay');
+    if (!overlay) return;
+    overlay.hidden = false;
+    paletteState.items = paletteRank(buildPaletteIndex(), '');
+    paletteState.idx = 0;
+    paletteState.query = '';
+    const inp = $('#paletteInput');
+    inp.value = '';
+    renderPalette();
+    setTimeout(() => inp.focus(), 30);
+  }
+  function closePalette() {
+    const overlay = $('#paletteOverlay');
+    if (overlay) overlay.hidden = true;
+    paletteState.items = [];
+  }
+  function paletteRunSelected() {
+    const it = paletteState.items[paletteState.idx];
+    if (!it) return;
+    closePalette();
+    setTimeout(() => { try { it.run(); } catch (e) { /* ignore */ } }, 0);
+  }
+
+  function wirePalette() {
+    const overlay = $('#paletteOverlay');
+    const inp = $('#paletteInput');
+    const list = $('#paletteResults');
+    if (!overlay || !inp) return;
+    inp.addEventListener('input', () => {
+      paletteState.query = inp.value;
+      paletteState.items = paletteRank(buildPaletteIndex(), paletteState.query);
+      paletteState.idx = 0;
+      renderPalette();
+    });
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); paletteState.idx = (paletteState.idx + 1) % Math.max(1, paletteState.items.length); renderPalette(); }
+      else if (e.key === 'ArrowUp')   { e.preventDefault(); paletteState.idx = (paletteState.idx - 1 + paletteState.items.length) % Math.max(1, paletteState.items.length); renderPalette(); }
+      else if (e.key === 'Enter')     { e.preventDefault(); paletteRunSelected(); }
+      else if (e.key === 'Escape')    { e.preventDefault(); closePalette(); }
+    });
+    list.addEventListener('mousedown', (e) => {
+      const btn = e.target.closest('.palette-item[data-idx]');
+      if (!btn) return;
+      e.preventDefault();
+      paletteState.idx = parseInt(btn.dataset.idx, 10);
+      paletteRunSelected();
+    });
+    list.addEventListener('mouseover', (e) => {
+      const btn = e.target.closest('.palette-item[data-idx]');
+      if (!btn) return;
+      const i = parseInt(btn.dataset.idx, 10);
+      if (i !== paletteState.idx) { paletteState.idx = i; renderPalette(); }
+    });
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closePalette(); });
+    $('#paletteClose')?.addEventListener('click', closePalette);
+  }
+
   /* --------------------- Phase B: sidebar groups + help ---------------- */
   function wireSidebarGroups() {
     document.querySelectorAll('.nav-section-toggle').forEach((toggle) => {
@@ -9125,7 +9359,7 @@
 
     $('#btnUndo').addEventListener('click', undo);
     $('#btnRedo').addEventListener('click', redo);
-    $('#btnQuickAdd').addEventListener('click', () => openQuickAdd('action'));
+    $('#btnQuickAdd').addEventListener('click', () => openPalette());
 
     $('#btnNotesToggle').addEventListener('click', () => {
       state.notesOpen = !state.notesOpen;
@@ -9141,6 +9375,7 @@
     initAutoBackup();
     wireSidebarGroups();
     wireHelpModal();
+    wirePalette();
 
     $('#btnExport').addEventListener('click', exportJSON);
     $('#btnImport').addEventListener('click', importJSON);
@@ -9229,7 +9464,7 @@
       // search-focus shortcut, and Cmd+Z would undo app state instead of text.
       const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault(); openQuickAdd('action');
+        e.preventDefault(); openPalette();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         if (!inField) { e.preventDefault(); undo(); }
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && e.shiftKey) {

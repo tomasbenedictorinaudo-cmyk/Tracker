@@ -144,7 +144,7 @@
         <button class="icon-btn" id="btnRedo" title="Redo (Cmd/Ctrl+Shift+Z)">↷</button>
         <button class="icon-btn" id="btnNotesToggle" title="Toggle meeting notes (Cmd/Ctrl+\\)">✎</button>
         <button class="icon-btn" id="btnHelp" title="Keyboard shortcuts (?)">?</button>
-        <button class="primary" id="btnQuickAdd" title="Quick add (Cmd/Ctrl+K)">+ Quick add</button>
+        <button class="primary" id="btnQuickAdd" title="Open command palette (Cmd/Ctrl+K)">+ Quick add</button>
       </div>
     </header>
 
@@ -229,6 +229,23 @@
         <button class="icon-btn" id="drawerClose">×</button>
       </div>
       <div class="drawer-body" id="drawerBody"></div>
+    </div>
+  </div>
+
+  <!-- Universal Cmd+K palette (Phase C) -->
+  <div class="overlay palette-overlay" id="paletteOverlay" hidden>
+    <div class="palette" role="dialog" aria-label="Command palette">
+      <div class="palette-input-row">
+        <span class="palette-glyph" aria-hidden="true">⌕</span>
+        <input id="paletteInput" type="text" placeholder="Search anything · type / for commands" autocomplete="off" />
+        <button class="icon-btn" id="paletteClose" title="Close (Esc)">×</button>
+      </div>
+      <div class="palette-results" id="paletteResults" role="listbox"></div>
+      <div class="palette-foot">
+        <span><kbd>↑↓</kbd> navigate</span>
+        <span><kbd>Enter</kbd> open</span>
+        <span><kbd>Esc</kbd> close</span>
+      </div>
     </div>
   </div>
 
