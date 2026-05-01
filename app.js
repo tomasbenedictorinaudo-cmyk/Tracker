@@ -7361,18 +7361,15 @@
     });
     $$('.person-row.clickable', view).forEach((row) => {
       row.addEventListener('click', () => {
-        applyTopbarFilter({ owner: row.dataset.ownerId, view: 'register' });
-      });
-      row.addEventListener('dblclick', (e) => {
-        e.preventDefault();
-        applyTopbarFilter({ owner: '', view: 'register' });
+        openPersonDashboard(row.dataset.ownerId);
       });
       row.addEventListener('contextmenu', (e) => {
         e.preventDefault();
         const id = row.dataset.ownerId;
         const p = state.people.find((x) => x.id === id);
         showContextMenu(e.clientX, e.clientY, [
-          { icon: '✎', label: 'Edit person…', onClick: () => openPersonEditor(id) },
+          { icon: '◰', label: 'Open dashboard',  onClick: () => openPersonDashboard(id) },
+          { icon: '✎', label: 'Edit person…',    onClick: () => openPersonEditor(id) },
           { icon: '⌕', label: `Filter Register to ${p?.name || ''}`, onClick: () => applyTopbarFilter({ owner: id, view: 'register' }) },
           { divider: true },
           { icon: '×', label: 'Delete person…', danger: true, onClick: () => {
@@ -7384,6 +7381,125 @@
             toast('Deleted');
           }},
         ]);
+      });
+    });
+  }
+
+  /* ---------------------- Phase I: Person dashboard -------------------- */
+  // Opens the existing drawer with an aggregated read-only view of one
+  // person: open / late actions, weekly load + spark, originated CRs,
+  // decisions made, owned risks with non-trivial residual. Each list item
+  // routes to its underlying drawer / editor.
+  function openPersonDashboard(personId) {
+    const p = state.people.find((x) => x.id === personId);
+    if (!p) return;
+    $('#drawerTitle').textContent = 'Person dashboard';
+    const today = todayISO();
+    const allActs = state.projects.flatMap((pr) =>
+      (pr.actions || []).filter((a) => !a.deletedAt && a.owner === p.id).map((a) => ({ a, pr })));
+    const open  = allActs.filter(({ a }) => !isClosedStatus(a.status));
+    const late  = open.filter(({ a }) => a.due && dayDiff(a.due, today) < 0);
+    const blocked = open.filter(({ a }) => a.status === 'blocked');
+    const allCRs       = state.projects.flatMap((pr) => (pr.changes || []).map((c) => ({ c, pr })));
+    const myCRs        = allCRs.filter(({ c }) => c.originator === p.id);
+    const myDecisions  = state.projects.flatMap((pr) => (pr.decisions || []).filter((d) => d.owner === p.id).map((d) => ({ d, pr })));
+    const myRisks      = state.projects.flatMap((pr) =>
+      (pr.risks || []).filter((r) => r.owner === p.id).map((r) => {
+        const res = r.residual || r.inherent || { probability: 0, impact: 0 };
+        return { r, pr, _score: (res.probability || 0) * (res.impact || 0) };
+      }))
+      .filter((x) => x._score >= 6)
+      .sort((a, b) => b._score - a._score);
+
+    const series = weeklyLoad(p.id, 12);
+    const cap = p.capacity || 100;
+    const peakWeek = series.reduce((mx, s) => s.count > mx.count ? s : mx, series[0] || { count: 0 });
+    const openCmt = open.reduce((s, { a }) => s + ((typeof a.commitment === 'number') ? a.commitment : 100), 0);
+    const pct = clamp(Math.round((openCmt / cap) * 100), 0, 200);
+    const cls = pct > 100 ? 'over' : pct > 80 ? 'warn' : 'ok';
+
+    const listRow = (title, sub, run) => `
+      <div class="dash-row${run ? ' clickable' : ''}" data-run="1">
+        <div class="dash-row-title">${escapeHTML(title)}</div>
+        <div class="dash-row-sub">${escapeHTML(sub)}</div>
+      </div>`;
+    const listOrEmpty = (title, count, html) => `
+      <div class="dash-section">
+        <div class="dash-section-title">${escapeHTML(title)}<span class="dash-section-count">${count}</span></div>
+        ${count ? html : '<div class="empty">— none</div>'}
+      </div>`;
+
+    $('#drawerBody').innerHTML = `
+      <div class="dash-head">
+        <span class="avatar lg">${initials(p.name)}</span>
+        <div class="dash-head-body">
+          <div class="dash-name">${escapeHTML(p.name)}</div>
+          <div class="dash-role">${escapeHTML(p.role || '—')}</div>
+          <div class="dash-head-actions">
+            <button class="ghost" id="dashEdit">Edit person…</button>
+            <button class="ghost" id="dashFilter">Filter Register to ${escapeHTML(p.name)}</button>
+          </div>
+        </div>
+      </div>
+      <div class="dash-kpis">
+        <div class="dash-kpi"><div class="dash-kpi-num">${open.length}</div><div class="dash-kpi-lbl">Open</div></div>
+        <div class="dash-kpi ${late.length ? 'bad' : ''}"><div class="dash-kpi-num">${late.length}</div><div class="dash-kpi-lbl">Late</div></div>
+        <div class="dash-kpi ${blocked.length ? 'warn' : ''}"><div class="dash-kpi-num">${blocked.length}</div><div class="dash-kpi-lbl">Blocked</div></div>
+        <div class="dash-kpi ${cls === 'over' ? 'bad' : cls === 'warn' ? 'warn' : ''}"><div class="dash-kpi-num">${pct}%</div><div class="dash-kpi-lbl">Load</div></div>
+      </div>
+      <div class="dash-section">
+        <div class="dash-section-title">Workload — next 12 weeks<span class="dash-section-count">peak ${peakWeek.count}%</span></div>
+        ${workloadSparkSVG(p, series)}
+      </div>
+      ${listOrEmpty('Late actions', late.length,
+        late.slice(0, 12).map(({ a, pr }) => `
+          <div class="dash-row clickable" data-action-id="${a.id}">
+            <div class="dash-row-title">${escapeHTML(a.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)} · ${Math.abs(dayDiff(a.due, today))}d late</div>
+          </div>`).join(''))}
+      ${listOrEmpty('Open actions', open.length,
+        open.slice(0, 20).map(({ a, pr }) => `
+          <div class="dash-row clickable" data-action-id="${a.id}">
+            <div class="dash-row-title">${escapeHTML(a.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)} · ${escapeHTML(a.status)}${a.due ? ' · due ' + a.due : ''}</div>
+          </div>`).join(''))}
+      ${listOrEmpty('Originated change requests', myCRs.length,
+        myCRs.slice(0, 12).map(({ c, pr }) => `
+          <div class="dash-row clickable" data-cr-id="${c.id}" data-proj-id="${pr.id}">
+            <div class="dash-row-title">${escapeHTML(c.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)} · ${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}</div>
+          </div>`).join(''))}
+      ${listOrEmpty('Decisions made', myDecisions.length,
+        myDecisions.slice(0, 12).map(({ d, pr }) => `
+          <div class="dash-row" data-dec-id="${d.id}">
+            <div class="dash-row-title">${escapeHTML(d.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)}${d.date ? ' · ' + d.date : ''}</div>
+          </div>`).join(''))}
+      ${listOrEmpty('Owned risks (residual ≥ 6)', myRisks.length,
+        myRisks.slice(0, 12).map(({ r, pr, _score }) => `
+          <div class="dash-row clickable" data-risk-id="${r.id}" data-proj-id="${pr.id}">
+            <div class="dash-row-title">${escapeHTML(r.title)}</div>
+            <div class="dash-row-sub">${escapeHTML(pr.name)} · residual ${_score}</div>
+          </div>`).join(''))}`;
+    $('#drawer').hidden = false;
+    $('#dashEdit').addEventListener('click', () => openPersonEditor(personId));
+    $('#dashFilter').addEventListener('click', () => {
+      closeDrawer();
+      applyTopbarFilter({ owner: personId, view: 'register' });
+    });
+    $('#drawerBody').querySelectorAll('[data-action-id]').forEach((row) => {
+      row.addEventListener('click', () => openDrawer(row.dataset.actionId));
+    });
+    $('#drawerBody').querySelectorAll('[data-cr-id]').forEach((row) => {
+      row.addEventListener('click', () => {
+        state.currentProjectId = row.dataset.projId;
+        openChangeRequestEditor(row.dataset.crId);
+      });
+    });
+    $('#drawerBody').querySelectorAll('[data-risk-id]').forEach((row) => {
+      row.addEventListener('click', () => {
+        state.currentProjectId = row.dataset.projId;
+        openRiskEditor(row.dataset.riskId);
       });
     });
   }

@@ -736,6 +736,93 @@ input, select, textarea { font: inherit; color: inherit; }
   font-size: 12px;
 }
 
+/* Phase I — person dashboard (rendered into the right-side drawer) */
+.dash-head {
+  display: flex; gap: 14px; align-items: flex-start;
+  padding: 4px 0 12px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.avatar.lg {
+  width: 44px; height: 44px;
+  font-size: 16px; font-weight: 700;
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--bg-3);
+  color: var(--text);
+  flex-shrink: 0;
+}
+.dash-head-body { flex: 1; min-width: 0; }
+.dash-name { font-size: 16px; font-weight: 700; color: var(--text); }
+.dash-role { font-size: 12px; color: var(--text-faint); margin-top: 2px; }
+.dash-head-actions {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin-top: 10px;
+}
+.dash-head-actions .ghost { padding: 5px 10px; font-size: 12px; }
+
+.dash-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.dash-kpi {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  text-align: center;
+}
+.dash-kpi-num { font-size: 20px; font-weight: 700; }
+.dash-kpi-lbl {
+  font-size: 9.5px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: .12em;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
+.dash-kpi.bad  .dash-kpi-num { color: var(--bad); }
+.dash-kpi.warn .dash-kpi-num { color: var(--warn); }
+
+.dash-section {
+  margin-bottom: 14px;
+}
+.dash-section-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+}
+.dash-section-count {
+  font-size: 10px; font-weight: 600;
+  color: var(--text-faint);
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 7px;
+  letter-spacing: 0;
+}
+.dash-row {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  margin-bottom: 4px;
+}
+.dash-row.clickable { cursor: pointer; transition: background var(--transition), border-color var(--transition); }
+.dash-row.clickable:hover { background: var(--bg-3); border-color: var(--line-2); }
+.dash-row-title {
+  font-size: 12.5px; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.dash-row-sub {
+  font-size: 11px; color: var(--text-faint);
+  margin-top: 1px;
+}
+
 /* Phase H — calendar month grid */
 .calendar {
   display: flex;
