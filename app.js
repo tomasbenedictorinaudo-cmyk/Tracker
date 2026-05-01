@@ -4434,40 +4434,181 @@
     wireCumWlLegend();
   }
 
+  // Merged Review + Reports. Two reading modes share the same data:
+  //  - 'walkthrough': stepper wizard with inline edits, for live meetings.
+  //  - 'full':        single-page snapshot, for distribution.
+  // Period selector + Markdown / Print exports are shared and always
+  // visible. Default mode is walkthrough so the live meeting flow lands
+  // first; users can flip to 'full' for the print-ready snapshot.
+  const reviewModeState = { mode: 'walkthrough' };
   function renderReview(root) {
     const proj = curProject();
     const view = document.createElement('div');
     view.className = 'view';
+    const isAll = state.currentProjectId === '__all__';
+    if (isAll || !proj) {
+      view.innerHTML = `
+        <div class="page-head">
+          <div>
+            <div class="page-title">Review</div>
+            <div class="page-sub">Pick a project to review.</div>
+          </div>
+        </div>
+        <div class="empty">Review is project-scoped. Choose a project from the topbar.</div>`;
+      root.appendChild(view);
+      return;
+    }
+    const range = reportPeriodRange();
+    const data = buildReportData(proj, range.since, range.until);
+    const mode = reviewModeState.mode;
+    const optSel = (val) => reportState.period === val ? 'selected' : '';
+
     view.innerHTML = `
       <div class="review">
-        <div class="page-head" style="margin-bottom:0;">
+        <div class="page-head" style="margin-bottom:10px;">
           <div>
             <div class="page-title">${escapeHTML(proj.name)} — Review</div>
-            <div class="page-sub">${fmtFull(todayISO())}</div>
+            <div class="page-sub">${fmtFull(data.since)} – ${fmtFull(data.until)}</div>
           </div>
           <div class="page-actions">
-            <button class="ghost" id="btnReviewExport">Export HTML</button>
+            <select id="reportPeriod" class="report-period" title="Period for changes / decisions / CRs">
+              <option value="7d"  ${optSel('7d')}>Last 7 days</option>
+              <option value="30d" ${optSel('30d')}>Last 30 days</option>
+              <option value="90d" ${optSel('90d')}>Last 90 days</option>
+              <option value="custom" ${optSel('custom')}>Custom…</option>
+            </select>
+            <span class="report-custom" id="reportCustom" ${reportState.period === 'custom' ? '' : 'hidden'}>
+              <input type="date" id="reportSince" value="${reportState.customSince || data.since}" />
+              <span class="report-dash">–</span>
+              <input type="date" id="reportUntil" value="${reportState.customUntil || data.until}" />
+            </span>
+            <div class="seg" role="tablist" aria-label="Review mode">
+              <button type="button" class="seg-btn ${mode === 'walkthrough' ? 'active' : ''}" data-review-mode="walkthrough">Walk-through</button>
+              <button type="button" class="seg-btn ${mode === 'full'        ? 'active' : ''}" data-review-mode="full">Full report</button>
+            </div>
+            <button class="ghost" id="btnReportCopyMd"  title="Copy as Markdown">Copy MD</button>
+            <button class="ghost" id="btnReportDownload" title="Download .md file">Download</button>
+            <button class="ghost" id="btnReportPrint"   title="Open print-ready HTML in a new tab">Print → PDF</button>
           </div>
         </div>
-        <div class="review-stepper" id="reviewStepper"></div>
-        <div class="review-card" id="reviewBody"></div>
-        <div class="review-foot">
-          <button class="ghost" id="btnReviewPrev">← Previous</button>
-          <button class="primary" id="btnReviewNext">Next →</button>
-        </div>
+        ${mode === 'walkthrough' ? `
+          <div class="review-stepper" id="reviewStepper"></div>
+          <div class="review-card" id="reviewBody"></div>
+          <div class="review-foot">
+            <button class="ghost" id="btnReviewPrev">← Previous</button>
+            <button class="primary" id="btnReviewNext">Next →</button>
+          </div>
+        ` : `
+          <div class="report" id="reportBody"></div>
+        `}
       </div>`;
     root.appendChild(view);
 
-    drawReviewStep();
-    $('#btnReviewPrev').addEventListener('click', () => {
-      reviewStep = clamp(reviewStep - 1, 0, REVIEW_STEPS.length - 1);
-      drawReviewStep();
+    // --- Period + custom-range wiring (shared) ---
+    $('#reportPeriod').addEventListener('change', (e) => {
+      reportState.period = e.target.value;
+      render();
     });
-    $('#btnReviewNext').addEventListener('click', () => {
-      reviewStep = clamp(reviewStep + 1, 0, REVIEW_STEPS.length - 1);
-      drawReviewStep();
+    $('#reportSince')?.addEventListener('change', (e) => {
+      reportState.customSince = e.target.value; reportState.period = 'custom'; render();
     });
-    $('#btnReviewExport').addEventListener('click', exportReviewHTML);
+    $('#reportUntil')?.addEventListener('change', (e) => {
+      reportState.customUntil = e.target.value; reportState.period = 'custom'; render();
+    });
+
+    // --- Mode toggle ---
+    $$('.seg-btn[data-review-mode]', view).forEach((b) => {
+      b.addEventListener('click', () => {
+        if (reviewModeState.mode === b.dataset.reviewMode) return;
+        reviewModeState.mode = b.dataset.reviewMode;
+        render();
+      });
+    });
+
+    // --- Export buttons (always export the FULL report for the current
+    // period — that's the most useful artifact regardless of mode) ---
+    $('#btnReportCopyMd').addEventListener('click', async () => {
+      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
+      try { await navigator.clipboard.writeText(md); toast('Copied as Markdown'); }
+      catch (e) { toast('Copy failed — clipboard unavailable'); }
+    });
+    $('#btnReportDownload').addEventListener('click', () => {
+      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
+      const blob = new Blob([md], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `report-${proj.id}-${range.until}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Report downloaded');
+    });
+    $('#btnReportPrint').addEventListener('click', () => {
+      const html = reportToPrintHTML(buildReportData(curProject(), range.since, range.until));
+      const w = window.open('', '_blank');
+      if (!w) { toast('Pop-up blocked'); return; }
+      w.document.write(html); w.document.close();
+      setTimeout(() => { try { w.print(); } catch (e) { /* ignore */ } }, 250);
+    });
+
+    // --- Mode-specific body wiring ---
+    if (mode === 'walkthrough') {
+      drawReviewStep();
+      $('#btnReviewPrev').addEventListener('click', () => {
+        reviewStep = clamp(reviewStep - 1, 0, REVIEW_STEPS.length - 1);
+        drawReviewStep();
+      });
+      $('#btnReviewNext').addEventListener('click', () => {
+        reviewStep = clamp(reviewStep + 1, 0, REVIEW_STEPS.length - 1);
+        drawReviewStep();
+      });
+    } else {
+      // Full report — render the same body the old Reports view used,
+      // wired with the same drilldowns.
+      const k = data.kpis;
+      const reportBody = $('#reportBody');
+      reportBody.innerHTML = `
+        <div class="report-kpis">
+          <div class="report-kpi"><div class="report-kpi-num">${k.done}</div><div class="report-kpi-lbl">Done</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.changed}</div><div class="report-kpi-lbl">Changed</div></div>
+          <div class="report-kpi ${k.late > 0 ? 'bad' : ''}"><div class="report-kpi-num">${k.late}</div><div class="report-kpi-lbl">Late</div></div>
+          <div class="report-kpi ${k.blocked > 0 ? 'warn' : ''}"><div class="report-kpi-num">${k.blocked}</div><div class="report-kpi-lbl">Blocked</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.decisions}</div><div class="report-kpi-lbl">Decisions</div></div>
+          <div class="report-kpi"><div class="report-kpi-num">${k.crs}</div><div class="report-kpi-lbl">CRs decided</div></div>
+        </div>
+        ${reportSection('What changed', data.changed.slice(0, 30), (a) =>
+          `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.status)}${a.updatedAt ? ' · ' + a.updatedAt : ''}</span></div>`,
+          'No updates in this period.')}
+        ${reportSection('Late & blocked', data.lateOrBlocked, (a) => {
+          const reason = a.status === 'blocked' ? 'blocked' : `${Math.abs(dayDiff(a.due, data.today))}d late`;
+          return `<div class="report-row clickable bad" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${reason}</span></div>`;
+        }, 'Nothing late or blocked — nice work.')}
+        ${reportSection('Decisions made', data.decisions, (d) =>
+          `<div class="report-row"><span>${escapeHTML(d.title)}</span><span class="report-meta">${escapeHTML(personName(d.owner))} · ${escapeHTML(d.date || '—')}</span></div>${d.rationale ? `<div class="report-rationale">${escapeHTML(d.rationale)}</div>` : ''}`,
+          'No decisions logged in this period.')}
+        ${reportSection('Change requests decided', data.crsDecided, (c) =>
+          `<div class="report-row clickable" data-open-cr="${c.id}"><span>${escapeHTML(c.title)}</span><span class="report-meta">${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + escapeHTML(personName(c.decisionBy)) : ''}</span></div>`,
+          'No CRs decided in this period.')}
+        ${reportSection('Top risks (by residual)', data.topRisks, (r) =>
+          `<div class="report-row clickable" data-open-risk="${r.id}"><span>${escapeHTML(r.title)}</span><span class="report-meta">residual ${r._score}</span></div>${r.mitigation ? `<div class="report-rationale">${escapeHTML(r.mitigation)}</div>` : ''}`,
+          'No risks logged.')}
+        <div class="report-section">
+          <div class="report-section-title">What's next (next 14 days)</div>
+          ${(data.next.milestones.length || data.next.deliverables.length || data.next.actions.length)
+            ? `${data.next.milestones.length ? '<div class="report-sub-title">Milestones</div>' + data.next.milestones.map((m) => `<div class="report-row"><span>${escapeHTML(m.name || m.title || '')}</span><span class="report-meta">${escapeHTML(m.date || '')}</span></div>`).join('') : ''}
+               ${data.next.deliverables.length ? '<div class="report-sub-title">Deliverables</div>' + data.next.deliverables.map((d) => `<div class="report-row"><span>${escapeHTML(d.name || d.title || '')}</span><span class="report-meta">${escapeHTML(d.date || '')}</span></div>`).join('') : ''}
+               ${data.next.actions.length ? '<div class="report-sub-title">Due actions</div>' + data.next.actions.slice(0, 30).map((a) => `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.due || '')}</span></div>`).join('') : ''}`
+            : '<div class="empty">Nothing scheduled in the next 14 days.</div>'}
+        </div>`;
+      reportBody.querySelectorAll('[data-open-action]').forEach((el) => {
+        el.addEventListener('click', () => openDrawer(el.dataset.openAction));
+      });
+      reportBody.querySelectorAll('[data-open-cr]').forEach((el) => {
+        el.addEventListener('click', () => openChangeRequestEditor(el.dataset.openCr));
+      });
+      reportBody.querySelectorAll('[data-open-risk]').forEach((el) => {
+        el.addEventListener('click', () => openRiskEditor(el.dataset.openRisk));
+      });
+    }
   }
 
   function drawReviewStep() {
@@ -10694,7 +10835,17 @@ ${data.next.actions.length ? '<p><b>Due actions</b></p>' + list(data.next.action
 ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.actions.length) ? '<p class="empty">Nothing scheduled in the next 14 days.</p>' : ''}
 </body></html>`;
   }
+  // Reports is merged into Review — keep the function name for any
+  // remaining callers (palette, stale state.currentView), but route to
+  // the merged Review in 'full' mode so the old entry-point gives the
+  // single-page snapshot users expected.
   function renderReports(root) {
+    reviewModeState.mode = 'full';
+    return renderReview(root);
+  }
+  // The full implementation below is dead-code post-merge but kept for
+  // reference and so any direct callers continue to compile.
+  function renderReports_legacy_unused(root) {
     const proj = curProject();
     const view = document.createElement('div');
     view.className = 'view';
@@ -11176,7 +11327,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       () => { const p = curProject(); if (!p || curProjectIsMerged()) { toast('Pick a single project'); return; } saveProjectAsTemplate(p.id); });
     sc('Open Inbox',            'Reminders + alerts',() => { state.currentView = 'inbox'; render(); });
     sc('Open Calendar',         'Month view',        () => { state.currentView = 'calendar'; render(); });
-    sc('Open Reports',          'Status report',     () => { state.currentView = 'reports'; render(); });
+    sc('Open Review (walk-through)', 'Live review wizard', () => { reviewModeState.mode = 'walkthrough'; state.currentView = 'review'; render(); });
+    sc('Open Status report',         'Single-page snapshot', () => { reviewModeState.mode = 'full';        state.currentView = 'review'; render(); });
     sc('Toggle theme',          'Light / dark',      () => $('#btnTheme')?.click());
     sc('Toggle notes',          'Side panel',        () => $('#btnNotesToggle')?.click());
     sc('Run tour',              '5-step intro',      () => runTour(0));
