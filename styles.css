@@ -1081,12 +1081,28 @@ input, select, textarea { font: inherit; color: inherit; }
 .cal-chip-milestone   .cal-chip-icon { color: rgb(179, 137, 255); font-weight: 700; }
 .cal-chip-deliverable .cal-chip-icon { color: rgb(251, 191, 36); }
 .cal-chip-meeting     .cal-chip-icon { color: rgb(20, 184, 166); }
-/* Inline component tint (set via --cal-chip-tint when a meeting carries
-   a component). Overrides the default per-kind icon colour and softens
-   the chip-row background so meetings visually group with their work area. */
-.cal-chip.has-tint .cal-chip-icon { color: rgb(var(--cal-chip-tint)); }
-.cal-chip.has-tint { background: rgba(var(--cal-chip-tint), .10); }
-.cal-chip.has-tint:hover { background: rgba(var(--cal-chip-tint), .22); }
+/* Inline component tint (set via --cal-chip-tint on any chip whose
+   underlying item carries a component). Two visual signals at once:
+   - A 3-px left-edge stripe in the component colour — the strongest
+     scannable cue when the eye sweeps a column of chips.
+   - A faint full-chip background tint (≈7%) so chips with the same
+     component visibly group even when the stripes don't line up.
+   The chip's icon keeps its kind colour, so kind and component read
+   independently. */
+.cal-chip.has-tint {
+  border-left: 3px solid rgb(var(--cal-chip-tint));
+  padding-left: 3px;
+  background: rgba(var(--cal-chip-tint), .07);
+}
+.cal-chip.has-tint:hover { background: rgba(var(--cal-chip-tint), .18); }
+/* Keep the connected-band look intact for ranged-milestone chips even
+   when they carry a component: the start day owns the stripe + rounded
+   left, middle/end days drop the stripe so the row reads continuous. */
+.cal-chip.has-tint.is-middle,
+.cal-chip.has-tint.is-end {
+  border-left: 0;
+  padding-left: 6px;
+}
 
 /* Ranged-milestone visual band: chips on consecutive days share the
    same color and connect via a faint background tint, while the

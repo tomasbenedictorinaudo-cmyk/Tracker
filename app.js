@@ -4930,6 +4930,12 @@
               </select>
             </div>
           </div>
+          <div class="field"><label>Component <span class="muted">— optional</span></label>
+            <select id="dvComp">
+              <option value="">— None</option>
+              ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === d.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
+            </select>
+          </div>
         </div>
         <div class="desc-foot">
           <button class="ghost" id="dvCancel">Cancel</button>
@@ -4949,6 +4955,7 @@
       d.name = document.getElementById('dvName').value.trim() || d.name;
       d.dueDate = document.getElementById('dvDue').value || null;
       d.status = document.getElementById('dvStatus').value;
+      d.component = document.getElementById('dvComp').value || null;
       commit('deliverable-edit');
       close();
       toast('Saved');
@@ -5067,6 +5074,12 @@
               </select>
             </div>
           </div>
+          <div class="field"><label>Component <span class="muted">— optional</span></label>
+            <select id="msComp">
+              <option value="">— None</option>
+              ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === m.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
+            </select>
+          </div>
         </div>
         <div class="desc-foot">
           <button class="ghost" id="msCancel">Cancel</button>
@@ -5090,6 +5103,7 @@
       if (ed && m.date && ed < m.date) { toast('End date can\'t be before start date'); return; }
       m.endDate = (ed && ed !== m.date) ? ed : null;
       m.status = document.getElementById('msStatus').value;
+      m.component = document.getElementById('msComp').value || null;
       commit('milestone-edit');
       close();
       toast('Saved');
@@ -9433,6 +9447,9 @@
         d.name = d.name || '';
         d.dueDate = d.dueDate || null;
         d.status = d.status || 'todo';
+        // Optional component link, surfaced as a colour stripe on calendar
+        // chips so the user can scan-by-component across kinds.
+        if (d.component === undefined) d.component = null;
       });
 
       p.milestones.forEach((m) => {
@@ -9443,6 +9460,7 @@
         // event (legacy behaviour); when set, the milestone spans
         // [date … endDate] inclusive in the calendar.
         if (m.endDate === undefined) m.endDate = null;
+        if (m.component === undefined) m.component = null;
         m.status = m.status || 'todo';
       });
 
@@ -10828,15 +10846,19 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const acts = (proj.actions || []).filter((a) => !a.deletedAt);
     acts.forEach((a) => {
       if (!a.due || !inRange(a.due)) return;
+      const cmp = a.component ? findComponent(proj, a.component) : null;
+      const cmpRgb = cmp ? componentColor(cmp.color)?.rgb : null;
+      const subBase = personName(a.owner);
       items.push({
         date: a.due,
         kind: 'action',
         tone: a.status === 'done' ? 'muted' : (a.status === 'blocked' ? 'bad' : 'accent'),
         label: a.title,
-        sub: personName(a.owner),
+        sub: cmp ? `${subBase} · ${cmp.name}` : subBase,
         // Checkbox glyph reflects status — filled box for done, empty
         // outline otherwise. Reads at-a-glance like a to-do checklist.
         icon: a.status === 'done' ? '☑' : '☐',
+        tint: cmpRgb,
         run: () => openDrawer(a.id),
       });
     });
@@ -10851,6 +10873,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const startT = parseDate(start).getTime();
       const endT   = parseDate(end).getTime();
       const isRange = endT > startT;
+      const cmp = m.component ? findComponent(proj, m.component) : null;
+      const cmpRgb = cmp ? componentColor(cmp.color)?.rgb : null;
       for (let t = startT; t <= endT; t += dayMs) {
         const iso = fmtISO(new Date(t));
         if (!inRange(iso)) continue;
@@ -10858,16 +10882,18 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         const isEnd   = iso === end;
         const rangePos = !isRange ? 'single' : isStart ? 'start' : isEnd ? 'end' : 'middle';
         const icon = !isRange ? '◇' : isStart ? '▷' : isEnd ? '▭' : '─';
+        const baseSub = isRange
+          ? (isStart ? `Milestone start · ends ${end}` : isEnd ? `Milestone end · started ${start}` : 'Milestone in progress')
+          : 'Milestone';
         items.push({
           date: iso,
           kind: 'milestone',
           tone: 'milestone',
           label: m.name,
-          sub: isRange
-            ? (isStart ? `Milestone start · ends ${end}` : isEnd ? `Milestone end · started ${start}` : 'Milestone in progress')
-            : 'Milestone',
+          sub: cmp ? `${baseSub} · ${cmp.name}` : baseSub,
           icon,
           rangePos,
+          tint: cmpRgb,
           run: () => openMilestoneEditor(m.id),
         });
       }
@@ -10875,13 +10901,16 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     (proj.deliverables || []).forEach((d) => {
       const dt = d.dueDate || d.date;
       if (!dt || !inRange(dt)) return;
+      const cmp = d.component ? findComponent(proj, d.component) : null;
+      const cmpRgb = cmp ? componentColor(cmp.color)?.rgb : null;
       items.push({
         date: dt,
         kind: 'deliverable',
         tone: 'deliverable',
         label: d.name,
-        sub: 'Deliverable',
+        sub: cmp ? `Deliverable · ${cmp.name}` : 'Deliverable',
         icon: '◆',
+        tint: cmpRgb,
         run: () => openDeliverableEditor(d.id),
       });
     });
