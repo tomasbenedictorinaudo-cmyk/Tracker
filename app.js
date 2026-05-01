@@ -9526,8 +9526,24 @@
     if (typeof s.settings.tourSeen     !== 'boolean') s.settings.tourSeen = false;
     if (typeof s.settings.notifyEnabled !== 'boolean') s.settings.notifyEnabled = false;
     if (typeof s.settings.sidebarGroups !== 'object' || !s.settings.sidebarGroups) {
-      s.settings.sidebarGroups = { workspace: true, project: true, engineering: true };
+      s.settings.sidebarGroups = { workspace: true, work: true, insight: true };
     }
+    // Migration: legacy 'project' / 'engineering' group keys were renamed
+    // to 'work' / 'insight' when the sidebar was re-grouped by intent.
+    // Carry over the user's collapse state so a tidy sidebar stays tidy.
+    if (s.settings.sidebarGroups.project !== undefined && s.settings.sidebarGroups.work === undefined) {
+      s.settings.sidebarGroups.work = s.settings.sidebarGroups.project;
+      delete s.settings.sidebarGroups.project;
+    }
+    if (s.settings.sidebarGroups.engineering !== undefined && s.settings.sidebarGroups.insight === undefined) {
+      s.settings.sidebarGroups.insight = s.settings.sidebarGroups.engineering;
+      delete s.settings.sidebarGroups.engineering;
+    }
+    // Ensure the three current keys exist so first-render doesn't fall
+    // through to undefined (which the helper treats as 'expanded').
+    ['workspace', 'work', 'insight'].forEach((k) => {
+      if (s.settings.sidebarGroups[k] === undefined) s.settings.sidebarGroups[k] = true;
+    });
     s.inbox = s.inbox || {};
     s.inbox.dismissed = Array.isArray(s.inbox.dismissed) ? s.inbox.dismissed : [];
     s.templates = Array.isArray(s.templates) ? s.templates : [];
