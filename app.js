@@ -8459,7 +8459,10 @@
     } else if (qaType === 'milestone') {
       body.innerHTML = `
         <div class="field"><label>Name</label><input id="qName" /></div>
-        <div class="field"><label>Date</label><input id="qDate" type="date" /></div>`;
+        <div class="qa-row">
+          <div class="field"><label>Start date</label><input id="qDate" type="date" /></div>
+          <div class="field"><label>End date <span class="muted">— optional, for a range</span></label><input id="qEndDate" type="date" /></div>
+        </div>`;
     } else if (qaType === 'risk') {
       const kind = qaInit.kind === 'opportunity' ? 'opportunity' : 'risk';
       const actionsList = (proj.actions || []).slice().sort((a, b) => a.title.localeCompare(b.title));
@@ -8687,8 +8690,18 @@
     } else if (qaType === 'milestone') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
+      const date = $('#qDate').value || null;
+      const ed = $('#qEndDate')?.value || null;
+      if (ed && date && ed < date) { toast('End date can\'t be before start date'); return; }
       proj.milestones = proj.milestones || [];
-      proj.milestones.push({ id: uid('m'), name, date: $('#qDate').value || null, status: 'todo' });
+      proj.milestones.push({
+        id: uid('m'),
+        name,
+        date,
+        // Range: only stored if it's strictly after the start.
+        endDate: (ed && ed !== date) ? ed : null,
+        status: 'todo',
+      });
     } else if (qaType === 'risk') {
       const title = $('#qTitle').value.trim();
       if (!title) return toast('Title required');
@@ -11701,12 +11714,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             const z = clamp(calState.tlPxPerDay || 26, 0.5, 80);
             const g = z >= 12 ? 'Day' : z >= 3 ? 'Week' : 'Month';
             return `
-              <div class="tl-zoom-group" role="group" aria-label="Timeline zoom">
-                <button type="button" class="icon-btn" id="tlZoomOut" title="Zoom out (Ctrl+wheel down)">−</button>
-                <span class="tl-zoom-label" title="Granularity auto-switches at 12 px/day (Day↔Week) and 3 px/day (Week↔Month)">${g}</span>
-                <button type="button" class="icon-btn" id="tlZoomIn"  title="Zoom in (Ctrl+wheel up)">+</button>
-                <button type="button" class="icon-btn" id="tlZoomFit" title="Reset zoom">⌂</button>
-              </div>` ; })() : ''}
+              <span class="tl-zoom-label" title="Ctrl + scroll-wheel to zoom. Granularity auto-switches at 12 px/day (Day↔Week) and 3 px/day (Week↔Month).">${g}</span>` ; })() : ''}
           ${isMerged ? '' : `
             <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
             <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
@@ -11771,34 +11779,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       });
     });
 
-    // Timeline zoom — continuous via px-per-day. − / + buttons step
-    // by ×1.5 (capped); ⌂ resets. Granularity (day / week / month)
-    // auto-derives from pxPerDay during render.
-    function stepZoom(factor) {
-      const cur = clamp(calState.tlPxPerDay || 26, 0.5, 80);
-      const next = clamp(cur * factor, 0.5, 80);
-      if (Math.abs(next - cur) < 1e-3) return;
-      // Anchor zoom around the current viewport centre so the user
-      // doesn't lose their place while zooming.
-      const scroll = view.querySelector('.tl-scroll');
-      let anchorDayOffset = null;
-      if (scroll) {
-        const cx = scroll.scrollLeft + scroll.clientWidth / 2;
-        anchorDayOffset = cx / cur;
-      }
-      calState.tlPxPerDay = next;
-      render();
-      if (anchorDayOffset != null) {
-        const newScroll = $('.tl-scroll');
-        if (newScroll) {
-          const newX = anchorDayOffset * next;
-          newScroll.scrollLeft = Math.max(0, newX - newScroll.clientWidth / 2);
-        }
-      }
-    }
-    $('#tlZoomOut')?.addEventListener('click', () => stepZoom(1 / 1.5));
-    $('#tlZoomIn')?.addEventListener('click',  () => stepZoom(1.5));
-    $('#tlZoomFit')?.addEventListener('click', () => { calState.tlPxPerDay = 26; render(); });
+    // Timeline zoom — continuous via Ctrl/Cmd + scroll-wheel. Granularity
+    // (day / week / month) auto-derives from pxPerDay during render.
 
     // Ctrl/Cmd + wheel anchors zoom at the cursor position so the date
     // under the pointer stays put. Plain wheel still scrolls the timeline
