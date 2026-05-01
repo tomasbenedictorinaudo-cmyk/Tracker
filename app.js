@@ -866,15 +866,17 @@
       openpoints: renderOpenPoints,
       timeline: renderTimeline,
       dashboard: renderDashboard,
-      // Charts is merged into Dashboard — route any stale 'charts' view
-      // (saved before the merge or arrived via palette) to the combined view.
+      // Charts merged into Dashboard, Reports merged into Review, and
+      // Milestones / Deliverables absorbed by the Calendar — route any
+      // stale state.currentView values to their replacement panel so
+      // saved-state and palette deeplinks keep working.
       charts: renderDashboard,
       review: renderReview,
       archive: renderArchive,
       components: renderComponents,
       budgets: renderBudgets,
-      deliverables: renderDeliverables,
-      milestones: renderMilestones,
+      deliverables: renderCalendar,
+      milestones: renderCalendar,
       risks: renderRisks,
       decisions: renderDecisions,
       changes: renderChangeRequests,
@@ -4416,35 +4418,6 @@
     </div>`;
   }
 
-  function renderCharts(root) {
-    const view = document.createElement('div');
-    view.className = 'view';
-    view.innerHTML = `
-      <div class="page-head">
-        <div><div class="page-title">Charts</div><div class="page-sub">Trends and projections across the portfolio</div></div>
-      </div>
-      <div class="charts-grid">
-        <div class="panel chart-panel">
-          <div class="panel-title">Schedule deviation waterfall <span class="legend">x = when forecast was made • y = forecast due • diagonal = delivered now</span></div>
-          ${chartWaterfall()}
-        </div>
-        <div class="panel chart-panel half">
-          <div class="panel-title">Cumulative workload (next 12 weeks) <span class="legend">click a name to hide / show</span></div>
-          <div id="cumWlSlot">${chartCumulativeWorkload(12)}</div>
-        </div>
-        <div class="panel chart-panel half">
-          <div class="panel-title">Activity / week (last 12 weeks)</div>
-          ${chartFlow(12)}
-        </div>
-        <div class="panel chart-panel">
-          <div class="panel-title">Per-person workload (next 12 weeks)</div>
-          ${chartPerPerson()}
-        </div>
-      </div>`;
-    root.appendChild(view);
-    wireCumWlLegend();
-  }
-
   // Merged Review + Reports. Two reading modes share the same data:
   //  - 'walkthrough': stepper wizard with inline edits, for live meetings.
   //  - 'full':        single-page snapshot, for distribution.
@@ -4750,340 +4723,6 @@
     toast('Review exported');
   }
 
-  /* ---------------------- Engineering side views --------------------- */
-
-  // Per-strip zoom state. Each strip stores its zoom factor (1 = fit,
-  // higher = zoomed in horizontally so labels and dates stretch out).
-  const stripState = {
-    deliverables: { zoom: 1 },
-    milestones:   { zoom: 1 },
-  };
-  const STRIP_ZOOM_STEPS = [1, 1.5, 2, 3, 4, 6, 8];
-
-  // Shared timeline strip — renders points/markers along a horizontal date axis.
-  // items: [{ id, name, date: 'YYYY-MM-DD', status?, rgb?, icon? }]
-  // Uses lane-packing so labels never overlap, plus a stable per-item color
-  // (passed in as `rgb`) so the row swatch matches the timeline circle.
-  // opts.zoom: horizontal zoom factor (default 1). At zoom > 1 the SVG renders
-  // wider than the panel and scrolls horizontally inside .strip-scroll.
-  function renderTimelineStrip(items, opts = {}) {
-    const zoom = Math.max(1, Math.min(8, opts.zoom || 1));
-    const dated = items.filter((i) => i.date).map((i) => ({ ...i, t: parseDate(i.date) }));
-    if (!dated.length) return '<div class="empty">Add a date to any item to see it on the timeline.</div>';
-
-    const today = new Date(); today.setHours(0, 0, 0, 0);
-    const all = [...dated.map((d) => d.t), today];
-    let min = new Date(Math.min(...all));
-    let max = new Date(Math.max(...all));
-    const span = Math.max(dayMs * 30, max - min);
-    min = new Date(min.getTime() - span * 0.10);
-    max = new Date(max.getTime() + span * 0.10);
-
-    const sorted = dated.slice().sort((a, b) => a.t - b.t);
-    const baseW = 880;
-    const W = Math.round(baseW * zoom);
-    const padL = 32, padR = 32;
-    const innerW = W - padL - padR;
-    const xFor = (t) => padL + (t - min) / (max - min) * innerW;
-
-    // Lane packing — alternate sides, then stack into rows.
-    // Each label occupies a horizontal extent at the lane's y; we pick the
-    // lowest-numbered lane where the new extent doesn't overlap any prior label.
-    const CHAR_W = 6.6; // px per char (12px font, font-weight 600)
-    const PAD_X  = 8;   // gap between adjacent labels
-    const ROW_H  = 18;  // vertical pitch between lanes — bigger = clearer
-    const labelW = (s) => Math.max(36, Math.min(220, s.length * CHAR_W));
-    const lanesAbove = []; // each: array of {x0, x1}
-    const lanesBelow = [];
-    function fit(lanes, x0, x1) {
-      for (let l = 0; l < lanes.length; l++) {
-        if (!lanes[l].some((r) => x1 + PAD_X >= r.x0 && x0 - PAD_X <= r.x1)) {
-          lanes[l].push({ x0, x1 });
-          return l;
-        }
-      }
-      lanes.push([{ x0, x1 }]);
-      return lanes.length - 1;
-    }
-
-    // Group items by date so multiple events on the same day get a small
-    // vertical stagger on the axis (otherwise their circles overlap and the
-    // user can't tell two events occupy the same date).
-    const dateGroups = {};
-    sorted.forEach((it) => {
-      (dateGroups[it.date] = dateGroups[it.date] || []).push(it);
-    });
-    const STACK_PITCH = 7; // px between stacked dots on the axis
-
-    const placed = sorted.map((it, i) => {
-      const x = xFor(it.t);
-      const w = labelW(it.name);
-      const x0 = x - w / 2, x1 = x + w / 2;
-      // Alternate above/below for a balanced look, then pack into the first free lane.
-      const above = i % 2 === 0;
-      const lane = above ? fit(lanesAbove, x0, x1) : fit(lanesBelow, x0, x1);
-      // Vertical offset along the axis when this item shares its date with others
-      const grp = dateGroups[it.date];
-      const grpIdx = grp.indexOf(it);
-      const dotOffset = grp.length > 1
-        ? (grpIdx - (grp.length - 1) / 2) * STACK_PITCH
-        : 0;
-      return { ...it, x, above, lane, dotOffset, stackSize: grp.length };
-    });
-
-    const lanesA = Math.max(1, lanesAbove.length);
-    const lanesB = Math.max(1, lanesBelow.length);
-    // Allow vertical headroom for stacked-date dots ((max stack - 1)/2 px each side)
-    const maxStack = placed.reduce((m, p) => Math.max(m, p.stackSize || 1), 1);
-    const stackHalfPx = ((maxStack - 1) / 2) * STACK_PITCH;
-    const padT = 18 + lanesA * ROW_H + stackHalfPx;
-    const padB = 22 + lanesB * ROW_H + 14 + stackHalfPx;
-    const H = padT + padB + 18;
-    const yLine = padT + 10;
-
-    // Monthly ticks (also weekly when zoom is high enough to keep them readable)
-    const showWeeks = zoom >= 3;
-    const ticks = [];
-    if (showWeeks) {
-      // Weekly ticks (Mondays) — subtle
-      let w0 = new Date(min);
-      while (w0.getDay() !== 1) w0 = new Date(w0.getTime() + dayMs);
-      let wt = w0;
-      while (wt <= max) {
-        const x = xFor(wt);
-        ticks.push(`<line class="strip-week-tick" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${(yLine - 3).toFixed(1)}" y2="${(yLine + 3).toFixed(1)}" />`);
-        wt = new Date(wt.getTime() + 7 * dayMs);
-      }
-    }
-    let dt = new Date(min.getFullYear(), min.getMonth(), 1);
-    if (dt < min) dt = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
-    while (dt <= max) {
-      const x = xFor(dt);
-      ticks.push(`<g><line class="strip-tick" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${(yLine - 6).toFixed(1)}" y2="${(yLine + 6).toFixed(1)}" /><text class="strip-month" x="${x.toFixed(1)}" y="${(H - 4).toFixed(1)}" text-anchor="middle">${dt.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</text></g>`);
-      dt = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
-    }
-
-    const todayX = xFor(today);
-    const todayLine = `<line class="strip-today" x1="${todayX.toFixed(1)}" x2="${todayX.toFixed(1)}" y1="${(padT - 8).toFixed(1)}" y2="${(H - padB + 8).toFixed(1)}" /><text class="strip-today-lbl" x="${(todayX + 4).toFixed(1)}" y="${(padT - 10).toFixed(1)}">today</text>`;
-
-    const markers = placed.map((it) => {
-      const x = it.x;
-      // Same-date stacking shifts this item's circle vertically along the axis
-      const cy = yLine + (it.dotOffset || 0);
-      const labelY = it.above
-        ? padT - 8 - (lanesAbove.length - 1 - it.lane) * ROW_H
-        : H - padB + 18 + it.lane * ROW_H;
-      const dateY = it.above ? labelY + 12 : labelY + 12;
-      // Stems run between the actual circle position (cy) and the label line
-      const stemY1 = it.above
-        ? labelY - 9
-        : cy + 7;
-      const stemY2 = it.above
-        ? cy - 7
-        : labelY - 14;
-      const isDone = it.status === 'done';
-      const isLate = !isDone && it.t < today;
-      const cls = isDone ? 'done' : (isLate ? 'late' : '');
-      const rgb = it.rgb || '129,140,248';
-      const labelFill = isDone ? 'var(--text-dim)' : (isLate ? 'var(--bad)' : `rgb(${rgb})`);
-      const safeName = escapeHTML(it.name);
-      const r = 7;
-      // Status badge: ✓ for done, ! for late — anchored to the actual circle
-      // position so it still hugs each stacked dot when same-date events split.
-      const badge = isDone
-        ? `<g class="strip-badge done"><circle cx="${(x + 8).toFixed(1)}" cy="${(cy - 8).toFixed(1)}" r="6" fill="var(--ok)" stroke="var(--bg-1)" stroke-width="1.6" /><text x="${(x + 8).toFixed(1)}" y="${(cy - 5).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="8" font-weight="700">✓</text></g>`
-        : isLate
-          ? `<g class="strip-badge late"><circle cx="${(x + 8).toFixed(1)}" cy="${(cy - 8).toFixed(1)}" r="6" fill="var(--bad)" stroke="var(--bg-1)" stroke-width="1.6" /><text x="${(x + 8).toFixed(1)}" y="${(cy - 5).toFixed(1)}" text-anchor="middle" fill="var(--bg-1)" font-size="9" font-weight="700">!</text></g>`
-          : '';
-      return `
-        <g class="strip-mark ${cls}" data-strip-id="${it.id}">
-          <line class="strip-stem" x1="${x.toFixed(1)}" x2="${x.toFixed(1)}" y1="${stemY1.toFixed(1)}" y2="${stemY2.toFixed(1)}" stroke="rgb(${rgb})" />
-          <circle class="strip-pt" cx="${x.toFixed(1)}" cy="${cy.toFixed(1)}" r="${r}" fill="rgb(${rgb})" stroke="var(--bg-1)" stroke-width="1.8" />
-          ${badge}
-          <text class="strip-lbl" x="${x.toFixed(1)}" y="${labelY.toFixed(1)}" text-anchor="middle" fill="${labelFill}">${safeName}</text>
-          <text class="strip-date" x="${x.toFixed(1)}" y="${dateY.toFixed(1)}" text-anchor="middle">${fmtDate(it.date)}</text>
-        </g>`;
-    }).join('');
-
-    // At zoom=1 the SVG fills its wrapper; at zoom>1 it gets an explicit pixel
-    // width so the wrapper scrolls horizontally.
-    const widthAttr = zoom > 1 ? `width="${W}"` : 'width="100%"';
-    return `
-      <svg viewBox="0 0 ${W} ${H}" class="strip-svg" ${widthAttr} preserveAspectRatio="xMinYMin meet">
-        ${ticks.join('')}
-        <line class="strip-axis" x1="${padL}" x2="${W - padR}" y1="${yLine}" y2="${yLine}" />
-        ${todayLine}
-        ${markers}
-      </svg>`;
-  }
-
-  // Zoom-control markup + handler for a timeline strip. `id` is a unique
-  // prefix used for the data-attributes / element IDs (so multiple strips on
-  // the same view don't collide).
-  function stripZoomControlsHTML(id) {
-    return `
-      <span class="strip-zoom" role="group" aria-label="Timeline zoom">
-        <button type="button" class="icon-btn" id="${id}-zoom-out" title="Zoom out">−</button>
-        <span class="strip-zoom-val" id="${id}-zoom-val">1×</span>
-        <button type="button" class="icon-btn" id="${id}-zoom-in" title="Zoom in">+</button>
-        <button type="button" class="icon-btn" id="${id}-zoom-reset" title="Reset zoom">⟲</button>
-      </span>`;
-  }
-  function wireStripZoom(scope, id, state, redraw) {
-    const STEPS = STRIP_ZOOM_STEPS;
-    const idxOf = (z) => {
-      let best = 0, bestDiff = Infinity;
-      STEPS.forEach((s, i) => { const d = Math.abs(s - z); if (d < bestDiff) { bestDiff = d; best = i; } });
-      return best;
-    };
-    const set = (z) => { state.zoom = z; redraw(); };
-    scope.querySelector(`#${id}-zoom-in`).addEventListener('click', () => {
-      const i = idxOf(state.zoom); set(STEPS[Math.min(STEPS.length - 1, i + 1)]);
-    });
-    scope.querySelector(`#${id}-zoom-out`).addEventListener('click', () => {
-      const i = idxOf(state.zoom); set(STEPS[Math.max(0, i - 1)]);
-    });
-    scope.querySelector(`#${id}-zoom-reset`).addEventListener('click', () => set(1));
-    // Cmd/Ctrl + scroll zoom inside the strip
-    const wrap = scope.querySelector(`#${id}-scroll`);
-    if (wrap) {
-      wrap.addEventListener('wheel', (e) => {
-        if (!(e.metaKey || e.ctrlKey)) return;
-        e.preventDefault();
-        const i = idxOf(state.zoom);
-        const next = e.deltaY < 0 ? STEPS[Math.min(STEPS.length - 1, i + 1)] : STEPS[Math.max(0, i - 1)];
-        if (next !== state.zoom) set(next);
-      }, { passive: false });
-    }
-  }
-
-  // Shared floating tooltip + hover wiring for the deliverables / milestones strip.
-  let _stripTipEl = null;
-  function ensureStripTipEl() {
-    if (_stripTipEl) return _stripTipEl;
-    _stripTipEl = document.createElement('div');
-    _stripTipEl.className = 'strip-tooltip';
-    document.body.appendChild(_stripTipEl);
-    return _stripTipEl;
-  }
-  function wireStripHover(scope, lookup) {
-    const svg = scope.querySelector('.strip-svg');
-    if (!svg) return;
-    const tip = ensureStripTipEl();
-    function show(g, x, y) {
-      const it = lookup(g.dataset.stripId);
-      if (!it) return;
-      const today = todayISO();
-      const diff = dayDiff(it.date, today);
-      const rel = diff === 0 ? 'today'
-        : diff > 0 ? `in ${diff} day${diff === 1 ? '' : 's'}`
-        : `${-diff} day${diff === -1 ? '' : 's'} ago`;
-      const isDone = it.status === 'done';
-      const isLate = !isDone && diff < 0;
-      const statusLbl = isDone ? '✓ Done'
-        : isLate ? '⚠ Late'
-        : (it.status === 'doing' ? '◐ In progress' : '○ Not started');
-      const swatch = it.rgb ? `<span class="strip-tip-swatch" style="background:rgb(${it.rgb})"></span>` : '';
-      tip.innerHTML = `
-        <div class="strip-tip-head">${swatch}<span class="strip-tip-title">${escapeHTML(it.name)}</span></div>
-        <div class="strip-tip-row"><span class="strip-tip-lbl">Date</span><span>${fmtFull(it.date)}</span></div>
-        <div class="strip-tip-row"><span class="strip-tip-lbl">When</span><span>${rel}</span></div>
-        <div class="strip-tip-row"><span class="strip-tip-lbl">Status</span><span class="${isDone ? 'ok' : isLate ? 'bad' : ''}">${statusLbl}</span></div>`;
-      tip.style.display = 'block';
-      const r = tip.getBoundingClientRect();
-      let px = x + 14, py = y + 14;
-      if (px + r.width  > innerWidth  - 8) px = x - r.width  - 14;
-      if (py + r.height > innerHeight - 8) py = y - r.height - 14;
-      tip.style.left = Math.max(8, px) + 'px';
-      tip.style.top  = Math.max(8, py) + 'px';
-    }
-    function hide() { tip.style.display = 'none'; }
-    svg.addEventListener('mousemove', (e) => {
-      const g = e.target.closest('.strip-mark[data-strip-id]');
-      if (!g) { hide(); return; }
-      show(g, e.clientX, e.clientY);
-    });
-    svg.addEventListener('mouseleave', hide);
-  }
-
-  function renderDeliverables(root) {
-    const proj = curProject();
-    const view = document.createElement('div');
-    view.className = 'view';
-    const sortedDels = (proj.deliverables || []).slice().sort((a, b) => (a.dueDate || '').localeCompare(b.dueDate || ''));
-    const items = sortedDels.map((d, i) => ({
-      id: d.id, name: d.name, date: d.dueDate, status: d.status,
-      rgb: PERSON_PALETTE[i % PERSON_PALETTE.length].rgb,
-    }));
-    const colorById = Object.fromEntries(items.map((it) => [it.id, it.rgb]));
-    view.innerHTML = `
-      <div class="page-head">
-        <div><div class="page-title">Deliverables</div><div class="page-sub">Optional — group actions under a deliverable.</div></div>
-        <div class="page-actions"><button class="ghost" id="btnAddDel">+ Deliverable</button></div>
-      </div>
-      <div class="row-list" id="delList"></div>
-      <div class="panel chart-panel" style="margin-top:14px;">
-        <div class="panel-title">
-          <span>Timeline</span>
-          ${stripZoomControlsHTML('strip-del')}
-        </div>
-        <div class="strip-scroll" id="strip-del-scroll">${renderTimelineStrip(items, { zoom: stripState.deliverables.zoom })}</div>
-      </div>`;
-    root.appendChild(view);
-    wireStripZoom(view, 'strip-del', stripState.deliverables, () => {
-      const wrap = view.querySelector('#strip-del-scroll');
-      wrap.innerHTML = renderTimelineStrip(items, { zoom: stripState.deliverables.zoom });
-      wireStripHover(view, (id) => items.find((x) => x.id === id));
-      view.querySelector('#strip-del-zoom-val').textContent = stripState.deliverables.zoom + '×';
-    });
-    const list = $('#delList');
-    if (!proj.deliverables?.length) list.innerHTML = '<div class="empty">No deliverables yet.</div>';
-    else {
-      list.innerHTML = sortedDels.map((d) => {
-        const dueCls = d.status === 'done' ? '' :
-          (d.dueDate && dayDiff(d.dueDate, todayISO()) < 0 ? 'late' : '');
-        const rgb = colorById[d.id] || '129,140,248';
-        return `
-          <div class="row ${dueCls}" data-deliverable-id="${d.id}">
-            ${ROW_GRIP_HTML}
-            <span class="row-swatch" style="background:rgb(${rgb})" aria-hidden="true"></span>
-            <span>◆ ${escapeHTML(d.name)}</span>
-            <span class="row-meta">${d.dueDate ? fmtFull(d.dueDate) : '—'} • ${escapeHTML(d.status || 'todo')}</span>
-          </div>`;
-      }).join('');
-      wireListReorder(list, {
-        rowSelector: '.row[data-deliverable-id]',
-        idAttr: 'deliverableId',
-        getArray: () => proj.deliverables,
-        setOrder: (ids) => { proj.deliverables = ids.map((id) => proj.deliverables.find((x) => x.id === id)).filter(Boolean); },
-        commitName: 'deliverables-reorder',
-      });
-      wireStripHover(view, (id) => items.find((x) => x.id === id));
-      $$('.row[data-deliverable-id]', list).forEach((row) => {
-        row.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          const id = row.dataset.deliverableId;
-          const d = (proj.deliverables || []).find((x) => x.id === id);
-          if (!d) return;
-          showContextMenu(e.clientX, e.clientY, [
-            { icon: '✎', label: 'Edit…', onClick: () => openDeliverableEditor(id) },
-            { divider: true },
-            { icon: '×', label: 'Delete deliverable', danger: true, onClick: () => {
-              const linked = (proj.actions || []).filter((a) => a.deliverable === id).length;
-              if (!confirm(`Delete "${d.name}"?` + (linked ? ` (${linked} action${linked === 1 ? '' : 's'} will become unlinked)` : ''))) return;
-              proj.deliverables = (proj.deliverables || []).filter((x) => x.id !== id);
-              (proj.actions || []).forEach((a) => { if (a.deliverable === id) a.deliverable = null; });
-              commit('deliverable-delete');
-              toast('Deleted');
-            }},
-          ]);
-        });
-        row.addEventListener('dblclick', () => openDeliverableEditor(row.dataset.deliverableId));
-      });
-    }
-    $('#btnAddDel').addEventListener('click', () => openQuickAdd('deliverable'));
-  }
-
   function openDeliverableEditor(deliverableId) {
     const proj = curProject();
     const d = (proj.deliverables || []).find((x) => x.id === deliverableId);
@@ -5147,84 +4786,6 @@
       close();
       toast('Deleted');
     });
-  }
-
-  function renderMilestones(root) {
-    const proj = curProject();
-    const view = document.createElement('div');
-    view.className = 'view';
-    const sortedMs = (proj.milestones || []).slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
-    const items = sortedMs.map((m, i) => ({
-      id: m.id, name: m.name, date: m.date, status: m.status,
-      rgb: PERSON_PALETTE[i % PERSON_PALETTE.length].rgb,
-    }));
-    const colorById = Object.fromEntries(items.map((it) => [it.id, it.rgb]));
-    view.innerHTML = `
-      <div class="page-head">
-        <div><div class="page-title">Milestones</div><div class="page-sub">Optional — anchor key dates.</div></div>
-        <div class="page-actions"><button class="ghost" id="btnAddMile">+ Milestone</button></div>
-      </div>
-      <div class="row-list" id="mileList"></div>
-      <div class="panel chart-panel" style="margin-top:14px;">
-        <div class="panel-title">
-          <span>Timeline</span>
-          ${stripZoomControlsHTML('strip-ms')}
-        </div>
-        <div class="strip-scroll" id="strip-ms-scroll">${renderTimelineStrip(items, { zoom: stripState.milestones.zoom })}</div>
-      </div>`;
-    root.appendChild(view);
-    wireStripZoom(view, 'strip-ms', stripState.milestones, () => {
-      const wrap = view.querySelector('#strip-ms-scroll');
-      wrap.innerHTML = renderTimelineStrip(items, { zoom: stripState.milestones.zoom });
-      wireStripHover(view, (id) => items.find((x) => x.id === id));
-      view.querySelector('#strip-ms-zoom-val').textContent = stripState.milestones.zoom + '×';
-    });
-    const list = $('#mileList');
-    if (!proj.milestones?.length) list.innerHTML = '<div class="empty">No milestones yet.</div>';
-    else {
-      list.innerHTML = sortedMs.map((m) => {
-        const dueCls = m.status === 'done' ? '' :
-          (m.date && dayDiff(m.date, todayISO()) < 0 ? 'late' : '');
-        const rgb = colorById[m.id] || '129,140,248';
-        return `
-          <div class="row ${dueCls}" data-milestone-id="${m.id}">
-            ${ROW_GRIP_HTML}
-            <span class="row-swatch" style="background:rgb(${rgb})" aria-hidden="true"></span>
-            <span>◇ ${escapeHTML(m.name)}</span>
-            <span class="row-meta">${m.date ? fmtFull(m.date) : '—'} • ${escapeHTML(m.status || 'todo')}</span>
-          </div>`;
-      }).join('');
-      wireListReorder(list, {
-        rowSelector: '.row[data-milestone-id]',
-        idAttr: 'milestoneId',
-        getArray: () => proj.milestones,
-        setOrder: (ids) => { proj.milestones = ids.map((id) => proj.milestones.find((x) => x.id === id)).filter(Boolean); },
-        commitName: 'milestones-reorder',
-      });
-      wireStripHover(view, (id) => items.find((x) => x.id === id));
-      $$('.row[data-milestone-id]', list).forEach((row) => {
-        row.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          const id = row.dataset.milestoneId;
-          const m = (proj.milestones || []).find((x) => x.id === id);
-          if (!m) return;
-          showContextMenu(e.clientX, e.clientY, [
-            { icon: '✎', label: 'Edit…', onClick: () => openMilestoneEditor(id) },
-            { divider: true },
-            { icon: '×', label: 'Delete milestone', danger: true, onClick: () => {
-              const linked = (proj.actions || []).filter((a) => a.milestone === id).length;
-              if (!confirm(`Delete "${m.name}"?` + (linked ? ` (${linked} action${linked === 1 ? '' : 's'} will become unlinked)` : ''))) return;
-              proj.milestones = (proj.milestones || []).filter((x) => x.id !== id);
-              (proj.actions || []).forEach((a) => { if (a.milestone === id) a.milestone = null; });
-              commit('milestone-delete');
-              toast('Deleted');
-            }},
-          ]);
-        });
-        row.addEventListener('dblclick', () => openMilestoneEditor(row.dataset.milestoneId));
-      });
-    }
-    $('#btnAddMile').addEventListener('click', () => openQuickAdd('milestone'));
   }
 
   function openMilestoneEditor(milestoneId) {
@@ -9593,6 +9154,11 @@
     });
     s.currentView = s.currentView || 'board';
     if (s.currentView === 'teams') s.currentView = 'people';
+    // Panels merged into others over time — migrate stale state so saved
+    // sessions and old exports land on the replacement panel.
+    if (s.currentView === 'milestones' || s.currentView === 'deliverables') s.currentView = 'calendar';
+    if (s.currentView === 'charts') s.currentView = 'dashboard';
+    if (s.currentView === 'reports') s.currentView = 'review';
     if (!s.currentProjectId || (s.currentProjectId !== '__all__' && !s.projects.some((p) => p.id === s.currentProjectId))) {
       s.currentProjectId = s.projects[0]?.id || null;
     }
@@ -10907,139 +10473,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   function renderReports(root) {
     reviewModeState.mode = 'full';
     return renderReview(root);
-  }
-  // The full implementation below is dead-code post-merge but kept for
-  // reference and so any direct callers continue to compile.
-  function renderReports_legacy_unused(root) {
-    const proj = curProject();
-    const view = document.createElement('div');
-    view.className = 'view';
-    const isAll = state.currentProjectId === '__all__';
-    if (isAll || !proj) {
-      view.innerHTML = `
-        <div class="page-head">
-          <div>
-            <div class="page-title">Status report</div>
-            <div class="page-sub">Pick a project to generate a report.</div>
-          </div>
-        </div>
-        <div class="empty">Reports are project-scoped. Choose a project from the topbar.</div>`;
-      root.appendChild(view);
-      return;
-    }
-    const range = reportPeriodRange();
-    const data = buildReportData(proj, range.since, range.until);
-    const k = data.kpis;
-    const optSel = (val) => reportState.period === val ? 'selected' : '';
-    view.innerHTML = `
-      <div class="page-head">
-        <div>
-          <div class="page-title">${escapeHTML(proj.name)} — Status report</div>
-          <div class="page-sub">${fmtFull(data.since)} – ${fmtFull(data.until)}</div>
-        </div>
-        <div class="page-actions">
-          <select id="reportPeriod" class="report-period">
-            <option value="7d"  ${optSel('7d')}>Last 7 days</option>
-            <option value="30d" ${optSel('30d')}>Last 30 days</option>
-            <option value="90d" ${optSel('90d')}>Last 90 days</option>
-            <option value="custom" ${optSel('custom')}>Custom…</option>
-          </select>
-          <span class="report-custom" id="reportCustom" ${reportState.period === 'custom' ? '' : 'hidden'}>
-            <input type="date" id="reportSince" value="${reportState.customSince || data.since}" />
-            <span class="report-dash">–</span>
-            <input type="date" id="reportUntil" value="${reportState.customUntil || data.until}" />
-          </span>
-          <button class="ghost" id="btnReportCopyMd"  title="Copy as Markdown">Copy Markdown</button>
-          <button class="ghost" id="btnReportDownload" title="Download .md file">Download .md</button>
-          <button class="ghost" id="btnReportPrint"   title="Open print-ready HTML in a new tab">Print → PDF</button>
-        </div>
-      </div>
-      <div class="report">
-        <div class="report-kpis">
-          <div class="report-kpi"><div class="report-kpi-num">${k.done}</div><div class="report-kpi-lbl">Done</div></div>
-          <div class="report-kpi"><div class="report-kpi-num">${k.changed}</div><div class="report-kpi-lbl">Changed</div></div>
-          <div class="report-kpi ${k.late > 0 ? 'bad' : ''}"><div class="report-kpi-num">${k.late}</div><div class="report-kpi-lbl">Late</div></div>
-          <div class="report-kpi ${k.blocked > 0 ? 'warn' : ''}"><div class="report-kpi-num">${k.blocked}</div><div class="report-kpi-lbl">Blocked</div></div>
-          <div class="report-kpi"><div class="report-kpi-num">${k.decisions}</div><div class="report-kpi-lbl">Decisions</div></div>
-          <div class="report-kpi"><div class="report-kpi-num">${k.crs}</div><div class="report-kpi-lbl">CRs decided</div></div>
-        </div>
-
-        ${reportSection('What changed', data.changed.slice(0, 30), (a) =>
-          `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.status)}${a.updatedAt ? ' · ' + a.updatedAt : ''}</span></div>`,
-          'No updates in this period.')}
-
-        ${reportSection('Late & blocked', data.lateOrBlocked, (a) => {
-          const reason = a.status === 'blocked' ? 'blocked' : `${Math.abs(dayDiff(a.due, data.today))}d late`;
-          return `<div class="report-row clickable bad" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${reason}</span></div>`;
-        }, 'Nothing late or blocked — nice work.')}
-
-        ${reportSection('Decisions made', data.decisions, (d) =>
-          `<div class="report-row"><span>${escapeHTML(d.title)}</span><span class="report-meta">${escapeHTML(personName(d.owner))} · ${escapeHTML(d.date || '—')}</span></div>${d.rationale ? `<div class="report-rationale">${escapeHTML(d.rationale)}</div>` : ''}`,
-          'No decisions logged in this period.')}
-
-        ${reportSection('Change requests decided', data.crsDecided, (c) =>
-          `<div class="report-row clickable" data-open-cr="${c.id}"><span>${escapeHTML(c.title)}</span><span class="report-meta">${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + escapeHTML(personName(c.decisionBy)) : ''}</span></div>`,
-          'No CRs decided in this period.')}
-
-        ${reportSection('Top risks (by residual)', data.topRisks, (r) =>
-          `<div class="report-row clickable" data-open-risk="${r.id}"><span>${escapeHTML(r.title)}</span><span class="report-meta">residual ${r._score}</span></div>${r.mitigation ? `<div class="report-rationale">${escapeHTML(r.mitigation)}</div>` : ''}`,
-          'No risks logged.')}
-
-        <div class="report-section">
-          <div class="report-section-title">What's next (next 14 days)</div>
-          ${(data.next.milestones.length || data.next.deliverables.length || data.next.actions.length)
-            ? `${data.next.milestones.length ? '<div class="report-sub-title">Milestones</div>' + data.next.milestones.map((m) => `<div class="report-row"><span>${escapeHTML(m.name || m.title || '')}</span><span class="report-meta">${escapeHTML(m.date || '')}</span></div>`).join('') : ''}
-               ${data.next.deliverables.length ? '<div class="report-sub-title">Deliverables</div>' + data.next.deliverables.map((d) => `<div class="report-row"><span>${escapeHTML(d.name || d.title || '')}</span><span class="report-meta">${escapeHTML(d.date || '')}</span></div>`).join('') : ''}
-               ${data.next.actions.length ? '<div class="report-sub-title">Due actions</div>' + data.next.actions.slice(0, 30).map((a) => `<div class="report-row clickable" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${escapeHTML(a.due || '')}</span></div>`).join('') : ''}`
-            : '<div class="empty">Nothing scheduled in the next 14 days.</div>'}
-        </div>
-      </div>`;
-    root.appendChild(view);
-
-    // Interactivity
-    $('#reportPeriod').addEventListener('change', (e) => {
-      reportState.period = e.target.value;
-      render();
-    });
-    $('#reportSince')?.addEventListener('change', (e) => {
-      reportState.customSince = e.target.value; reportState.period = 'custom'; render();
-    });
-    $('#reportUntil')?.addEventListener('change', (e) => {
-      reportState.customUntil = e.target.value; reportState.period = 'custom'; render();
-    });
-    $('#btnReportCopyMd').addEventListener('click', async () => {
-      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
-      try { await navigator.clipboard.writeText(md); toast('Copied as Markdown'); }
-      catch (e) { toast('Copy failed — clipboard unavailable'); }
-    });
-    $('#btnReportDownload').addEventListener('click', () => {
-      const md = reportToMarkdown(buildReportData(curProject(), range.since, range.until));
-      const blob = new Blob([md], { type: 'text/markdown' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = `report-${proj.id}-${range.until}.md`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast('Report downloaded');
-    });
-    $('#btnReportPrint').addEventListener('click', () => {
-      const html = reportToPrintHTML(buildReportData(curProject(), range.since, range.until));
-      const w = window.open('', '_blank');
-      if (!w) { toast('Pop-up blocked'); return; }
-      w.document.write(html); w.document.close();
-      setTimeout(() => { try { w.print(); } catch (e) { /* ignore */ } }, 250);
-    });
-
-    // Row drilldowns
-    view.querySelectorAll('[data-open-action]').forEach((el) => {
-      el.addEventListener('click', () => openDrawer(el.dataset.openAction));
-    });
-    view.querySelectorAll('[data-open-cr]').forEach((el) => {
-      el.addEventListener('click', () => openChangeRequestEditor(el.dataset.openCr));
-    });
-    view.querySelectorAll('[data-open-risk]').forEach((el) => {
-      el.addEventListener('click', () => openRiskEditor(el.dataset.openRisk));
-    });
   }
   function reportSection(title, items, fmt, empty) {
     return `
@@ -12623,15 +12056,17 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       (proj.deliverables || []).forEach((d) => {
         out.push({ kind: 'deliverable', label: d.name, hint: `${proj.name} · deliverable · ${d.dueDate ? fmtDate(d.dueDate) : 'no date'}`, run: () => {
           state.currentProjectId = proj.id;
-          state.currentView = 'deliverables';
+          state.currentView = 'calendar';
           render();
+          setTimeout(() => openDeliverableEditor(d.id), 30);
         }});
       });
       (proj.milestones || []).forEach((m) => {
         out.push({ kind: 'milestone', label: m.name, hint: `${proj.name} · milestone · ${m.date ? fmtDate(m.date) : 'no date'}`, run: () => {
           state.currentProjectId = proj.id;
-          state.currentView = 'milestones';
+          state.currentView = 'calendar';
           render();
+          setTimeout(() => openMilestoneEditor(m.id), 30);
         }});
       });
       (proj.components || []).forEach((cmp) => {
