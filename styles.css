@@ -2267,7 +2267,7 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .spark-meta .warn { color: var(--warn); }
 .spark-meta .over { color: var(--bad); }
 
-/* Charts page */
+/* Charts grid (also used as the Charts section of the Dashboard) */
 .charts-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -2275,6 +2275,26 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .chart-panel { grid-column: span 2; }
 .chart-panel.half { grid-column: span 1; }
+
+/* Section break used inside the merged Dashboard view to introduce
+   the Charts block under the Dashboard block. Visually a quiet
+   horizontal rule + a section title — not a new page header. */
+.dashboard-section-break {
+  margin: 22px 0 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.dashboard-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: .2px;
+}
+.dashboard-section-sub {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 2px;
+}
 .chart-svg { width: 100%; max-height: 380px; display: block; }
 .chart-foot {
   margin-top: 6px;

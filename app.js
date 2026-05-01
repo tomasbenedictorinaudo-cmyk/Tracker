@@ -866,7 +866,9 @@
       openpoints: renderOpenPoints,
       timeline: renderTimeline,
       dashboard: renderDashboard,
-      charts: renderCharts,
+      // Charts is merged into Dashboard — route any stale 'charts' view
+      // (saved before the merge or arrived via palette) to the combined view.
+      charts: renderDashboard,
       review: renderReview,
       archive: renderArchive,
       components: renderComponents,
@@ -3907,8 +3909,32 @@
           <div class="panel-title">Status mix</div>
           <div id="statusMix"></div>
         </div>
+      </div>
+
+      <div class="dashboard-section-break">
+        <div class="dashboard-section-title">Charts</div>
+        <div class="dashboard-section-sub">Trends and projections across the portfolio</div>
+      </div>
+      <div class="charts-grid">
+        <div class="panel chart-panel">
+          <div class="panel-title">Schedule deviation waterfall <span class="legend">x = when forecast was made • y = forecast due • diagonal = delivered now</span></div>
+          ${chartWaterfall()}
+        </div>
+        <div class="panel chart-panel half">
+          <div class="panel-title">Cumulative workload (next 12 weeks) <span class="legend">click a name to hide / show</span></div>
+          <div id="cumWlSlot">${chartCumulativeWorkload(12)}</div>
+        </div>
+        <div class="panel chart-panel half">
+          <div class="panel-title">Activity / week (last 12 weeks)</div>
+          ${chartFlow(12)}
+        </div>
+        <div class="panel chart-panel">
+          <div class="panel-title">Per-person workload (next 12 weeks)</div>
+          ${chartPerPerson()}
+        </div>
       </div>`;
     root.appendChild(view);
+    wireCumWlLegend();
 
     // Stale-action rows in the decision-KPI panel → open the drawer for that action
     $$('.dkpi-list-row[data-action-id]', view).forEach((el) => {
