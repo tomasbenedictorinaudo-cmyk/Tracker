@@ -1199,6 +1199,150 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .cal-more:hover { background: var(--bg-3); color: var(--text); }
 
+/* Calendar — Timeline format. Same window as the month grid, but
+   one swim-lane per kind. Chips are absolutely-positioned by date
+   offset; ranged milestones stretch as a bar across days. */
+.cal-timeline {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+.tl-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.tl-axis-row,
+.tl-lane {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  align-items: stretch;
+  border-bottom: 1px solid var(--line);
+}
+.tl-lane:last-child { border-bottom: 0; }
+.tl-lane-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+  background: var(--bg-2);
+  border-right: 1px solid var(--line);
+  white-space: nowrap;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+}
+.tl-axis-spacer {
+  background: var(--bg-2);
+}
+.tl-axis-track {
+  display: flex;
+  position: relative;
+  background: var(--bg-2);
+  height: 26px;
+  border-bottom: 1px solid var(--line);
+}
+.tl-axis-cell {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  padding-left: 4px;
+  font-size: 10px;
+  color: var(--text-faint);
+  border-right: 1px solid transparent;
+  font-variant-numeric: tabular-nums;
+}
+.tl-axis-cell.is-mon {
+  border-right-color: var(--line);
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.tl-axis-cell.is-today {
+  color: var(--accent);
+  font-weight: 700;
+}
+.tl-today-line {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: .55;
+  pointer-events: none;
+}
+.tl-lane-track {
+  position: relative;
+  height: 36px;
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent 29px,
+    rgba(255,255,255,.04) 29px,
+    rgba(255,255,255,.04) 30px
+  );
+  background-size: 210px 100%;
+}
+:root[data-theme="light"] .tl-lane-track {
+  background-image: repeating-linear-gradient(
+    to right,
+    transparent 0,
+    transparent 29px,
+    rgba(0,0,0,.05) 29px,
+    rgba(0,0,0,.05) 30px
+  );
+}
+.tl-lane-empty {
+  position: absolute;
+  top: 50%;
+  left: 10px;
+  transform: translateY(-50%);
+  font-size: 11px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+.tl-chip {
+  position: absolute;
+  top: 6px;
+  height: 24px;
+  padding: 0 6px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  overflow: hidden;
+  transition: background var(--transition), border-color var(--transition);
+}
+.tl-chip:hover {
+  background: var(--bg-3);
+  border-color: var(--line-2);
+  z-index: 3;
+}
+.tl-chip .cal-chip-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Apply the same component-tint as the month chips do */
+.tl-chip.has-tint {
+  border-left: 3px solid rgb(var(--cal-chip-tint));
+  padding-left: 3px;
+  background: rgba(var(--cal-chip-tint), .14);
+}
+.tl-chip.has-tint:hover { background: rgba(var(--cal-chip-tint), .26); }
+/* Ranged-milestone start chip: keep rounded both sides since the bar
+   is one continuous element on the timeline (no middle/end siblings). */
+.tl-chip.kind-milestone.is-start { border-radius: 4px; }
+
 /* … overflow button on rows / cards */
 .row-overflow {
   position: absolute;

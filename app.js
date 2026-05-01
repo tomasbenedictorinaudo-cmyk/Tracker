@@ -11019,6 +11019,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   const calState = {
     monthOffset: 0, // 0 = current month, -1 = previous, +1 = next
     keyWired: false,
+    // 'month' = 7×6 grid (default); 'timeline' = horizontal swim-lane
+    // view of the same window — one lane per kind.
+    format: 'month',
     // Per-kind visibility filters. The legend doubles as the filter
     // strip: clicking a pill toggles its kind on/off. Persists across
     // month navigation but resets on reload (intentional — fresh
@@ -11159,6 +11162,132 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     });
     return items;
   }
+  // Horizontal swim-lane variant of the calendar — same window, same data,
+  // same chips — but laid out with one lane per kind, with chips placed by
+  // date offset and ranged milestones stretching across days as a bar.
+  function renderCalendarTimeline(cells, items, byDate, todayISO_) {
+    const startMs = cells[0].getTime();
+    const totalDays = cells.length;
+    const dayPx = 30; // column width per day
+    const totalPx = totalDays * dayPx;
+
+    // Build per-kind lanes from the (already-filter-aware) flat items list,
+    // skipping milestone middle/end positions — they're absorbed into the
+    // start chip's wider bar so the range reads as one continuous element
+    // rather than 4 separate chips.
+    const laneOrder = ['milestone', 'deliverable', 'action', 'meeting', 'cr'];
+    const laneLabels = { milestone: 'Milestones', deliverable: 'Deliverables', action: 'Actions', meeting: 'Meetings', cr: 'CRs' };
+    const laneIcons  = { milestone: '◇', deliverable: '◆', action: '☐', meeting: '⊕', cr: '⇆' };
+    const lanes = laneOrder
+      .filter((k) => calState.visible[k] !== false)
+      .map((k) => ({ kind: k, items: [] }));
+    const laneByKind = Object.fromEntries(lanes.map((l) => [l.kind, l]));
+
+    // Track which (item.key) we've already added so a milestone band's
+    // start chip is the only one we keep (its width covers the range).
+    const seenMilestoneIds = new Set();
+    items.forEach((it) => {
+      const lane = laneByKind[it.kind];
+      if (!lane) return;
+      // Range-aware milestone packing: only the 'start' / 'single' positions
+      // create a chip; middle/end positions are skipped because the start
+      // chip's width spans the range.
+      if (it.kind === 'milestone' && it.rangePos && (it.rangePos === 'middle' || it.rangePos === 'end')) {
+        return;
+      }
+      lane.items.push(it);
+    });
+
+    // Index helper (offset days from the grid start)
+    const offsetDays = (iso) => Math.round((parseDate(iso).getTime() - startMs) / dayMs);
+
+    // Today indicator x-position
+    const todayOffset = todayISO_ >= fmtISO(cells[0]) && todayISO_ <= fmtISO(cells[cells.length - 1])
+      ? offsetDays(todayISO_) * dayPx + dayPx / 2 : null;
+
+    // Axis: render a tick + label every 7 days, plus highlight Mondays.
+    // Labels show 'Mon Apr 27' / 'May 4' etc; abbreviated to fit 30px column.
+    const axisCells = cells.map((d, i) => {
+      const iso = fmtISO(d);
+      const isToday = iso === todayISO_;
+      const isMon = d.getDay() === 1;
+      const showLabel = isMon || i === 0;
+      const lbl = showLabel
+        ? (d.getDate() === 1 || i === 0
+            ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+            : String(d.getDate()))
+        : '';
+      return `<div class="tl-axis-cell ${isToday ? 'is-today' : ''} ${isMon ? 'is-mon' : ''}" data-iso="${iso}" style="width:${dayPx}px;">${lbl}</div>`;
+    }).join('');
+
+    // For each item we need to know its index in byDate.get(iso) so chip
+    // clicks can resolve back to the run() callback. We re-derive that here.
+    function indexInDateBucket(it) {
+      const bucket = byDate.get(it.date) || [];
+      return bucket.indexOf(it);
+    }
+
+    // Render lanes. Each chip is absolutely-positioned by left/width.
+    // Range milestones get width = (endOffset - startOffset + 1) * dayPx;
+    // everything else gets width = dayPx.
+    function renderLane(lane) {
+      const chipsHTML = lane.items.map((it) => {
+        const idx = indexInDateBucket(it);
+        const x = offsetDays(it.date) * dayPx;
+        // Compute width for milestone ranges; use the underlying record so
+        // we can read endDate (item itself only carries rangePos+date).
+        let w = dayPx - 2;
+        if (it.kind === 'milestone' && it.rangePos === 'start') {
+          // Find the matching 'end' chip to derive width
+          const startD = it.date;
+          // The day-bucketed items include 'end' positions; locate the same
+          // milestone label across the whole `items` array.
+          const same = items.filter((x) => x.kind === 'milestone' && x.label === it.label);
+          const lastIso = same.reduce((mx, x) => x.date > mx ? x.date : mx, startD);
+          const span = offsetDays(lastIso) - offsetDays(startD) + 1;
+          w = Math.max(dayPx - 2, span * dayPx - 2);
+        }
+        const tintStyle = it.tint ? `--cal-chip-tint: ${it.tint};` : '';
+        const tintCls = it.tint ? ' has-tint' : '';
+        const rangeCls = it.rangePos ? ` is-${it.rangePos}` : '';
+        return `
+          <button class="tl-chip cal-chip cal-chip-${it.tone} kind-${it.kind}${rangeCls}${tintCls}"
+                  style="left:${x}px;width:${w}px;${tintStyle}"
+                  data-tl-item-key="${escapeHTML(it.date)}|${idx}"
+                  title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+            <span class="cal-chip-icon" aria-hidden="true">${escapeHTML(it.icon || '·')}</span>
+            <span class="cal-chip-label">${escapeHTML(it.label)}</span>
+          </button>`;
+      }).join('');
+      const empty = !lane.items.length ? '<div class="tl-lane-empty">— none</div>' : '';
+      return `
+        <div class="tl-lane">
+          <div class="tl-lane-label">
+            <span class="cal-chip-icon kind-${lane.kind}">${laneIcons[lane.kind]}</span>
+            ${escapeHTML(laneLabels[lane.kind])}
+          </div>
+          <div class="tl-lane-track" style="width:${totalPx}px;">
+            ${chipsHTML}
+            ${empty}
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="cal-timeline">
+        <div class="tl-scroll">
+          <div class="tl-axis-row">
+            <div class="tl-lane-label tl-axis-spacer"></div>
+            <div class="tl-axis-track" style="width:${totalPx}px;">
+              ${axisCells}
+              ${todayOffset != null ? `<div class="tl-today-line" style="left:${todayOffset}px;"></div>` : ''}
+            </div>
+          </div>
+          ${lanes.map(renderLane).join('')}
+        </div>
+      </div>`;
+  }
+
   function renderCalendar(root) {
     const proj = curProject();
     const view = document.createElement('div');
@@ -11237,6 +11366,10 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           <div class="page-sub">${escapeHTML(monthLabel)} · arrow keys to switch months</div>
         </div>
         <div class="page-actions">
+          <div class="seg" role="tablist" aria-label="Calendar format">
+            <button type="button" class="seg-btn ${calState.format === 'month'    ? 'active' : ''}" data-cal-format="month"    title="Month grid view">Month</button>
+            <button type="button" class="seg-btn ${calState.format === 'timeline' ? 'active' : ''}" data-cal-format="timeline" title="Horizontal timeline view">Timeline</button>
+          </div>
           <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
           <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
           <button class="ghost" id="calAddMtg"  title="Add a meeting (one-off or recurring)">+ Meeting</button>
@@ -11262,12 +11395,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           <span class="cal-chip-icon kind-cr">⇆</span> CRs <span class="cal-legend-count">${kindCounts.cr}</span>
         </button>
       </div>
-      <div class="calendar">
-        <div class="cal-head">
-          ${dayHeaders.map((h) => `<div class="cal-head-cell">${h}</div>`).join('')}
+      ${calState.format === 'month' ? `
+        <div class="calendar">
+          <div class="cal-head">
+            ${dayHeaders.map((h) => `<div class="cal-head-cell">${h}</div>`).join('')}
+          </div>
+          <div class="cal-grid">${cellHTML}</div>
         </div>
-        <div class="cal-grid">${cellHTML}</div>
-      </div>`;
+      ` : renderCalendarTimeline(cells, items, byDate, todayISO_)}`;
     root.appendChild(view);
 
     $('#calPrev').addEventListener('click', () => { calState.monthOffset -= 1; render(); });
@@ -11277,6 +11412,16 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     $('#calAddDel').addEventListener('click', () => openQuickAdd('deliverable'));
     $('#calAddMtg').addEventListener('click', () => openQuickAdd('meeting'));
 
+    // Format toggle (Month / Timeline)
+    view.querySelectorAll('[data-cal-format]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const f = btn.dataset.calFormat;
+        if (calState.format === f) return;
+        calState.format = f;
+        render();
+      });
+    });
+
     // Legend pills double as visibility filters
     view.querySelectorAll('[data-toggle-kind]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -11285,6 +11430,21 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         render();
       });
     });
+
+    // Timeline-mode chip + bar wiring (mirrors the month-grid wiring)
+    if (calState.format === 'timeline') {
+      view.querySelectorAll('[data-tl-item-key]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const key = el.dataset.tlItemKey;
+          // key encodes "iso:idx" — find the matching item
+          const [iso, idxStr] = key.split('|');
+          const idx = parseInt(idxStr, 10);
+          const it = (byDate.get(iso) || [])[idx];
+          if (it && typeof it.run === 'function') it.run();
+        });
+      });
+    }
 
     // Per-chip click: dispatch to the item's run() callback. We store
     // (cell, item) indices on the button so the data closure stays simple.
