@@ -738,6 +738,7 @@
     renderView();
     refreshNoteChips();
     refreshTodoFab();
+    refreshBell();
   }
 
   function renderTopbar() {
@@ -791,6 +792,9 @@
       decisions: renderDecisions,
       changes: renderChangeRequests,
       links: renderLinks,
+      inbox: renderInbox,
+      calendar: renderCalendar,
+      reports: renderReports,
     };
     (fns[view] || renderBoard)(main);
   }
@@ -9003,6 +9007,224 @@
     refreshTodoFab();
   }
 
+  /* ----------------------- Phase D: Inbox + bell ---------------------- */
+  // Aggregate items that need user attention. Each item has a stable id so
+  // the user can dismiss it and the dismissal sticks across reloads.
+  const STALE_DAYS = 14;
+  const SOON_DAYS = 3;
+  function inboxItems() {
+    const today = todayISO();
+    const dismissed = new Set(state.inbox?.dismissed || []);
+    const out = [];
+    state.projects.forEach((proj) => {
+      // Late actions
+      (proj.actions || []).forEach((a) => {
+        if (a.deletedAt) return;
+        if (isClosedStatus(a.status)) return;
+        if (a.due && dayDiff(a.due, today) < 0) {
+          out.push({
+            id: 'late-action:' + a.id,
+            kind: 'late', icon: '⏰', tone: 'bad',
+            title: a.title,
+            sub: `${proj.name} · ${personName(a.owner)} · ${Math.abs(dayDiff(a.due, today))}d late`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'board'; render(); setTimeout(() => openDrawer(a.id), 30); },
+          });
+        } else if (a.due && dayDiff(a.due, today) <= SOON_DAYS) {
+          out.push({
+            id: 'due-soon:' + a.id,
+            kind: 'soon', icon: '⏳', tone: 'warn',
+            title: a.title,
+            sub: `${proj.name} · ${personName(a.owner)} · due in ${dayDiff(a.due, today)}d`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'board'; render(); setTimeout(() => openDrawer(a.id), 30); },
+          });
+        }
+        // Stale (open + not updated in N days)
+        if (!isClosedStatus(a.status) && a.updatedAt && dayDiff(today, a.updatedAt) >= STALE_DAYS) {
+          out.push({
+            id: 'stale-action:' + a.id,
+            kind: 'stale', icon: '·', tone: 'muted',
+            title: a.title,
+            sub: `${proj.name} · ${personName(a.owner)} · untouched ${dayDiff(today, a.updatedAt)}d`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'board'; render(); setTimeout(() => openDrawer(a.id), 30); },
+          });
+        }
+      });
+      // Pending CRs > 14d
+      (proj.changes || []).forEach((c) => {
+        if (c.status !== 'proposed' && c.status !== 'under_review') return;
+        if (c.originatedDate && dayDiff(today, c.originatedDate) >= STALE_DAYS) {
+          out.push({
+            id: 'cr-pending:' + c.id,
+            kind: 'cr', icon: '⇆', tone: 'warn',
+            title: c.title,
+            sub: `${proj.name} · ${c.status.replace('_', ' ')} · ${dayDiff(today, c.originatedDate)}d ago`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'changes'; render(); setTimeout(() => openChangeRequestEditor(c.id), 30); },
+          });
+        }
+      });
+      // High-criticality unmitigated risks
+      (proj.risks || []).forEach((r) => {
+        if ((r.kind || 'risk') === 'opportunity') return;
+        const inh = r.inherent || { probability: 0, impact: 0 };
+        const res = r.residual || inh;
+        const score = (res.probability || 0) * (res.impact || 0);
+        if (score >= 12 && !r.actionId) {
+          out.push({
+            id: 'risk-unmit:' + r.id,
+            kind: 'risk', icon: '△', tone: 'bad',
+            title: r.title,
+            sub: `${proj.name} · residual ${score} · no linked action`,
+            run: () => { state.currentProjectId = proj.id; state.currentView = 'risks'; render(); setTimeout(() => openRiskEditor(r.id), 30); },
+          });
+        }
+      });
+    });
+    // Personal todos due / open
+    (state.todos || []).forEach((t) => {
+      if (t.done) return;
+      out.push({
+        id: 'todo:' + t.id,
+        kind: 'todo', icon: '✓', tone: 'muted',
+        title: t.text || '(untitled)',
+        sub: 'Personal to-do',
+        run: () => $('#todoFab')?.click(),
+      });
+    });
+    return out.filter((it) => !dismissed.has(it.id));
+  }
+  function inboxCount() { return inboxItems().length; }
+  function refreshBell() {
+    const bell = $('#bellBadge');
+    if (!bell) return;
+    const n = inboxCount();
+    if (n > 0) { bell.textContent = String(n); bell.hidden = false; }
+    else bell.hidden = true;
+  }
+  function dismissInbox(id) {
+    state.inbox = state.inbox || { dismissed: [] };
+    state.inbox.dismissed = state.inbox.dismissed || [];
+    if (!state.inbox.dismissed.includes(id)) state.inbox.dismissed.push(id);
+    saveState();
+  }
+  function renderInbox(root) {
+    const view = document.createElement('div');
+    view.className = 'view';
+    const items = inboxItems();
+    const grouped = { late: [], soon: [], cr: [], risk: [], stale: [], todo: [] };
+    items.forEach((it) => { (grouped[it.kind] || (grouped[it.kind] = [])).push(it); });
+    const sectionTitle = { late: 'Late', soon: 'Due soon', cr: 'CR aging', risk: 'Unmitigated risks', stale: 'Stale', todo: 'Personal to-do' };
+    const order = ['late', 'soon', 'cr', 'risk', 'stale', 'todo'];
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Inbox</div>
+          <div class="page-sub">${items.length ? `${items.length} item${items.length === 1 ? '' : 's'} need your attention` : 'Nothing requires action right now — nice work.'}</div>
+        </div>
+        <div class="page-actions">
+          ${state.settings.notifyEnabled ? '' : '<button class="ghost" id="btnEnableNotify" title="Browser notifications when new items arrive">Enable notifications</button>'}
+          ${items.length ? '<button class="ghost" id="btnDismissAll" title="Dismiss all">Dismiss all</button>' : ''}
+        </div>
+      </div>
+      <div class="inbox">
+        ${items.length === 0 ? '<div class="empty">Your inbox is clear.</div>' : ''}
+        ${order.filter((k) => (grouped[k] || []).length).map((k) => `
+          <div class="inbox-section">
+            <div class="inbox-section-title">${escapeHTML(sectionTitle[k] || k)}<span class="inbox-section-count">${grouped[k].length}</span></div>
+            <div class="inbox-list">
+              ${grouped[k].map((it) => `
+                <div class="inbox-item tone-${it.tone}" data-id="${escapeHTML(it.id)}">
+                  <span class="inbox-icon">${escapeHTML(it.icon)}</span>
+                  <div class="inbox-text">
+                    <div class="inbox-title">${escapeHTML(it.title)}</div>
+                    <div class="inbox-sub">${escapeHTML(it.sub)}</div>
+                  </div>
+                  <button class="inbox-dismiss" data-action="dismiss" title="Dismiss" aria-label="Dismiss">×</button>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+    root.appendChild(view);
+
+    view.querySelectorAll('.inbox-item').forEach((row) => {
+      row.addEventListener('click', (e) => {
+        if (e.target.closest('[data-action="dismiss"]')) return;
+        const id = row.dataset.id;
+        const it = inboxItems().find((x) => x.id === id);
+        if (it) it.run();
+      });
+      row.querySelector('[data-action="dismiss"]')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = row.dataset.id;
+        dismissInbox(id);
+        render();
+      });
+    });
+    $('#btnDismissAll')?.addEventListener('click', () => {
+      if (!confirm('Dismiss all inbox items? They\'ll re-appear if their condition still holds tomorrow.')) return;
+      items.forEach((it) => dismissInbox(it.id));
+      render();
+    });
+    $('#btnEnableNotify')?.addEventListener('click', async () => {
+      try {
+        const perm = await Notification.requestPermission();
+        if (perm === 'granted') {
+          state.settings.notifyEnabled = true;
+          saveState(); render();
+          toast('Notifications enabled');
+        } else {
+          toast('Notifications denied');
+        }
+      } catch (e) { toast('Notifications not supported'); }
+    });
+  }
+  function maybeNotifyInbox() {
+    if (!state.settings.notifyEnabled) return;
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const today = todayISO();
+    if (state.inbox?.lastNotifyDate === today) return;
+    const items = inboxItems();
+    if (!items.length) return;
+    state.inbox = state.inbox || {};
+    state.inbox.lastNotifyDate = today;
+    saveState();
+    try {
+      new Notification('Cockpit — ' + items.length + ' item' + (items.length === 1 ? '' : 's') + ' need your attention', {
+        body: items.slice(0, 3).map((it) => '• ' + it.title).join('\n'),
+        silent: false,
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  /* --- Phase E / H stubs (filled in later phases) --- */
+  function renderReports(root) {
+    const view = document.createElement('div');
+    view.className = 'view';
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Status report</div>
+          <div class="page-sub">Coming in Phase E — generates a Markdown / printable HTML status digest.</div>
+        </div>
+      </div>
+      <div class="empty">Reports view will land in Phase E.</div>`;
+    root.appendChild(view);
+  }
+  function renderCalendar(root) {
+    const view = document.createElement('div');
+    view.className = 'view';
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Calendar</div>
+          <div class="page-sub">Coming in Phase H — month grid of every dated item.</div>
+        </div>
+      </div>
+      <div class="empty">Calendar view will land in Phase H.</div>`;
+    root.appendChild(view);
+  }
+
   /* ---------------------- Phase C: command palette --------------------- */
   // Universal Cmd+K palette. Indexes everything searchable + a small menu of
   // "slash commands" (action you can take). Up/Down + Enter to navigate +
@@ -9366,6 +9588,10 @@
       saveState();
       applyNotesPanel();
     });
+    $('#btnInbox').addEventListener('click', () => {
+      state.currentView = 'inbox';
+      saveState(); render();
+    });
     wireNotesPanel();
     applyNotesPanel();
     wireHoverDescOnce();
@@ -9489,6 +9715,12 @@
       if (document.visibilityState === 'hidden') flushPendingSaves();
     });
     setInterval(flushPendingSaves, 10000);
+
+    // Phase D — refresh the bell once per minute so day-rollover late-actions
+    // surface without needing a manual reload, and try the daily notification
+    // once per app load.
+    setInterval(refreshBell, 60000);
+    setTimeout(maybeNotifyInbox, 1500);
 
     render();
   }
