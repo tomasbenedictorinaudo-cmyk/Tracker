@@ -10712,6 +10712,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         <div class="page-actions">
           <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
           <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
+          <button class="ghost" id="calAddMtg"  title="Add a meeting (one-off or recurring)">+ Meeting</button>
           <button class="icon-btn" id="calPrev" title="Previous month (←)">‹</button>
           <button class="ghost"   id="calToday" title="Jump to current month">Today</button>
           <button class="icon-btn" id="calNext" title="Next month (→)">›</button>
@@ -10737,6 +10738,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     $('#calToday').addEventListener('click', () => { calState.monthOffset = 0; render(); });
     $('#calAddMile').addEventListener('click', () => openQuickAdd('milestone'));
     $('#calAddDel').addEventListener('click', () => openQuickAdd('deliverable'));
+    $('#calAddMtg').addEventListener('click', () => openQuickAdd('meeting'));
 
     // Per-chip click: dispatch to the item's run() callback. We store
     // (cell, item) indices on the button so the data closure stays simple.
