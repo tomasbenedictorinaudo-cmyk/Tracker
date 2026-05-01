@@ -1946,13 +1946,22 @@
       list.innerHTML = items.map((op) => {
         // Backfill defaults for legacy items
         if (!op.criticality) op.criticality = 'med';
+        // Left-border tint reflects the *dominant* severity of either
+        // criticality or priority — whichever is higher drives the colour
+        // so a Critical-priority point is red even if its criticality is
+        // only Medium, and vice versa.
+        const SEV_ORDER = ['low', 'med', 'high', 'critical'];
+        const critIdx = Math.max(0, SEV_ORDER.indexOf(op.criticality || 'med'));
+        const prioIdx = Math.max(0, SEV_ORDER.indexOf(op.priorityLevel || 'med'));
+        const domKey = SEV_ORDER[Math.max(critIdx, prioIdx)];
+        const domRgb = CRITICALITY_RGB[domKey];
         if (!op.createdAt) op.createdAt = todayISO();
         if (!Array.isArray(op.steps)) op.steps = [];
         const cmp = findComponent(proj, op.component);
         const c = cmp ? componentColor(cmp.color) : null;
         const critRgb = CRITICALITY_RGB[op.criticality] || CRITICALITY_RGB.med;
         // The left border tracks criticality (component shown as a chip below).
-        const tint = `style="border-left-color: rgb(${critRgb})"`;
+        const tint = `style="border-left-color: rgb(${domRgb})"`;
         const critLabel = CRITICALITY_LABEL[op.criticality] || 'Medium';
         // op.notes holds rich HTML; legacy plain-string entries render as text
         const contextHtml = op.notes && /<\w+/.test(op.notes) ? op.notes : escapeHTML(op.notes || '');
@@ -1978,8 +1987,6 @@
           <span class="op-row-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
           <div class="op-content">
             <div class="op-title-row">
-              <button type="button" class="op-level-chip op-crit-chip ${critQuiet ? 'is-default' : ''}" data-kind="criticality" title="Click to set criticality (severity if not addressed)" style="${critChipStyle}">${critLabel}</button>
-              <button type="button" class="op-level-chip prio-chip prio-${prio.id} ${prioQuiet ? 'is-default' : ''}" data-kind="priority" title="Click to set priority (urgency to act)" style="${prioChipStyle}">${prio.label}</button>
               <div class="op-title" contenteditable="true" data-field="title">${escapeHTML(op.title)}</div>
             </div>
             <div class="op-context-wrap">
@@ -2022,6 +2029,8 @@
             <div class="op-meta">
               <span class="op-origin" title="Auto-set when this open point was originated">Originated ${fmtFull(op.createdAt)}</span>
               ${stepTotal ? `<span class="op-meta-steps ${stepsAllDone ? 'ok' : ''}" title="Resolution steps">✓ ${stepDone}/${stepTotal} steps</span>` : ''}
+              <button type="button" class="op-level-chip op-crit-chip ${critQuiet ? 'is-default' : ''}" data-kind="criticality" title="Click to set criticality (severity if not addressed)" style="${critChipStyle}">${critLabel}</button>
+              <button type="button" class="op-level-chip prio-chip prio-${prio.id} ${prioQuiet ? 'is-default' : ''}" data-kind="priority" title="Click to set priority (urgency to act)" style="${prioChipStyle}">${prio.label}</button>
               ${cmp ? `<span class="component-chip" style="background:rgba(${c.rgb},.2);color:rgb(${c.rgb})">${escapeHTML(cmp.name)}</span>` : ''}
             </div>
           </div>
