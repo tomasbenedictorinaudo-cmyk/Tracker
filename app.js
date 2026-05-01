@@ -11029,11 +11029,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     firstWeekStart: null,
     weekCount: 12,
     windowAnchorOffset: null,
-    // Timeline-mode zoom — tick granularity tracks the zoom strictly:
-    // 'day' = ticks every day, 'week' = every Monday, 'month' = every
-    // 1st-of-month. Never intermediates. Pixel scale + window length
-    // also follow the zoom.
-    tlZoom: 'day',
+    // Timeline-mode zoom — continuous (px-per-day). Tick granularity
+    // is auto-derived from this value:
+    //   pxPerDay ≥ 12 → 'day'    (one tick per day)
+    //   pxPerDay ≥  3 → 'week'   (one tick per Monday)
+    //   else          → 'month'  (one tick per 1st-of-month)
+    tlPxPerDay: 26,
     // Per-kind visibility filters. The legend doubles as the filter
     // strip: clicking a pill toggles its kind on/off. Persists across
     // month navigation but resets on reload (intentional — fresh
@@ -11196,28 +11197,40 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   // overlapping events never occlude each other. The zoom tier strictly
   // controls tick granularity (Day / Week / Month — never intermediates)
   // and the pixel-per-day scale.
-  const TL_ZOOM_PROFILES = {
-    day:   { pxPerDay: 26,         windowDays: 84  /*  ~12 weeks */ },
-    week:  { pxPerDay: 30 / 7,     windowDays: 196 /*  ~28 weeks */ },
-    month: { pxPerDay: 60 / 30,    windowDays: 730 /*  ~24 months */ },
-  };
+  // Tick-granularity thresholds. Tuned so each visible tick has at least
+  // ~24 px of horizontal room — readable but not crowded.
+  const TL_ZOOM_MIN = 0.5;
+  const TL_ZOOM_MAX = 80;
+  function tlGranularityFor(pxPerDay) {
+    if (pxPerDay >= 12) return 'day';
+    if (pxPerDay >= 3)  return 'week';
+    return 'month';
+  }
+  function tlWindowDaysFor(pxPerDay) {
+    // Render enough days to keep ~3000 px of total stage width regardless
+    // of zoom, with a minimum of ~12 weeks so the user always has context
+    // around the anchor month.
+    return Math.max(84, Math.ceil(3000 / Math.max(0.1, pxPerDay)));
+  }
   function renderCalendarTimelineV2() {
     const proj = curProject();
     const todayISO_ = todayISO();
     const todayD = parseDate(todayISO_);
-    const z = TL_ZOOM_PROFILES[calState.tlZoom] || TL_ZOOM_PROFILES.day;
+    const pxPerDay = clamp(calState.tlPxPerDay || 26, TL_ZOOM_MIN, TL_ZOOM_MAX);
+    const granularity = tlGranularityFor(pxPerDay);
+    const windowDays = tlWindowDaysFor(pxPerDay);
 
     // Anchor near a Monday so axis ticks land cleanly. Lead the window
     // with ~30% behind the anchor month so a bit of history is visible.
     const anchor = new Date(todayD.getFullYear(), todayD.getMonth() + calState.monthOffset, 1);
-    let windowStart = new Date(anchor.getTime() - Math.floor(z.windowDays * 0.3) * dayMs);
+    let windowStart = new Date(anchor.getTime() - Math.floor(windowDays * 0.3) * dayMs);
     while (windowStart.getDay() !== 1) windowStart = new Date(windowStart.getTime() - dayMs);
-    const totalDays = z.windowDays;
+    const totalDays = windowDays;
     const windowEnd = new Date(windowStart.getTime() + (totalDays - 1) * dayMs);
-    const totalPx = Math.round(totalDays * z.pxPerDay);
+    const totalPx = Math.round(totalDays * pxPerDay);
     const startISO = fmtISO(windowStart);
     const endISO   = fmtISO(windowEnd);
-    const xFor = (iso) => Math.round((parseDate(iso).getTime() - windowStart.getTime()) / dayMs * z.pxPerDay);
+    const xFor = (iso) => Math.round((parseDate(iso).getTime() - windowStart.getTime()) / dayMs * pxPerDay);
 
     // Build items for the visible window
     const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
@@ -11255,7 +11268,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const isRange = it.kind === 'milestone' && it.rangePos === 'start' && endIso > startIso;
       if (isRange) {
         const span = (parseDate(endIso).getTime() - parseDate(startIso).getTime()) / dayMs + 1;
-        const width = Math.max(40, Math.round(span * z.pxPerDay));
+        const width = Math.max(40, Math.round(span * pxPerDay));
         ranges.push({ ...it, _start: startIso, _end: endIso, _left: left, _width: width });
       } else {
         // Point card: width is the typical card width (used for overlap
@@ -11319,12 +11332,13 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       return aboveBlockH + rangeBlockH + axisBlockH + row * ROW_H;
     }
 
-    // Tick generation — strict per-zoom granularity (Day / Week / Month).
+    // Tick generation — strict per-zoom granularity (Day / Week / Month),
+    // auto-derived from the current pxPerDay.
     const ticks = [];
-    if (calState.tlZoom === 'day') {
+    if (granularity === 'day') {
       for (let d = 0; d < totalDays; d++) {
         const dt = new Date(windowStart.getTime() + d * dayMs);
-        const x = Math.round(d * z.pxPerDay);
+        const x = Math.round(d * pxPerDay);
         const isMon = dt.getDay() === 1;
         const isFirst = dt.getDate() === 1;
         const label = isFirst
@@ -11332,11 +11346,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           : isMon ? String(dt.getDate()) : '';
         ticks.push({ x, label, major: isMon || isFirst });
       }
-    } else if (calState.tlZoom === 'week') {
+    } else if (granularity === 'week') {
       let d = new Date(windowStart);
       while (d <= windowEnd) {
         const offset = Math.round((d.getTime() - windowStart.getTime()) / dayMs);
-        const x = Math.round(offset * z.pxPerDay);
+        const x = Math.round(offset * pxPerDay);
         const isFirst = d.getDate() <= 7;
         const label = isFirst
           ? d.toLocaleDateString(undefined, { month: 'short' })
@@ -11349,7 +11363,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       if (cur < windowStart) cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
       while (cur <= windowEnd) {
         const offset = Math.round((cur.getTime() - windowStart.getTime()) / dayMs);
-        const x = Math.round(offset * z.pxPerDay);
+        const x = Math.round(offset * pxPerDay);
         const isJan = cur.getMonth() === 0;
         const label = isJan
           ? cur.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
@@ -11683,12 +11697,16 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <button type="button" class="seg-btn ${calState.format === 'month'    ? 'active' : ''}" data-cal-format="month"    title="Calendar view (vertical week grid)">Calendar</button>
             <button type="button" class="seg-btn ${calState.format === 'timeline' ? 'active' : ''}" data-cal-format="timeline" title="Horizontal timeline view">Timeline</button>
           </div>
-          ${calState.format === 'timeline' ? `
-            <div class="seg" role="tablist" aria-label="Timeline zoom">
-              <button type="button" class="seg-btn ${calState.tlZoom === 'day'   ? 'active' : ''}" data-tl-zoom="day"   title="Tick every day">Day</button>
-              <button type="button" class="seg-btn ${calState.tlZoom === 'week'  ? 'active' : ''}" data-tl-zoom="week"  title="Tick every Monday">Week</button>
-              <button type="button" class="seg-btn ${calState.tlZoom === 'month' ? 'active' : ''}" data-tl-zoom="month" title="Tick every 1st of month">Month</button>
-            </div>` : ''}
+          ${calState.format === 'timeline' ? (() => {
+            const z = clamp(calState.tlPxPerDay || 26, 0.5, 80);
+            const g = z >= 12 ? 'Day' : z >= 3 ? 'Week' : 'Month';
+            return `
+              <div class="tl-zoom-group" role="group" aria-label="Timeline zoom">
+                <button type="button" class="icon-btn" id="tlZoomOut" title="Zoom out (Ctrl+wheel down)">−</button>
+                <span class="tl-zoom-label" title="Granularity auto-switches at 12 px/day (Day↔Week) and 3 px/day (Week↔Month)">${g}</span>
+                <button type="button" class="icon-btn" id="tlZoomIn"  title="Zoom in (Ctrl+wheel up)">+</button>
+                <button type="button" class="icon-btn" id="tlZoomFit" title="Reset zoom">⌂</button>
+              </div>` ; })() : ''}
           ${isMerged ? '' : `
             <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
             <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
@@ -11753,15 +11771,62 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       });
     });
 
-    // Timeline zoom toggle (Day / Week / Month)
-    view.querySelectorAll('[data-tl-zoom]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const z = btn.dataset.tlZoom;
-        if (calState.tlZoom === z) return;
-        calState.tlZoom = z;
-        render();
-      });
-    });
+    // Timeline zoom — continuous via px-per-day. − / + buttons step
+    // by ×1.5 (capped); ⌂ resets. Granularity (day / week / month)
+    // auto-derives from pxPerDay during render.
+    function stepZoom(factor) {
+      const cur = clamp(calState.tlPxPerDay || 26, 0.5, 80);
+      const next = clamp(cur * factor, 0.5, 80);
+      if (Math.abs(next - cur) < 1e-3) return;
+      // Anchor zoom around the current viewport centre so the user
+      // doesn't lose their place while zooming.
+      const scroll = view.querySelector('.tl-scroll');
+      let anchorDayOffset = null;
+      if (scroll) {
+        const cx = scroll.scrollLeft + scroll.clientWidth / 2;
+        anchorDayOffset = cx / cur;
+      }
+      calState.tlPxPerDay = next;
+      render();
+      if (anchorDayOffset != null) {
+        const newScroll = $('.tl-scroll');
+        if (newScroll) {
+          const newX = anchorDayOffset * next;
+          newScroll.scrollLeft = Math.max(0, newX - newScroll.clientWidth / 2);
+        }
+      }
+    }
+    $('#tlZoomOut')?.addEventListener('click', () => stepZoom(1 / 1.5));
+    $('#tlZoomIn')?.addEventListener('click',  () => stepZoom(1.5));
+    $('#tlZoomFit')?.addEventListener('click', () => { calState.tlPxPerDay = 26; render(); });
+
+    // Ctrl/Cmd + wheel anchors zoom at the cursor position so the date
+    // under the pointer stays put. Plain wheel still scrolls the timeline
+    // horizontally (browser default for an overflow-x container).
+    if (calState.format === 'timeline') {
+      const scroll = view.querySelector('.tl-scroll');
+      if (scroll) {
+        scroll.addEventListener('wheel', (e) => {
+          if (!(e.ctrlKey || e.metaKey)) return;
+          e.preventDefault();
+          const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
+          const cur = clamp(calState.tlPxPerDay || 26, 0.5, 80);
+          const next = clamp(cur * factor, 0.5, 80);
+          if (Math.abs(next - cur) < 1e-3) return;
+          // Pin the date under the cursor
+          const rect = scroll.getBoundingClientRect();
+          const xInScroll = e.clientX - rect.left + scroll.scrollLeft;
+          const dayAtCursor = xInScroll / cur;
+          calState.tlPxPerDay = next;
+          render();
+          const newScroll = $('.tl-scroll');
+          if (newScroll) {
+            const newX = dayAtCursor * next;
+            newScroll.scrollLeft = Math.max(0, newX - (e.clientX - rect.left));
+          }
+        }, { passive: false });
+      }
+    }
 
     // Legend pills double as visibility filters
     view.querySelectorAll('[data-toggle-kind]').forEach((btn) => {
