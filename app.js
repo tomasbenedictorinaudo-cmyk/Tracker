@@ -8455,6 +8455,12 @@
           <div class="field"><label>Status</label>
             <select id="qStatus"><option value="todo">Not started</option><option value="doing">In progress</option><option value="done">Done</option></select>
           </div>
+        </div>
+        <div class="field"><label>Component <span class="muted">— optional</span></label>
+          <select id="qComp">
+            <option value="">— None</option>
+            ${(proj.components || []).map((cmp) => `<option value="${cmp.id}">${escapeHTML(cmp.name)}</option>`).join('')}
+          </select>
         </div>`;
     } else if (qaType === 'milestone') {
       body.innerHTML = `
@@ -8462,6 +8468,12 @@
         <div class="qa-row">
           <div class="field"><label>Start date</label><input id="qDate" type="date" /></div>
           <div class="field"><label>End date <span class="muted">— optional, for a range</span></label><input id="qEndDate" type="date" /></div>
+        </div>
+        <div class="field"><label>Component <span class="muted">— optional</span></label>
+          <select id="qComp">
+            <option value="">— None</option>
+            ${(proj.components || []).map((cmp) => `<option value="${cmp.id}">${escapeHTML(cmp.name)}</option>`).join('')}
+          </select>
         </div>`;
     } else if (qaType === 'risk') {
       const kind = qaInit.kind === 'opportunity' ? 'opportunity' : 'risk';
@@ -8686,7 +8698,13 @@
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
       proj.deliverables = proj.deliverables || [];
-      proj.deliverables.push({ id: uid('d'), name, dueDate: $('#qDue').value || null, status: $('#qStatus').value });
+      proj.deliverables.push({
+        id: uid('d'),
+        name,
+        dueDate: $('#qDue').value || null,
+        status: $('#qStatus').value,
+        component: $('#qComp')?.value || null,
+      });
     } else if (qaType === 'milestone') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
@@ -8701,6 +8719,7 @@
         // Range: only stored if it's strictly after the start.
         endDate: (ed && ed !== date) ? ed : null,
         status: 'todo',
+        component: $('#qComp')?.value || null,
       });
     } else if (qaType === 'risk') {
       const title = $('#qTitle').value.trim();
@@ -11710,11 +11729,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <button type="button" class="seg-btn ${calState.format === 'month'    ? 'active' : ''}" data-cal-format="month"    title="Calendar view (vertical week grid)">Calendar</button>
             <button type="button" class="seg-btn ${calState.format === 'timeline' ? 'active' : ''}" data-cal-format="timeline" title="Horizontal timeline view">Timeline</button>
           </div>
-          ${calState.format === 'timeline' ? (() => {
-            const z = clamp(calState.tlPxPerDay || 26, 0.5, 80);
-            const g = z >= 12 ? 'Day' : z >= 3 ? 'Week' : 'Month';
-            return `
-              <span class="tl-zoom-label" title="Ctrl + scroll-wheel to zoom. Granularity auto-switches at 12 px/day (Day↔Week) and 3 px/day (Week↔Month).">${g}</span>` ; })() : ''}
           ${isMerged ? '' : `
             <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
             <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
