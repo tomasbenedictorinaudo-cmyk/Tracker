@@ -11363,9 +11363,10 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     }
     function dateLabelOf(it) {
       const end = endIsoFor(it);
-      const base = parseDate(it.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const fmt = { month: 'short', day: 'numeric', year: 'numeric' };
+      const base = parseDate(it.date).toLocaleDateString(undefined, fmt);
       if (end && end !== it.date) {
-        const e = parseDate(end).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        const e = parseDate(end).toLocaleDateString(undefined, fmt);
         return `${base} → ${e}`;
       }
       return base;
