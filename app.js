@@ -11570,7 +11570,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // wiring (data-cell-idx) keeps working without changes elsewhere.
     function dayCellHTML(d, i) {
       const iso = fmtISO(d);
-      const inMonth = d.getMonth() === month;
+      // Month bands instead of an 'in-month' anchor: with continuous
+      // scroll the anchor doesn't move, so highlighting one month and
+      // greying everything else reads incorrectly. Alternate odd/even
+      // months with a subtle background difference so users can scan
+      // month boundaries while scrolling.
+      const monthBand = d.getMonth() % 2 === 1 ? 'month-band' : '';
       const isToday = iso === todayISO_;
       const isWeekend = d.getDay() === 0 || d.getDay() === 6;
       const isFirstOfMonth = d.getDate() === 1;
@@ -11597,7 +11602,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         ? `<span class="cal-day-month-tag">${d.toLocaleDateString(undefined, { month: 'short' })}</span> ${d.getDate()}`
         : `${d.getDate()}`;
       return `
-        <div class="cal-cell ${inMonth ? '' : 'out-of-month'} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}" data-cell-idx="${i}" data-iso="${iso}">
+        <div class="cal-cell ${monthBand} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}" data-cell-idx="${i}" data-iso="${iso}">
           <div class="cal-day-num">${dayLabel}</div>
           <div class="cal-chips">${chipsHTML}${moreHTML}</div>
         </div>`;
