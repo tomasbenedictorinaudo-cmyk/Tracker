@@ -11867,13 +11867,18 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // toggle. Re-renders triggered by extendTop / extendBottom keep
     // their explicit scrollTop set by the extend caller.
     if (calState.scrollToTodayPending) {
-      // Show the WHOLE month containing today: scroll so the row
-      // holding the 1st-of-month is at the top of the viewport.
+      // Show the WHOLE anchor month: scroll so the row holding the
+      // 1st-of-month is at the top of the viewport. Anchor =
+      // today's month + monthOffset, so:
+      //   Today  (monthOffset=0)   → today's month at top
+      //   ‹      (monthOffset-=1)  → previous month at top
+      //   ›      (monthOffset+=1)  → next month at top
       // Use getBoundingClientRect-relative math because the grid
       // doesn't have position:relative and offsetTop would resolve
       // against a far ancestor.
       const today = new Date();
-      const ymPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+      const anchor = new Date(today.getFullYear(), today.getMonth() + calState.monthOffset, 1);
+      const ymPrefix = `${anchor.getFullYear()}-${String(anchor.getMonth() + 1).padStart(2, '0')}-01`;
       const targetCell = grid.querySelector(`.cal-cell[data-iso="${ymPrefix}"]`)
                        || grid.querySelector('.cal-cell.today');
       if (targetCell) {
