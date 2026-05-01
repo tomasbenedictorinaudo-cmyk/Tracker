@@ -68,6 +68,32 @@
   // Phase A — Markdown escape for the upcoming status-report export.
   const mdEscape = (s) => String(s ?? '').replace(/([\\`*_{}\[\]()#+\-.!|>])/g, '\\$1');
 
+  // Phase G — render tag chips for a record. Tags live on the project; a
+  // record stores only ids. Unknown ids (e.g. tag was deleted) are silently
+  // skipped to avoid empty chips.
+  function renderTagChipsHTML(tagIds, proj) {
+    if (!Array.isArray(tagIds) || !tagIds.length) return '';
+    const known = (proj?.tags || []).filter((t) => t && t.id);
+    const byId = new Map(known.map((t) => [t.id, t]));
+    return tagIds.map((id) => {
+      const t = byId.get(id);
+      if (!t) return '';
+      const rgb = t.rgb || '120, 120, 140';
+      return `<span class="tag-chip" style="background:rgba(${rgb},.18);color:rgb(${rgb});border:1px solid rgba(${rgb},.40)" title="${escapeHTML(t.name)}">${escapeHTML(t.name)}</span>`;
+    }).join('');
+  }
+  const TAG_PALETTE = [
+    '110, 168, 255',  // blue
+    '179, 137, 255',  // purple
+    '52,  211, 153',  // green
+    '251, 191, 36',   // amber
+    '248, 113, 113',  // red
+    '129, 140, 248',  // indigo
+    '236, 72, 153',   // pink
+    '244, 114, 182',  // rose
+    '20,  184, 166',  // teal
+  ];
+
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
     const btn = document.getElementById('btnTheme');
@@ -911,10 +937,13 @@
     // Only render a chip when priority is non-default (Medium) — keeps cards
     // calm and lets High/Critical visually pop.
     const showPriorityChip = a.priorityLevel && a.priorityLevel !== 'med';
+    const tagChips = renderTagChipsHTML(a.tags, curProject(), a.comments);
     card.innerHTML = `
+      <button class="row-overflow" data-action="overflow" title="More actions" aria-label="More actions">⋯</button>
       <div class="card-top-row">
         ${component ? `<div class="component-chip">${escapeHTML(component.name)}</div>` : ''}
         ${showPriorityChip ? `<span class="prio-chip prio-${lvl.id}" title="Priority: ${lvl.label}" style="background:rgba(${lvl.rgb},.18);color:rgb(${lvl.rgb});border:1px solid rgb(${lvl.rgb})">${lvl.label}</span>` : ''}
+        ${tagChips}
       </div>
       <div class="card-title">${escapeHTML(a.title)}</div>
       <div class="card-meta">
@@ -922,8 +951,15 @@
         <span class="due ${dueClass}">${due ? fmtDate(due) : 'no date'}</span>
         ${a.notes ? '<span class="tag">note</span>' : ''}
         ${a.description ? '<span class="tag has-desc" title="Has a description — hover to read">≡</span>' : ''}
+        ${(a.comments && a.comments.length) ? `<span class="tag has-comments" title="${a.comments.length} comment${a.comments.length === 1 ? '' : 's'}">💬 ${a.comments.length}</span>` : ''}
       </div>`;
     card.addEventListener('click', (e) => {
+      if (e.target.closest('[data-action="overflow"]')) {
+        e.stopPropagation();
+        const r = e.target.getBoundingClientRect();
+        showContextMenu(r.left, r.bottom + 4, actionContextItems(a));
+        return;
+      }
       if (card._suppressClick) { card._suppressClick = false; return; }
       openDrawer(a.id);
     });
@@ -7400,7 +7436,13 @@
       <div class="field"><label>Depends on <span class="muted">— actions that must finish before this one</span></label>
         <div class="depends-input" id="dDependsWrap"></div>
       </div>
+      <div class="field"><label>Tags</label>
+        <div class="tags-input" id="dTagsWrap"></div>
+      </div>
       <div class="field"><label>Notes / justification</label><textarea id="dNotes">${escapeHTML(a.notes || '')}</textarea></div>
+      <div class="field"><label>Comments</label>
+        <div class="comments" id="dComments"></div>
+      </div>
       <div class="field"><label>History</label>
         <div class="history">${(a.history || []).slice(-10).reverse().map((h) => `<div class="history-item"><b>${h.at}</b> — ${escapeHTML(h.what)}</div>`).join('')}</div>
       </div>
@@ -7501,6 +7543,154 @@
     }
     renderDepsUI();
 
+    // Phase G — tags multi-select. Tags are project-scoped; new tags are
+    // appended to proj.tags. Removing a chip just removes the id from the
+    // record's tags array (does not delete the project tag).
+    const drawerTags = Array.isArray(a.tags) ? a.tags.slice() : [];
+    function renderTagsUI() {
+      const wrap = $('#dTagsWrap');
+      const projTags = proj.tags || [];
+      const byId = new Map(projTags.map((t) => [t.id, t]));
+      const remaining = projTags.filter((t) => !drawerTags.includes(t.id));
+      wrap.innerHTML = `
+        <div class="tags-chips">
+          ${drawerTags.map((id) => {
+            const t = byId.get(id);
+            if (!t) return '';
+            const rgb = t.rgb || '120, 120, 140';
+            return `<span class="dep-chip tag-chip-edit" data-id="${escapeHTML(id)}" style="background:rgba(${rgb},.18);color:rgb(${rgb});border:1px solid rgba(${rgb},.40)">
+              <span class="dep-chip-text">${escapeHTML(t.name)}</span>
+              <button type="button" class="dep-chip-x" data-action="remove-tag" title="Remove">×</button>
+            </span>`;
+          }).join('')}
+        </div>
+        <div class="depends-search">
+          <input type="text" id="dTagSearch" placeholder="${remaining.length || drawerTags.length ? 'Type to search or create…' : 'Type a name to create your first tag…'}" autocomplete="off" />
+          <div class="depends-results" id="dTagResults" hidden></div>
+        </div>`;
+      wrap.querySelectorAll('[data-action="remove-tag"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.closest('.tag-chip-edit')?.dataset.id;
+          const idx = drawerTags.indexOf(id);
+          if (idx >= 0) drawerTags.splice(idx, 1);
+          renderTagsUI();
+        });
+      });
+      const inp = $('#dTagSearch');
+      const results = $('#dTagResults');
+      const updateResults = () => {
+        const q = inp.value.trim();
+        const candidates = (proj.tags || []).filter((t) => !drawerTags.includes(t.id));
+        const ranked = q
+          ? candidates.map((t) => ({ t, s: fuzzyScore(q, t.name) })).filter((r) => r.s > 0).sort((p, q2) => q2.s - p.s)
+          : candidates.slice(0, 8).map((t) => ({ t, s: 0 }));
+        const list = ranked.slice(0, 8);
+        const exact = q && (proj.tags || []).find((t) => t.name.toLowerCase() === q.toLowerCase());
+        const canCreate = q && !exact;
+        let html = list.map((r) => {
+          const rgb = r.t.rgb || '120, 120, 140';
+          return `<div class="depends-result tag-result" data-id="${escapeHTML(r.t.id)}">
+            <span class="tag-color-dot" style="background:rgb(${rgb})"></span>
+            <span class="depends-result-title">${escapeHTML(r.t.name)}</span>
+          </div>`;
+        }).join('');
+        if (canCreate) {
+          html += `<div class="depends-result tag-create" data-create="${escapeHTML(q)}">
+            <span class="tag-color-dot" style="background:rgb(${TAG_PALETTE[(proj.tags || []).length % TAG_PALETTE.length]})"></span>
+            <span class="depends-result-title">+ Create "<b>${escapeHTML(q)}</b>"</span>
+          </div>`;
+        }
+        if (!list.length && !canCreate) {
+          html = '<div class="depends-empty">Type a name to create a new tag.</div>';
+        }
+        results.innerHTML = html;
+        results.hidden = false;
+        results.querySelectorAll('.tag-result').forEach((row) => {
+          row.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const id = row.dataset.id;
+            if (!drawerTags.includes(id)) drawerTags.push(id);
+            inp.value = '';
+            renderTagsUI();
+            setTimeout(() => $('#dTagSearch')?.focus(), 0);
+          });
+        });
+        results.querySelector('.tag-create')?.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const name = e.currentTarget.dataset.create;
+          const t = { id: uid('tg'), name, rgb: TAG_PALETTE[(proj.tags || []).length % TAG_PALETTE.length] };
+          proj.tags = proj.tags || [];
+          proj.tags.push(t);
+          drawerTags.push(t.id);
+          inp.value = '';
+          renderTagsUI();
+          setTimeout(() => $('#dTagSearch')?.focus(), 0);
+        });
+      };
+      inp.addEventListener('focus', updateResults);
+      inp.addEventListener('input', updateResults);
+      inp.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 120));
+    }
+    renderTagsUI();
+
+    // Phase G — comments thread. Local working list; mutations are persisted
+    // immediately on Post (independent of Save) so a user typing a long
+    // comment doesn't lose it if they hit Cancel on the rest.
+    function renderCommentsUI() {
+      const wrap = $('#dComments');
+      const items = (a.comments || []).slice().sort((x, y) => (x.at || '').localeCompare(y.at || ''));
+      wrap.innerHTML = `
+        <div class="comments-list">
+          ${items.length ? items.map((c) => {
+            const author = personName(c.by) || (c.by ? c.by : 'someone');
+            const when = c.at ? c.at.replace('T', ' ').slice(0, 16) : '';
+            return `<div class="comment-row" data-comment-id="${escapeHTML(c.id)}">
+              <div class="comment-head">
+                <span class="comment-author">${escapeHTML(author)}</span>
+                <span class="comment-when">${escapeHTML(when)}</span>
+                <button class="comment-del" data-action="del-comment" title="Delete comment">×</button>
+              </div>
+              <div class="comment-text">${escapeHTML(c.text)}</div>
+            </div>`;
+          }).join('') : '<div class="comments-empty">No comments yet.</div>'}
+        </div>
+        <div class="comment-compose">
+          <textarea id="dCommentNew" placeholder="Add a comment…" rows="2"></textarea>
+          <button class="ghost" id="dCommentPost" disabled>Post</button>
+        </div>`;
+      wrap.querySelectorAll('[data-action="del-comment"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.closest('[data-comment-id]')?.dataset.commentId;
+          if (!id) return;
+          if (!confirm('Delete this comment?')) return;
+          a.comments = (a.comments || []).filter((c) => c.id !== id);
+          a.updatedAt = todayISO();
+          commit('comment-delete');
+          // Re-render the drawer so the comment thread updates immediately
+          // without re-opening, but other drawer fields keep their state.
+          renderCommentsUI();
+        });
+      });
+      const ta = $('#dCommentNew');
+      const post = $('#dCommentPost');
+      ta?.addEventListener('input', () => { post.disabled = !ta.value.trim(); });
+      post?.addEventListener('click', () => {
+        const text = ta.value.trim();
+        if (!text) return;
+        a.comments = a.comments || [];
+        a.comments.push({
+          id: uid('cm'),
+          by: state.settings?.localUser || null,
+          at: new Date().toISOString(),
+          text,
+        });
+        a.updatedAt = todayISO();
+        commit('comment-add');
+        renderCommentsUI();
+      });
+    }
+    renderCommentsUI();
+
     $('#dSave').addEventListener('click', () => {
       const oldStatus = a.status;
       const oldOwner = a.owner;
@@ -7528,6 +7718,10 @@
       a.dependsOn = drawerDeps.slice();
       const depsChanged = oldDeps.length !== a.dependsOn.length || oldDeps.some((d, i) => d !== a.dependsOn[i]);
       if (depsChanged) a.history.push({ at: todayISO(), what: `Dependencies: ${oldDeps.length} → ${a.dependsOn.length}` });
+      const oldTags = Array.isArray(a.tags) ? a.tags.slice() : [];
+      a.tags = drawerTags.slice();
+      const tagsChanged = oldTags.length !== a.tags.length || oldTags.some((t, i) => t !== a.tags[i]);
+      if (tagsChanged) a.history.push({ at: todayISO(), what: `Tags: ${oldTags.length} → ${a.tags.length}` });
       a.notes = $('#dNotes').value;
       a.updatedAt = todayISO();
       if (oldStatus !== a.status) a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${a.status}` });

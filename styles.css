@@ -641,6 +641,121 @@ input, select, textarea { font: inherit; color: inherit; }
   box-shadow: 0 0 0 2px rgba(248,113,113,.18);
 }
 
+/* Phase G — tags + comments + … overflow button */
+.tag-chip {
+  display: inline-flex; align-items: center;
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  white-space: nowrap;
+}
+.tags-chips {
+  display: flex; flex-wrap: wrap; gap: 5px;
+  min-height: 0;
+}
+.tag-color-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+}
+.tag-result {
+  display: flex; align-items: center; gap: 8px;
+}
+.tag-create {
+  display: flex; align-items: center; gap: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.tag.has-comments {
+  background: rgba(110, 168, 255, .12);
+  color: var(--accent);
+  border: 1px solid rgba(110, 168, 255, .35);
+}
+
+/* Drawer comments thread */
+.comments {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.comments-list { display: flex; flex-direction: column; gap: 6px; }
+.comments-empty { color: var(--text-faint); font-size: 12px; font-style: italic; }
+.comment-row {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.comment-head {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 4px;
+}
+.comment-author { color: var(--text-dim); font-weight: 600; }
+.comment-when { color: var(--text-faint); }
+.comment-del {
+  margin-left: auto;
+  background: transparent; border: 0;
+  color: var(--text-faint);
+  font-size: 14px; line-height: 1;
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition), background var(--transition);
+}
+.comment-row:hover .comment-del { opacity: 1; }
+.comment-del:hover { background: var(--bg-3); color: var(--text); }
+.comment-text {
+  font-size: 12.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+.comment-compose { display: flex; gap: 8px; align-items: stretch; }
+.comment-compose textarea {
+  flex: 1;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 38px;
+}
+.comment-compose textarea:focus { outline: none; border-color: var(--accent); }
+.comment-compose button {
+  align-self: stretch;
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* … overflow button on rows / cards */
+.row-overflow {
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 22px; height: 22px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-faint);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition), background var(--transition), color var(--transition);
+  z-index: 2;
+}
+.card { position: relative; }
+.card:hover .row-overflow { opacity: .7; }
+.row-overflow:hover { opacity: 1 !important; background: var(--bg-3); color: var(--text); }
+
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   width: 100%;
