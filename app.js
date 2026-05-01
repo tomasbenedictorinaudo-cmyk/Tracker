@@ -2911,7 +2911,7 @@
     view.innerHTML = `
       <div class="page-head">
         <div>
-          <div class="page-title">${escapeHTML(proj.name)} — Timeline</div>
+          <div class="page-title">${escapeHTML(proj.name)} — Gantt</div>
           <div class="page-sub">Drag bar body to shift • Drag edges to resize • Drag vertically to reassign • Double-click empty space to create</div>
         </div>
         <div class="page-actions">
@@ -4321,7 +4321,7 @@
     candidates.sort((x, y) => (y.hist.length - x.hist.length) || (x.a.due.localeCompare(y.a.due)));
     const top = candidates.slice(0, 12);
     if (!top.length) {
-      return `<div class="empty">No scheduled actions yet — add some, then dragging them on the Timeline will populate this chart over time.</div>`;
+      return `<div class="empty">No scheduled actions yet — add some, then dragging them on the Gantt will populate this chart over time.</div>`;
     }
 
     // Domain: x = snapshot dates from earliest 'at' to today
@@ -12337,7 +12337,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       target: '#sidebar .nav, .sidebar nav',
       side: 'right',
       title: 'Navigate the project',
-      body: 'Switch views from here — Board, Register, Timeline, Calendar, Reports, plus engineering side-views like Risks and Change Requests.',
+      body: 'Switch views from here — Board, Register, Gantt, Calendar, Reports, plus engineering side-views like Risks and Change Requests.',
     },
     {
       target: '#btnQuickAdd',
