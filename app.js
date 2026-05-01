@@ -11207,9 +11207,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const todayD = parseDate(todayISO_);
     const z = TL_ZOOM_PROFILES[calState.tlZoom] || TL_ZOOM_PROFILES.day;
 
-    // Anchor: a Monday near the visible window so ticks land cleanly.
-    // Lead the window with ~30% behind the anchor month so the user starts
-    // with some history visible to the left of today.
+    // Anchor near a Monday so axis ticks land cleanly. Lead the window
+    // with ~30% behind the anchor month so a bit of history is visible.
     const anchor = new Date(todayD.getFullYear(), todayD.getMonth() + calState.monthOffset, 1);
     let windowStart = new Date(anchor.getTime() - Math.floor(z.windowDays * 0.3) * dayMs);
     while (windowStart.getDay() !== 1) windowStart = new Date(windowStart.getTime() - dayMs);
@@ -11218,19 +11217,15 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const totalPx = Math.round(totalDays * z.pxPerDay);
     const startISO = fmtISO(windowStart);
     const endISO   = fmtISO(windowEnd);
-
-    // Day → x-pixel offset
     const xFor = (iso) => Math.round((parseDate(iso).getTime() - windowStart.getTime()) / dayMs * z.pxPerDay);
-    const minChipPx = Math.max(20, Math.round(z.pxPerDay));
 
     // Build items for the visible window
     const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
     const filtered = allItems.filter((it) => calState.visible[it.kind] !== false);
-    // Drop milestone middle/end positions — start chip's width covers the range.
+    // Drop milestone middle/end positions — the start chip's width covers
+    // the range as one continuous bar.
     const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
 
-    // Per-event start/end ISO. For ranged milestones, look up the matching
-    // 'end' position to derive the bar's end date.
     function endIsoFor(it) {
       if (it.kind === 'milestone' && it.rangePos === 'start') {
         const same = filtered.filter((x) => x.kind === 'milestone' && x.label === it.label && x.date >= it.date);
@@ -11239,52 +11234,93 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       return it.date;
     }
 
-    // Build per-lane structure
-    const laneOrder  = ['milestone', 'deliverable', 'action', 'meeting', 'cr'];
-    const laneLabels = { milestone: 'Milestones', deliverable: 'Deliverables', action: 'Actions', meeting: 'Meetings', cr: 'CRs' };
-    const laneIcons  = { milestone: '◇', deliverable: '◆', action: '☐', meeting: '⊕', cr: '⇆' };
-    const lanes = laneOrder
-      .filter((k) => calState.visible[k] !== false)
-      .map((k) => ({ kind: k, items: [] }));
-    const laneByKind = Object.fromEntries(lanes.map((l) => [l.kind, l]));
+    // ---- Layout: split events into RANGE bars (sit on the axis) and POINT
+    // markers (cards alternating above/below the axis with a stem). ----
+    const CARD_W_HINT = 150;     // typical card width — used for collision packing
+    const CARD_H = 36;           // card body height
+    const STEM_H = 16;           // stem from card to axis
+    const CARD_GAP = 6;          // vertical gap between rows of cards on same side
+    const ROW_H = CARD_H + STEM_H + CARD_GAP;
+    const RANGE_H = 22;          // a range bar's height
+    const RANGE_GAP = 4;
+    const AXIS_GAP = 14;         // breathing room around the axis line
+    const AXIS_LABEL_H = 22;     // tick-label area below the axis line
+
+    const ranges = [];
+    const points = [];
     items.forEach((it) => {
-      const lane = laneByKind[it.kind];
-      if (!lane) return;
       const startIso = it.date;
       const endIso   = endIsoFor(it);
       const left  = xFor(startIso);
-      const span  = (parseDate(endIso).getTime() - parseDate(startIso).getTime()) / dayMs + 1;
-      const width = Math.max(minChipPx, Math.round(span * z.pxPerDay));
-      lane.items.push({ ...it, _start: startIso, _end: endIso, _left: left, _width: width });
+      const isRange = it.kind === 'milestone' && it.rangePos === 'start' && endIso > startIso;
+      if (isRange) {
+        const span = (parseDate(endIso).getTime() - parseDate(startIso).getTime()) / dayMs + 1;
+        const width = Math.max(40, Math.round(span * z.pxPerDay));
+        ranges.push({ ...it, _start: startIso, _end: endIso, _left: left, _width: width });
+      } else {
+        // Point card: width is the typical card width (used for overlap
+        // detection only; actual chip width is set by content).
+        points.push({ ...it, _start: startIso, _end: endIso, _left: left, _width: CARD_W_HINT });
+      }
     });
 
-    // Greedy packing per lane: place each chip in the topmost sub-row
-    // where it doesn't overlap (left/width) any earlier chip. 4-px gap
-    // between adjacent chips so they don't kiss.
-    lanes.forEach((lane) => {
-      lane.items.sort((a, b) => a._left - b._left);
-      const rowMaxRight = []; // rowMaxRight[i] = max right edge of items already in row i
-      lane.items.forEach((it) => {
-        const right = it._left + it._width;
-        let placed = -1;
-        for (let i = 0; i < rowMaxRight.length; i++) {
-          if (rowMaxRight[i] + 4 <= it._left) {
-            rowMaxRight[i] = right;
-            placed = i;
-            break;
-          }
-        }
-        if (placed < 0) {
-          placed = rowMaxRight.length;
-          rowMaxRight.push(right);
-        }
-        it._row = placed;
-      });
-      lane.rowCount = Math.max(1, rowMaxRight.length);
+    // Pack ranges into rows above the axis (greedy, by left).
+    ranges.sort((a, b) => a._left - b._left);
+    const rangeRowMaxRight = [];
+    ranges.forEach((it) => {
+      const right = it._left + it._width;
+      let placed = -1;
+      for (let i = 0; i < rangeRowMaxRight.length; i++) {
+        if (rangeRowMaxRight[i] + 4 <= it._left) { rangeRowMaxRight[i] = right; placed = i; break; }
+      }
+      if (placed < 0) { placed = rangeRowMaxRight.length; rangeRowMaxRight.push(right); }
+      it._row = placed;
     });
+    const rangeRowCount = rangeRowMaxRight.length;
 
-    // Tick generation — strict per-zoom granularity.
-    const ticks = []; // { x, label, major }
+    // Pack points alternating above/below the axis. Each side has its own
+    // greedy row stack; events alternate sides on insertion (sorted by left)
+    // so adjacent overlapping events naturally split between top + bottom.
+    points.sort((a, b) => a._left - b._left);
+    const aboveRowMaxRight = [];
+    const belowRowMaxRight = [];
+    let nextSide = 'above';
+    points.forEach((it) => {
+      const rows = nextSide === 'above' ? aboveRowMaxRight : belowRowMaxRight;
+      const right = it._left + it._width;
+      let placed = -1;
+      for (let i = 0; i < rows.length; i++) {
+        if (rows[i] + 6 <= it._left) { rows[i] = right; placed = i; break; }
+      }
+      if (placed < 0) { placed = rows.length; rows.push(right); }
+      it._side = nextSide;
+      it._row = placed;
+      nextSide = (nextSide === 'above' ? 'below' : 'above');
+    });
+    const aboveRowCount = aboveRowMaxRight.length;
+    const belowRowCount = belowRowMaxRight.length;
+
+    // ---- Vertical layout coordinates ----
+    const aboveBlockH = aboveRowCount * ROW_H + (aboveRowCount ? AXIS_GAP : 0);
+    const rangeBlockH = rangeRowCount * (RANGE_H + RANGE_GAP);
+    const axisLineY = aboveBlockH + rangeBlockH + AXIS_GAP / 2;
+    const axisBlockH = AXIS_GAP + AXIS_LABEL_H;
+    const belowBlockH = belowRowCount * ROW_H + (belowRowCount ? AXIS_GAP : 0);
+    const stageH = Math.max(160, aboveBlockH + rangeBlockH + axisBlockH + belowBlockH);
+
+    // Card top for a packed event:
+    //   above: row 0 sits closest to the axis (just above the range bars).
+    //   below: row 0 sits closest to the axis (just under the labels).
+    function cardTopAbove(row) {
+      // axis at axisLineY; cards above it. row 0 closest.
+      return aboveBlockH - (row + 1) * ROW_H + CARD_GAP;
+    }
+    function cardTopBelow(row) {
+      return aboveBlockH + rangeBlockH + axisBlockH + row * ROW_H;
+    }
+
+    // Tick generation — strict per-zoom granularity (Day / Week / Month).
+    const ticks = [];
     if (calState.tlZoom === 'day') {
       for (let d = 0; d < totalDays; d++) {
         const dt = new Date(windowStart.getTime() + d * dayMs);
@@ -11297,20 +11333,18 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         ticks.push({ x, label, major: isMon || isFirst });
       }
     } else if (calState.tlZoom === 'week') {
-      // Tick at every Monday in the window
       let d = new Date(windowStart);
       while (d <= windowEnd) {
         const offset = Math.round((d.getTime() - windowStart.getTime()) / dayMs);
         const x = Math.round(offset * z.pxPerDay);
-        const isFirst = d.getDate() <= 7; // first Monday of month region
+        const isFirst = d.getDate() <= 7;
         const label = isFirst
           ? d.toLocaleDateString(undefined, { month: 'short' })
           : `W${isoWeekNumber(d)}`;
         ticks.push({ x, label, major: isFirst });
         d = new Date(d.getTime() + 7 * dayMs);
       }
-    } else { // 'month'
-      // Tick at every 1st of month within the window
+    } else {
       let cur = new Date(windowStart.getFullYear(), windowStart.getMonth(), 1);
       if (cur < windowStart) cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
       while (cur <= windowEnd) {
@@ -11325,28 +11359,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       }
     }
 
-    // Today line position
     const todayX = (todayISO_ >= startISO && todayISO_ <= endISO) ? xFor(todayISO_) : null;
 
-    // SVG arrow axis. Slight overshoot (12 px) so the arrowhead isn't clipped.
-    const axisOvershoot = 12;
-    const axisW = totalPx + axisOvershoot;
-    const axisHTML = `
-      <svg class="tl-axis-svg" width="${axisW}" height="42" viewBox="0 0 ${axisW} 42" preserveAspectRatio="none" aria-hidden="true">
-        <line x1="0" y1="14" x2="${totalPx}" y2="14" class="tl-axis-line"/>
-        <polygon points="${totalPx},9 ${axisW},14 ${totalPx},19" class="tl-axis-arrow"/>
-        ${ticks.map((t) => `
-          <line x1="${t.x}" y1="${t.major ? 8 : 11}" x2="${t.x}" y2="${t.major ? 20 : 17}" class="tl-axis-tick ${t.major ? 'major' : ''}"/>
-          ${t.label ? `<text x="${t.x + 3}" y="32" class="tl-axis-label ${t.major ? 'major' : ''}">${escapeHTML(t.label)}</text>` : ''}
-        `).join('')}
-        ${todayX != null ? `<line x1="${todayX}" y1="0" x2="${todayX}" y2="42" class="tl-today-tick"/>` : ''}
-      </svg>`;
-
-    // Click resolution: V2 builds its own item set with its own window
-    // (zoom-dependent), so we maintain a small map from a unique chip
-    // key to the item's run() callback. The outer click handler reads
-    // this map by key — independent of any byDate or filtered-list state
-    // outside V2.
+    // Run-callback resolution
     calState._tlRunMap = new Map();
     let _tlRunCounter = 0;
     function runKey(it) {
@@ -11355,52 +11370,89 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       return k;
     }
 
-    // Render lanes — chips placed absolutely with row-based vertical packing.
-    const ROW_PX = 26;     // chip + gap height per sub-row
-    const ROW_PAD = 6;     // top padding inside lane
-    function renderLaneV2(lane) {
-      const laneH = ROW_PAD * 2 + lane.rowCount * ROW_PX;
-      const chipsHTML = lane.items.map((it) => {
-        const top = ROW_PAD + it._row * ROW_PX;
-        const tintStyle = it.tint ? `--cal-chip-tint:${it.tint};` : '';
-        const tintCls = it.tint ? ' has-tint' : '';
-        const rangeCls = it.rangePos ? ` is-${it.rangePos}` : '';
-        return `
-          <button class="tl-chip cal-chip-${it.tone} kind-${it.kind}${rangeCls}${tintCls}"
-                  style="left:${it._left}px;width:${it._width}px;top:${top}px;${tintStyle}"
-                  data-tl-run-key="${runKey(it)}"
-                  title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
-            <span class="cal-chip-icon" aria-hidden="true">${escapeHTML(it.icon || '·')}</span>
-            <span class="cal-chip-label">${escapeHTML(it.label)}</span>
-          </button>`;
-      }).join('');
-      const empty = !lane.items.length ? '<div class="tl-lane-empty">— none</div>' : '';
+    // ---- SVG axis: arrow line + ticks + labels ----
+    const axisOvershoot = 14;
+    const axisW = totalPx + axisOvershoot;
+    const axisSVG = `
+      <svg class="tl-axis-svg" width="${axisW}" height="${axisBlockH}" viewBox="0 0 ${axisW} ${axisBlockH}" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" y1="${AXIS_GAP / 2}" x2="${totalPx}" y2="${AXIS_GAP / 2}" class="tl-axis-line"/>
+        <polygon points="${totalPx},${AXIS_GAP / 2 - 5} ${axisW},${AXIS_GAP / 2} ${totalPx},${AXIS_GAP / 2 + 5}" class="tl-axis-arrow"/>
+        ${ticks.map((t) => `
+          <line x1="${t.x}" y1="${t.major ? AXIS_GAP / 2 - 6 : AXIS_GAP / 2 - 3}" x2="${t.x}" y2="${t.major ? AXIS_GAP / 2 + 6 : AXIS_GAP / 2 + 3}" class="tl-axis-tick ${t.major ? 'major' : ''}"/>
+          ${t.label ? `<text x="${t.x + 3}" y="${AXIS_GAP + 12}" class="tl-axis-label ${t.major ? 'major' : ''}">${escapeHTML(t.label)}</text>` : ''}
+        `).join('')}
+      </svg>`;
+
+    // ---- Range bars (phase-arrow style on the axis) ----
+    const rangeBarsHTML = ranges.map((it) => {
+      const top = aboveBlockH + it._row * (RANGE_H + RANGE_GAP);
+      const tintStyle = it.tint ? `--cal-chip-tint:${it.tint};` : '';
+      const tintCls = it.tint ? ' has-tint' : '';
       return `
-        <div class="tl-lane">
-          <div class="tl-lane-label">
-            <span class="cal-chip-icon kind-${lane.kind}">${laneIcons[lane.kind]}</span>
-            ${escapeHTML(laneLabels[lane.kind])}
-          </div>
-          <div class="tl-lane-track" style="width:${totalPx}px;height:${laneH}px;">
-            ${chipsHTML}
-            ${empty}
-            ${todayX != null ? `<div class="tl-today-line" style="left:${todayX}px;"></div>` : ''}
-          </div>
-        </div>`;
+        <button class="tl-range-bar kind-${it.kind}${tintCls}"
+                style="left:${it._left}px;top:${top}px;width:${it._width}px;height:${RANGE_H}px;${tintStyle}"
+                data-tl-run-key="${runKey(it)}"
+                title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+          <span class="tl-range-icon">${escapeHTML(it.icon || '◇')}</span>
+          <span class="tl-range-label">${escapeHTML(it.label)}</span>
+        </button>`;
+    }).join('');
+
+    // ---- Point markers (above/below alternating) ----
+    function markerHTML(it) {
+      const isAbove = it._side === 'above';
+      const cardTop = isAbove ? cardTopAbove(it._row) : cardTopBelow(it._row);
+      // Stem: from the card to the axis line
+      const stemTop    = isAbove ? cardTop + CARD_H : axisLineY;
+      const stemHeight = isAbove ? (axisLineY - (cardTop + CARD_H)) : (cardTop - axisLineY);
+      const dotTop = axisLineY - 4; // dot 8px tall, centered on axis
+      const tintStyle = it.tint ? `--cal-chip-tint:${it.tint};` : '';
+      const tintCls = it.tint ? ' has-tint' : '';
+      const sideCls = isAbove ? ' is-above' : ' is-below';
+      // Date label format for the card sub
+      const dateLabel = (() => {
+        try { return parseDate(it.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch (e) { return it.date || ''; }
+      })();
+      return `
+        <button class="tl-marker kind-${it.kind}${tintCls}${sideCls}"
+                style="left:${it._left}px;${tintStyle}"
+                data-tl-run-key="${runKey(it)}"
+                title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+          <span class="tl-marker-card" style="top:${cardTop}px;">
+            <span class="tl-marker-icon">${escapeHTML(it.icon || '·')}</span>
+            <span class="tl-marker-text">
+              <span class="tl-marker-label">${escapeHTML(it.label)}</span>
+              <span class="tl-marker-date">${escapeHTML(dateLabel)}</span>
+            </span>
+          </span>
+          <span class="tl-marker-stem" style="top:${stemTop}px;height:${Math.max(0, stemHeight)}px;"></span>
+          <span class="tl-marker-dot" style="top:${dotTop}px;"></span>
+        </button>`;
     }
+    const pointsHTML = points.map(markerHTML).join('');
+
+    // ---- Today vertical line ----
+    const todayLineHTML = todayX != null
+      ? `<div class="tl-today-line" style="left:${todayX}px;height:${stageH}px;"></div>`
+      : '';
+
+    // ---- Empty hint ----
+    const emptyHTML = (!ranges.length && !points.length)
+      ? `<div class="tl-empty">No events in the visible window — scroll, drag, or zoom out to find some.</div>`
+      : '';
 
     return `
       <div class="cal-timeline">
         <div class="tl-scroll">
-          <div class="tl-axis-row">
-            <div class="tl-lane-label tl-axis-spacer">
-              <div class="tl-axis-zoom-hint">${calState.tlZoom === 'day' ? 'days' : calState.tlZoom === 'week' ? 'weeks' : 'months'}</div>
+          <div class="tl-stage" style="width:${axisW}px;height:${stageH}px;">
+            ${todayLineHTML}
+            ${rangeBarsHTML}
+            <div class="tl-axis-host" style="top:${aboveBlockH + rangeBlockH}px;width:${axisW}px;">
+              ${axisSVG}
             </div>
-            <div class="tl-axis-track" style="width:${axisW}px;">
-              ${axisHTML}
-            </div>
+            ${pointsHTML}
+            ${emptyHTML}
           </div>
-          ${lanes.map(renderLaneV2).join('')}
         </div>
       </div>`;
   }
