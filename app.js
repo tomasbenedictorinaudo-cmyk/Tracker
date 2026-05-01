@@ -5170,6 +5170,12 @@
               <input id="mtgEndDate" type="date" value="${m.endDate || ''}" />
             </div>
           </div>
+          <div class="field"><label>Component <span class="muted">— optional</span></label>
+            <select id="mtgComp">
+              <option value="">— None</option>
+              ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === m.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
+            </select>
+          </div>
         </div>
         <div class="desc-foot">
           <button class="ghost" id="mtgCancel">Cancel</button>
@@ -5213,6 +5219,7 @@
       const isRepeating = repeatChk.checked;
       m.title = title;
       m.time = time;
+      m.component = overlay.querySelector('#mtgComp').value || null;
       if (!isRepeating) {
         m.kind = 'oneoff';
         m.date = date;
@@ -8359,6 +8366,12 @@
             <label>Ends <span class="muted">— optional</span></label>
             <input id="qEndDate" type="date" />
           </div>
+        </div>
+        <div class="field"><label>Component <span class="muted">— optional</span></label>
+          <select id="qComp">
+            <option value="">— None</option>
+            ${(proj.components || []).map((cmp) => `<option value="${cmp.id}">${escapeHTML(cmp.name)}</option>`).join('')}
+          </select>
         </div>`;
       const repeatChk = body.querySelector('#qMtRepeats');
       const recurWrap = body.querySelector('#qMtRecurWrap');
@@ -8522,7 +8535,8 @@
       const repeating = !!$('#qMtRepeats')?.checked;
       const date = $('#qDate').value || todayISO();
       const time = $('#qTime').value || null;
-      const m = { id: uid('mtg'), title, time, endDate: null };
+      const component = $('#qComp')?.value || null;
+      const m = { id: uid('mtg'), title, time, endDate: null, component };
       if (!repeating) {
         m.kind = 'oneoff';
         m.date = date;
@@ -9518,6 +9532,7 @@
           }
         }
         if (m.endDate === undefined) m.endDate = null;
+        if (m.component === undefined) m.component = null;
       });
 
       p.openPoints.forEach((op) => {
@@ -10782,6 +10797,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   const calState = {
     monthOffset: 0, // 0 = current month, -1 = previous, +1 = next
     keyWired: false,
+    // Per-kind visibility filters. The legend doubles as the filter
+    // strip: clicking a pill toggles its kind on/off. Persists across
+    // month navigation but resets on reload (intentional — fresh
+    // sessions start with everything shown).
+    visible: { action: true, deliverable: true, milestone: true, cr: true, meeting: true },
   };
   function calendarMonthBounds() {
     const today = new Date();
@@ -10883,15 +10903,23 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const dates = expandMeetingDates(m, gridStartISO, gridEndISO);
       if (!dates.length) return;
       const baseLabel = meetingRecurrenceLabel(m);
+      const cmp = m.component ? findComponent(proj, m.component) : null;
+      const cmpRgb = cmp ? componentColor(cmp.color)?.rgb : null;
       const subBase = m.time ? `${baseLabel} · ${m.time}` : baseLabel;
+      const subWithComponent = cmp ? `${subBase} · ${cmp.name}` : subBase;
       dates.forEach((iso) => {
         items.push({
           date: iso,
           kind: 'meeting',
           tone: 'meeting',
           label: m.title,
-          sub: subBase,
+          sub: subWithComponent,
           icon: '⊕',
+          // When a component is set, the chip's icon + label pick up the
+          // component's colour so meetings cluster visually with their
+          // related work area. Stored on the item so the chip renderer
+          // can apply it inline alongside the existing tone class.
+          tint: cmpRgb,
           run: () => openMeetingEditor(m.id),
         });
       });
@@ -10918,12 +10946,20 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const { year, month, monthLabel, cells } = calendarMonthBounds();
     const gridStartISO = fmtISO(cells[0]);
     const gridEndISO   = fmtISO(cells[cells.length - 1]);
-    const items = buildCalendarItems(proj, year, month, gridStartISO, gridEndISO);
+    const allItems = buildCalendarItems(proj, year, month, gridStartISO, gridEndISO);
+    // Apply per-kind visibility filters (driven by the interactive legend
+    // below). buildCalendarItems still returns everything so the toggle
+    // state can flip without rebuilding the source data.
+    const items = allItems.filter((it) => calState.visible[it.kind] !== false);
     const byDate = new Map();
     items.forEach((it) => {
       if (!byDate.has(it.date)) byDate.set(it.date, []);
       byDate.get(it.date).push(it);
     });
+    // Per-kind counts for the legend (using the unfiltered set so users
+    // see the underlying total, not the post-filter count).
+    const kindCounts = { milestone: 0, deliverable: 0, action: 0, cr: 0, meeting: 0 };
+    allItems.forEach((it) => { if (it.kind in kindCounts) kindCounts[it.kind]++; });
 
     const todayISO_ = todayISO();
     const dayHeaders = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -10942,8 +10978,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         const icon = it.icon || '·';
         const rangeCls = it.kind === 'milestone' && it.rangePos
           ? ` is-${it.rangePos}` : '';
+        // Optional inline tint (currently used by component-tagged meetings)
+        const tintStyle = it.tint ? ` style="--cal-chip-tint: ${it.tint};"` : '';
+        const tintCls = it.tint ? ' has-tint' : '';
         return `
-          <button class="cal-chip cal-chip-${it.tone} kind-${it.kind}${rangeCls}" data-cell-idx="${i}" data-item-idx="${idx}" title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+          <button class="cal-chip cal-chip-${it.tone} kind-${it.kind}${rangeCls}${tintCls}" data-cell-idx="${i}" data-item-idx="${idx}" title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}"${tintStyle}>
             <span class="cal-chip-icon" aria-hidden="true">${escapeHTML(icon)}</span>
             <span class="cal-chip-label">${escapeHTML(it.label)}</span>
           </button>`;
@@ -10973,12 +11012,22 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           <button class="icon-btn" id="calNext" title="Next month (→)">›</button>
         </div>
       </div>
-      <div class="cal-legend" aria-hidden="true">
-        <span class="cal-legend-item"><span class="cal-chip-icon kind-milestone">◇</span> Milestone</span>
-        <span class="cal-legend-item"><span class="cal-chip-icon kind-deliverable">◆</span> Deliverable</span>
-        <span class="cal-legend-item"><span class="cal-chip-icon kind-action">☐</span> Action due <span class="cal-chip-icon kind-action" style="color:var(--text-faint);">☑</span> done</span>
-        <span class="cal-legend-item"><span class="cal-chip-icon kind-cr">⇆</span> CR decided</span>
-        <span class="cal-legend-item"><span class="cal-chip-icon kind-meeting">⊕</span> Meeting</span>
+      <div class="cal-legend" role="group" aria-label="Show / hide on calendar">
+        <button type="button" class="cal-legend-item ${calState.visible.milestone   ? 'on' : 'off'}" data-toggle-kind="milestone"   title="Show / hide milestones">
+          <span class="cal-chip-icon kind-milestone">◇</span> Milestones <span class="cal-legend-count">${kindCounts.milestone}</span>
+        </button>
+        <button type="button" class="cal-legend-item ${calState.visible.deliverable ? 'on' : 'off'}" data-toggle-kind="deliverable" title="Show / hide deliverables">
+          <span class="cal-chip-icon kind-deliverable">◆</span> Deliverables <span class="cal-legend-count">${kindCounts.deliverable}</span>
+        </button>
+        <button type="button" class="cal-legend-item ${calState.visible.action      ? 'on' : 'off'}" data-toggle-kind="action"      title="Show / hide actions">
+          <span class="cal-chip-icon kind-action">☐</span> Actions <span class="cal-legend-count">${kindCounts.action}</span>
+        </button>
+        <button type="button" class="cal-legend-item ${calState.visible.meeting     ? 'on' : 'off'}" data-toggle-kind="meeting"     title="Show / hide meetings">
+          <span class="cal-chip-icon kind-meeting">⊕</span> Meetings <span class="cal-legend-count">${kindCounts.meeting}</span>
+        </button>
+        <button type="button" class="cal-legend-item ${calState.visible.cr          ? 'on' : 'off'}" data-toggle-kind="cr"          title="Show / hide CR decisions">
+          <span class="cal-chip-icon kind-cr">⇆</span> CRs <span class="cal-legend-count">${kindCounts.cr}</span>
+        </button>
       </div>
       <div class="calendar">
         <div class="cal-head">
@@ -10994,6 +11043,15 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     $('#calAddMile').addEventListener('click', () => openQuickAdd('milestone'));
     $('#calAddDel').addEventListener('click', () => openQuickAdd('deliverable'));
     $('#calAddMtg').addEventListener('click', () => openQuickAdd('meeting'));
+
+    // Legend pills double as visibility filters
+    view.querySelectorAll('[data-toggle-kind]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const k = btn.dataset.toggleKind;
+        calState.visible[k] = !calState.visible[k];
+        render();
+      });
+    });
 
     // Per-chip click: dispatch to the item's run() callback. We store
     // (cell, item) indices on the button so the data closure stays simple.
