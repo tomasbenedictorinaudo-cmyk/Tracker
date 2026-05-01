@@ -3236,6 +3236,32 @@ input[type="date"].reg-inp {
   box-shadow: inset 3px 0 0 rgb(var(--prio-rgb));
 }
 
+/* Status overrides — mirror the board's treatment of done / cancelled
+   rows. Done cards on the board show a green (ok) left edge; here we
+   match that and additionally fade the row + strike through the title
+   so the row reads as 'past tense' even without a column to imply it.
+   Cancelled gets the board's stronger grey-out treatment. */
+.reg-row.is-done {
+  box-shadow: inset 3px 0 0 var(--ok);
+  opacity: .68;
+}
+.reg-row.is-done .title-inp {
+  text-decoration: line-through;
+  text-decoration-color: rgba(255,255,255,.4);
+  text-decoration-thickness: 1.5px;
+}
+.reg-row.is-done:hover { opacity: 1; }
+.reg-row.is-cancelled {
+  box-shadow: inset 3px 0 0 rgb(107,114,128);
+  opacity: .55;
+}
+.reg-row.is-cancelled .title-inp {
+  text-decoration: line-through;
+  text-decoration-color: rgba(255,255,255,.4);
+  text-decoration-thickness: 1.5px;
+}
+.reg-row.is-cancelled:hover { opacity: .85; }
+
 /* Lateness 'drag tail' — a small horizontal trail whose length scales
    with days late. Length encodes magnitude, the +Nd label gives the
    precise read. Capped at 30 days of width so a 90-day-late item

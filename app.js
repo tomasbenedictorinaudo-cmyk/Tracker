@@ -2568,8 +2568,10 @@
       const dragTail = isOverdue
         ? `<span class="reg-late-tail" style="--days:${Math.min(lateDays, 30)};" title="Late by ${lateDays} day${lateDays === 1 ? '' : 's'} · was due ${escapeHTML(fmtDate(a.due))}"><span class="reg-late-icon" aria-hidden="true">⏰</span><span class="reg-late-num">+${lateDays}d</span></span>`
         : '';
+      const isDone      = a.status === 'done';
+      const isCancelled = a.status === 'cancelled';
       return `
-        <div class="reg-row prio-${lvl.id} ${isOverdue ? 'is-overdue' : ''}" data-id="${a.id}"${tint}>
+        <div class="reg-row prio-${lvl.id} ${isOverdue ? 'is-overdue' : ''} ${isDone ? 'is-done' : ''} ${isCancelled ? 'is-cancelled' : ''}" data-id="${a.id}"${tint}>
           <div class="reg-cell title-cell">
             ${ROW_GRIP_HTML}
             <input type="text" class="reg-inp title-inp" data-field="title" value="${escapeHTML(a.title)}" />
