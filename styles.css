@@ -736,6 +736,109 @@ input, select, textarea { font: inherit; color: inherit; }
   font-size: 12px;
 }
 
+/* Phase K — light team-mode merge overlay */
+.merge-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.merge-modal {
+  width: 760px;
+  max-width: 92vw;
+  max-height: 88vh;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  display: flex; flex-direction: column;
+  box-shadow: 0 18px 48px rgba(0,0,0,.55);
+}
+.merge-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.merge-title { font-size: 14px; font-weight: 700; flex: 1; }
+.merge-body {
+  padding: 14px 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+.merge-section { margin-bottom: 14px; }
+.merge-section-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--text-faint);
+  margin-bottom: 6px;
+  display: flex; align-items: center; gap: 8px;
+}
+.merge-row { padding: 6px 0; }
+.merge-row.muted { color: var(--text-faint); font-size: 12px; font-style: italic; }
+.merge-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+.merge-tag-add      { background: rgba(52,211,153,.15); color: rgb(52,211,153); }
+.merge-tag-conflict { background: rgba(248,113,113,.15); color: var(--bad); }
+.merge-tag-keep     { background: var(--bg-3); color: var(--text-faint); }
+
+.merge-block { margin: 8px 0 12px; }
+.merge-block-head {
+  font-size: 12px; color: var(--text-dim);
+  margin-bottom: 4px;
+  display: flex; align-items: center; gap: 8px;
+  text-transform: capitalize;
+}
+.merge-conflicts { display: flex; flex-direction: column; gap: 6px; }
+.merge-conflict {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+}
+.merge-conflict-title {
+  font-size: 12px;
+  color: var(--text);
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+.merge-conflict-versions {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 6px;
+}
+.merge-version {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 8px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.merge-version:hover { border-color: var(--line-2); }
+.merge-version.sel { border-color: var(--accent); }
+.merge-version-label { display: flex; flex-direction: column; }
+.merge-version-when { font-size: 10px; color: var(--text-faint); }
+
+.merge-choice {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-right: 12px;
+  font-size: 12px;
+}
+.merge-foot {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+.merge-summary { color: var(--text-faint); font-size: 11px; flex: 1; }
+
 /* Phase I — person dashboard (rendered into the right-side drawer) */
 .dash-head {
   display: flex; gap: 14px; align-items: flex-start;

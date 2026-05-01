@@ -9483,6 +9483,257 @@
     input.click();
   }
 
+  /* ----------------------- Phase K: light merge ------------------------ */
+  // 2-way merge between local state ("mine") and a teammate's JSON
+  // ("theirs"). The diff is computed per record-kind by id; conflicts
+  // (same id, differing payload) get a per-row resolution UI. Records
+  // that exist on only one side default to 'include' so nothing is lost
+  // unless the user explicitly drops it.
+  function openMergeOverlay() {
+    const input = document.createElement('input');
+    input.type = 'file'; input.accept = 'application/json';
+    input.addEventListener('change', () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const obj = JSON.parse(reader.result);
+          if (!obj || !obj.projects || !obj.people) throw new Error('Not a Cockpit JSON');
+          delete obj.__schemaVersion; delete obj.__exportedAt; delete obj.__app;
+          const theirs = normalizeState(JSON.parse(JSON.stringify(obj)));
+          showMergeUI(state, theirs);
+        } catch (e) { toast('Merge failed: ' + e.message); }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  }
+  function recordKey(rec) { return rec.id || ''; }
+  function recordSig(rec) {
+    // Signature for change detection: stringify everything except edit
+    // metadata (so a re-stamp without value change doesn't count as a diff).
+    const { __lastEditor, __lastEditAt, ...rest } = rec || {};
+    return JSON.stringify(rest);
+  }
+  function diffArr(mineArr, theirsArr) {
+    const mineMap = new Map((mineArr || []).map((r) => [recordKey(r), r]));
+    const theirsMap = new Map((theirsArr || []).map((r) => [recordKey(r), r]));
+    const onlyMine = [], onlyTheirs = [], conflicts = [], same = [];
+    mineMap.forEach((m, id) => {
+      if (!theirsMap.has(id)) { onlyMine.push(m); return; }
+      const t = theirsMap.get(id);
+      if (recordSig(m) === recordSig(t)) same.push(m);
+      else conflicts.push({ id, mine: m, theirs: t });
+    });
+    theirsMap.forEach((t, id) => { if (!mineMap.has(id)) onlyTheirs.push(t); });
+    return { onlyMine, onlyTheirs, conflicts, same };
+  }
+  function showMergeUI(mine, theirs) {
+    // Build per-project diffs across actions / openPoints / changes /
+    // risks / decisions / deliverables / milestones / components / links.
+    const projDiffs = [];
+    const mineProj = new Map(mine.projects.map((p) => [p.id, p]));
+    const theirsProj = new Map(theirs.projects.map((p) => [p.id, p]));
+    const projIds = new Set([...mineProj.keys(), ...theirsProj.keys()]);
+    projIds.forEach((pid) => {
+      const m = mineProj.get(pid);
+      const t = theirsProj.get(pid);
+      if (!m && t) {
+        projDiffs.push({ pid, name: t.name, only: 'theirs', proj: t });
+        return;
+      }
+      if (m && !t) {
+        projDiffs.push({ pid, name: m.name, only: 'mine', proj: m });
+        return;
+      }
+      const arrays = ['actions', 'openPoints', 'changes', 'risks', 'decisions', 'deliverables', 'milestones', 'components', 'links', 'meetings'];
+      const perKind = {};
+      arrays.forEach((k) => { perKind[k] = diffArr(m[k] || [], t[k] || []); });
+      projDiffs.push({ pid, name: m.name, perKind });
+    });
+    // Resolution state: choices per record-key
+    const choices = {};
+    // Default: include only-theirs (auto-add new from teammate), keep
+    // only-mine (don't drop), conflicts default to 'mine'.
+    projDiffs.forEach((pd) => {
+      if (!pd.perKind) return;
+      Object.entries(pd.perKind).forEach(([kind, d]) => {
+        d.onlyTheirs.forEach((r) => { choices[`${pd.pid}:${kind}:${r.id}`] = 'include'; });
+        d.onlyMine.forEach((r)   => { choices[`${pd.pid}:${kind}:${r.id}`] = 'keep'; });
+        d.conflicts.forEach((c)  => {
+          // Tiebreaker: take whichever has the most-recent __lastEditAt
+          const mAt = c.mine.__lastEditAt || c.mine.updatedAt || '';
+          const tAt = c.theirs.__lastEditAt || c.theirs.updatedAt || '';
+          choices[`${pd.pid}:${kind}:${c.id}`] = (tAt > mAt) ? 'theirs' : 'mine';
+        });
+      });
+    });
+
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay merge-overlay';
+    overlay.innerHTML = `
+      <div class="merge-modal">
+        <div class="merge-head">
+          <div class="merge-title">Merge teammate's JSON</div>
+          <button class="icon-btn" id="mClose" title="Close">×</button>
+        </div>
+        <div class="merge-body" id="mBody"></div>
+        <div class="merge-foot">
+          <span class="merge-summary" id="mSummary"></span>
+          <button class="ghost" id="mCancel">Cancel</button>
+          <button class="primary" id="mApply">Apply merge</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    $('#mClose', overlay).addEventListener('click', close);
+    $('#mCancel', overlay).addEventListener('click', close);
+
+    function renderMergeBody() {
+      const body = $('#mBody', overlay);
+      let totalConflicts = 0, totalAdds = 0;
+      body.innerHTML = projDiffs.map((pd) => {
+        if (pd.only === 'theirs') {
+          totalAdds++;
+          return `<div class="merge-section">
+            <div class="merge-section-title">${escapeHTML(pd.name)} <span class="merge-tag merge-tag-add">new project</span></div>
+            <div class="merge-row">
+              <label class="merge-choice">
+                <input type="radio" name="proj-${escapeHTML(pd.pid)}" value="include" checked />
+                <span>Include teammate's project</span>
+              </label>
+              <label class="merge-choice">
+                <input type="radio" name="proj-${escapeHTML(pd.pid)}" value="skip" />
+                <span>Skip</span>
+              </label>
+            </div>
+          </div>`;
+        }
+        if (pd.only === 'mine') {
+          return `<div class="merge-section">
+            <div class="merge-section-title">${escapeHTML(pd.name)} <span class="merge-tag merge-tag-keep">only in yours</span></div>
+            <div class="merge-row muted">Project will remain as-is.</div>
+          </div>`;
+        }
+        const blocks = Object.entries(pd.perKind).map(([kind, d]) => {
+          const adds = d.onlyTheirs.length;
+          const conflicts = d.conflicts.length;
+          const onlyMineN = d.onlyMine.length;
+          totalAdds += adds;
+          totalConflicts += conflicts;
+          if (!adds && !conflicts && !onlyMineN) return '';
+          const summary = [
+            adds      ? `<span class="merge-tag merge-tag-add">+${adds} new</span>`     : '',
+            conflicts ? `<span class="merge-tag merge-tag-conflict">${conflicts} differ</span>` : '',
+            onlyMineN ? `<span class="merge-tag merge-tag-keep">${onlyMineN} only-yours</span>` : '',
+          ].join(' ');
+          const conflictRows = d.conflicts.map((c) => {
+            const key = `${pd.pid}:${kind}:${c.id}`;
+            const cur = choices[key] || 'mine';
+            const label = c.mine.title || c.mine.name || c.theirs.title || c.theirs.name || c.id;
+            const mAt = c.mine.__lastEditAt || c.mine.updatedAt || '—';
+            const tAt = c.theirs.__lastEditAt || c.theirs.updatedAt || '—';
+            return `<div class="merge-conflict" data-key="${escapeHTML(key)}">
+              <div class="merge-conflict-title">${escapeHTML(label)}</div>
+              <div class="merge-conflict-versions">
+                <label class="merge-version ${cur === 'mine' ? 'sel' : ''}">
+                  <input type="radio" name="${escapeHTML(key)}" value="mine" ${cur === 'mine' ? 'checked' : ''} />
+                  <span class="merge-version-label">Yours <span class="merge-version-when">${escapeHTML(mAt)}</span></span>
+                </label>
+                <label class="merge-version ${cur === 'theirs' ? 'sel' : ''}">
+                  <input type="radio" name="${escapeHTML(key)}" value="theirs" ${cur === 'theirs' ? 'checked' : ''} />
+                  <span class="merge-version-label">Theirs <span class="merge-version-when">${escapeHTML(tAt)}</span></span>
+                </label>
+                <label class="merge-version ${cur === 'both' ? 'sel' : ''}">
+                  <input type="radio" name="${escapeHTML(key)}" value="both" ${cur === 'both' ? 'checked' : ''} />
+                  <span class="merge-version-label">Keep both</span>
+                </label>
+              </div>
+            </div>`;
+          }).join('');
+          return `<div class="merge-block">
+            <div class="merge-block-head">${kind} ${summary}</div>
+            ${conflicts ? `<div class="merge-conflicts">${conflictRows}</div>` : ''}
+          </div>`;
+        }).filter(Boolean).join('');
+        return `<div class="merge-section">
+          <div class="merge-section-title">${escapeHTML(pd.name)}</div>
+          ${blocks || '<div class="merge-row muted">No differences.</div>'}
+        </div>`;
+      }).join('') || '<div class="empty">No differences detected.</div>';
+
+      $('#mSummary', overlay).textContent =
+        `${totalAdds} additions · ${totalConflicts} conflicts`;
+
+      // Wire change events for conflict + project radios
+      body.querySelectorAll('input[type=radio]').forEach((rd) => {
+        rd.addEventListener('change', () => {
+          const name = rd.name;
+          if (name.startsWith('proj-')) {
+            const pid = name.slice(5);
+            choices[`__proj__:${pid}`] = rd.value;
+          } else {
+            choices[name] = rd.value;
+          }
+        });
+      });
+    }
+    renderMergeBody();
+
+    $('#mApply', overlay).addEventListener('click', () => {
+      // Apply choices to mine
+      undoStack.push(JSON.stringify(state));
+      const result = JSON.parse(JSON.stringify(mine));
+      const resultProjMap = new Map(result.projects.map((p, i) => [p.id, i]));
+      projDiffs.forEach((pd) => {
+        if (pd.only === 'theirs') {
+          const choice = choices[`__proj__:${pd.pid}`] || 'include';
+          if (choice === 'include') {
+            result.projects.push(JSON.parse(JSON.stringify(pd.proj)));
+          }
+          return;
+        }
+        if (pd.only === 'mine') return;
+        const targetIdx = resultProjMap.get(pd.pid);
+        if (targetIdx == null) return;
+        const target = result.projects[targetIdx];
+        Object.entries(pd.perKind).forEach(([kind, d]) => {
+          // 1. Apply only-theirs additions for which the user kept default 'include'
+          d.onlyTheirs.forEach((r) => {
+            const key = `${pd.pid}:${kind}:${r.id}`;
+            if ((choices[key] || 'include') !== 'include') return;
+            target[kind] = target[kind] || [];
+            target[kind].push(JSON.parse(JSON.stringify(r)));
+          });
+          // 2. Conflicts
+          d.conflicts.forEach((c) => {
+            const key = `${pd.pid}:${kind}:${c.id}`;
+            const choice = choices[key] || 'mine';
+            const list = target[kind] || (target[kind] = []);
+            const idx = list.findIndex((x) => x.id === c.id);
+            if (choice === 'theirs') {
+              if (idx >= 0) list[idx] = JSON.parse(JSON.stringify(c.theirs));
+            } else if (choice === 'both') {
+              const dup = JSON.parse(JSON.stringify(c.theirs));
+              const prefix = (c.theirs.id || 'id').split('_')[0] || 'id';
+              dup.id = uid(prefix);
+              if (dup.title) dup.title = dup.title + ' (theirs)';
+              else if (dup.name) dup.name = dup.name + ' (theirs)';
+              list.push(dup);
+            }
+            // 'mine' = no-op
+          });
+        });
+      });
+      state = normalizeState(result);
+      saveState();
+      render();
+      close();
+      toast('Merged');
+    });
+  }
+
   /* ------------------- Personal to-do (floating widget) ------------------ */
 
   // The widget lives at the state level (project-independent), so changes only
@@ -10748,6 +10999,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
 
     $('#btnExport').addEventListener('click', exportJSON);
     $('#btnImport').addEventListener('click', importJSON);
+    $('#btnMerge').addEventListener('click', openMergeOverlay);
     $('#btnReset').addEventListener('click', () => {
       if (!confirm('Replace the current data with the sample dataset?\n\nYou can Export first if you want to keep what\'s here.')) return;
       undoStack.push(JSON.stringify(state));
