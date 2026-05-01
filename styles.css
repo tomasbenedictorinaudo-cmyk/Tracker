@@ -1151,7 +1151,8 @@ input, select, textarea { font: inherit; color: inherit; }
 /* Ranged-milestone visual band: chips on consecutive days share the
    same color and connect via a faint background tint, while the
    start / middle / end positions get rounded corners only on their
-   outer side so a multi-day range reads as a continuous bar. */
+   outer side so a multi-day range reads as a continuous bar.
+   Default colour is the milestone-violet brand hue. */
 .cal-chip.kind-milestone.is-start,
 .cal-chip.kind-milestone.is-middle,
 .cal-chip.kind-milestone.is-end {
@@ -1164,6 +1165,20 @@ input, select, textarea { font: inherit; color: inherit; }
 .cal-chip.kind-milestone.is-middle:hover,
 .cal-chip.kind-milestone.is-end:hover {
   background: rgba(179, 137, 255, .28);
+}
+/* When a ranged milestone has a component, override the brand violet
+   with the component tint so the connected band picks up the
+   component's colour. Same specificity as the rules above; placed
+   after so the cascade resolves to these for tinted chips. */
+.cal-chip.has-tint.kind-milestone.is-start,
+.cal-chip.has-tint.kind-milestone.is-middle,
+.cal-chip.has-tint.kind-milestone.is-end {
+  background: rgba(var(--cal-chip-tint), .14);
+}
+.cal-chip.has-tint.kind-milestone.is-start:hover,
+.cal-chip.has-tint.kind-milestone.is-middle:hover,
+.cal-chip.has-tint.kind-milestone.is-end:hover {
+  background: rgba(var(--cal-chip-tint), .28);
 }
 
 /* Compact inline checkbox + label used in Quick Add / editor toggles */
