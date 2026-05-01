@@ -9939,18 +9939,235 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       </div>`;
   }
 
+  /* ----------------------- Phase H: Calendar view ---------------------- */
+  // Month grid (7 cols × N rows) of every dated item. Each cell shows
+  // colour-tinted chips per kind: action due, milestone, deliverable,
+  // CR decided, meeting. Arrow keys navigate months. Clicking a chip
+  // opens the relevant drawer / editor.
+  const calState = {
+    monthOffset: 0, // 0 = current month, -1 = previous, +1 = next
+    keyWired: false,
+  };
+  function calendarMonthBounds() {
+    const today = new Date();
+    const base = new Date(today.getFullYear(), today.getMonth() + calState.monthOffset, 1);
+    const year = base.getFullYear();
+    const month = base.getMonth();
+    const monthLabel = base.toLocaleDateString(undefined, { year: 'numeric', month: 'long' });
+    // Start the grid on Monday of the week containing the 1st of the month
+    const first = new Date(year, month, 1);
+    const dow = (first.getDay() + 6) % 7; // Mon=0 … Sun=6
+    const gridStart = new Date(year, month, 1 - dow);
+    // 6 rows × 7 cols = 42 cells, enough to cover any month
+    const cells = [];
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(gridStart);
+      d.setDate(gridStart.getDate() + i);
+      cells.push(d);
+    }
+    return { year, month, monthLabel, cells };
+  }
+  function buildCalendarItems(proj, year, month, gridStartISO, gridEndISO) {
+    const inRange = (d) => d && d >= gridStartISO && d <= gridEndISO;
+    const items = []; // { date, kind, label, tone, run }
+    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    acts.forEach((a) => {
+      if (!a.due || !inRange(a.due)) return;
+      items.push({
+        date: a.due,
+        kind: 'action',
+        tone: a.status === 'done' ? 'muted' : (a.status === 'blocked' ? 'bad' : 'accent'),
+        label: a.title,
+        sub: personName(a.owner),
+        run: () => openDrawer(a.id),
+      });
+    });
+    (proj.milestones || []).forEach((m) => {
+      if (!m.date || !inRange(m.date)) return;
+      items.push({
+        date: m.date,
+        kind: 'milestone',
+        tone: 'milestone',
+        label: m.name,
+        sub: 'Milestone',
+        run: () => { state.currentView = 'milestones'; render(); },
+      });
+    });
+    (proj.deliverables || []).forEach((d) => {
+      const dt = d.dueDate || d.date;
+      if (!dt || !inRange(dt)) return;
+      items.push({
+        date: dt,
+        kind: 'deliverable',
+        tone: 'deliverable',
+        label: d.name,
+        sub: 'Deliverable',
+        run: () => { state.currentView = 'deliverables'; render(); },
+      });
+    });
+    (proj.changes || []).forEach((c) => {
+      if (!c.decisionDate || !inRange(c.decisionDate)) return;
+      const decided = ['approved', 'rejected', 'implemented', 'cancelled'].includes(c.status);
+      if (!decided) return;
+      items.push({
+        date: c.decisionDate,
+        kind: 'cr',
+        tone: c.status === 'rejected' || c.status === 'cancelled' ? 'bad' : 'good',
+        label: c.title,
+        sub: 'CR ' + c.status,
+        run: () => openChangeRequestEditor(c.id),
+      });
+    });
+    (proj.meetings || []).forEach((m) => {
+      if (m.kind === 'oneoff' && m.date && inRange(m.date)) {
+        items.push({
+          date: m.date,
+          kind: 'meeting',
+          tone: 'meeting',
+          label: m.title,
+          sub: m.time ? 'Meeting · ' + m.time : 'Meeting',
+          run: null,
+        });
+      } else if (m.kind === 'weekly' && typeof m.dayOfWeek === 'number') {
+        // Expand weekly into the grid window
+        const start = parseDate(gridStartISO);
+        const end = parseDate(gridEndISO);
+        let dt = new Date(start);
+        while (dt.getDay() !== m.dayOfWeek) dt = new Date(dt.getTime() + dayMs);
+        const since = m.startDate ? parseDate(m.startDate) : start;
+        while (dt <= end) {
+          if (dt >= since) {
+            items.push({
+              date: fmtISO(dt),
+              kind: 'meeting',
+              tone: 'meeting',
+              label: m.title,
+              sub: m.time ? 'Weekly · ' + m.time : 'Weekly',
+              run: null,
+            });
+          }
+          dt = new Date(dt.getTime() + 7 * dayMs);
+        }
+      }
+    });
+    return items;
+  }
   function renderCalendar(root) {
+    const proj = curProject();
     const view = document.createElement('div');
     view.className = 'view';
+    const isAll = state.currentProjectId === '__all__';
+    if (isAll || !proj) {
+      view.innerHTML = `
+        <div class="page-head">
+          <div>
+            <div class="page-title">Calendar</div>
+            <div class="page-sub">Pick a project to see its month grid.</div>
+          </div>
+        </div>
+        <div class="empty">Calendar is project-scoped. Choose a project from the topbar.</div>`;
+      root.appendChild(view);
+      return;
+    }
+    const { year, month, monthLabel, cells } = calendarMonthBounds();
+    const gridStartISO = fmtISO(cells[0]);
+    const gridEndISO   = fmtISO(cells[cells.length - 1]);
+    const items = buildCalendarItems(proj, year, month, gridStartISO, gridEndISO);
+    const byDate = new Map();
+    items.forEach((it) => {
+      if (!byDate.has(it.date)) byDate.set(it.date, []);
+      byDate.get(it.date).push(it);
+    });
+
+    const todayISO_ = todayISO();
+    const dayHeaders = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    const cellHTML = cells.map((d, i) => {
+      const iso = fmtISO(d);
+      const inMonth = d.getMonth() === month;
+      const isToday = iso === todayISO_;
+      const isWeekend = d.getDay() === 0 || d.getDay() === 6;
+      const cellItems = byDate.get(iso) || [];
+      const VISIBLE = 4;
+      const shown = cellItems.slice(0, VISIBLE);
+      const hidden = cellItems.length - shown.length;
+      const chipsHTML = shown.map((it, idx) => `
+        <button class="cal-chip cal-chip-${it.tone}" data-cell-idx="${i}" data-item-idx="${idx}" title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+          <span class="cal-chip-dot"></span>
+          <span class="cal-chip-label">${escapeHTML(it.label)}</span>
+        </button>`).join('');
+      const moreHTML = hidden > 0
+        ? `<button class="cal-more" data-cell-idx="${i}">+ ${hidden} more</button>`
+        : '';
+      return `
+        <div class="cal-cell ${inMonth ? '' : 'out-of-month'} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}" data-cell-idx="${i}" data-iso="${iso}">
+          <div class="cal-day-num">${d.getDate()}</div>
+          <div class="cal-chips">${chipsHTML}${moreHTML}</div>
+        </div>`;
+    }).join('');
+
     view.innerHTML = `
       <div class="page-head">
         <div>
-          <div class="page-title">Calendar</div>
-          <div class="page-sub">Coming in Phase H — month grid of every dated item.</div>
+          <div class="page-title">${escapeHTML(proj.name)} — Calendar</div>
+          <div class="page-sub">${escapeHTML(monthLabel)} · arrow keys to switch months</div>
+        </div>
+        <div class="page-actions">
+          <button class="icon-btn" id="calPrev" title="Previous month (←)">‹</button>
+          <button class="ghost"   id="calToday" title="Jump to current month">Today</button>
+          <button class="icon-btn" id="calNext" title="Next month (→)">›</button>
         </div>
       </div>
-      <div class="empty">Calendar view will land in Phase H.</div>`;
+      <div class="calendar">
+        <div class="cal-head">
+          ${dayHeaders.map((h) => `<div class="cal-head-cell">${h}</div>`).join('')}
+        </div>
+        <div class="cal-grid">${cellHTML}</div>
+      </div>`;
     root.appendChild(view);
+
+    $('#calPrev').addEventListener('click', () => { calState.monthOffset -= 1; render(); });
+    $('#calNext').addEventListener('click', () => { calState.monthOffset += 1; render(); });
+    $('#calToday').addEventListener('click', () => { calState.monthOffset = 0; render(); });
+
+    // Per-chip click: dispatch to the item's run() callback. We store
+    // (cell, item) indices on the button so the data closure stays simple.
+    view.querySelectorAll('.cal-chip').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cellIdx = +btn.dataset.cellIdx;
+        const itemIdx = +btn.dataset.itemIdx;
+        const iso = fmtISO(cells[cellIdx]);
+        const it = (byDate.get(iso) || [])[itemIdx];
+        if (it && typeof it.run === 'function') it.run();
+      });
+    });
+    // "+ N more" expands into a quick popover listing every chip for the day
+    view.querySelectorAll('.cal-more').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cellIdx = +btn.dataset.cellIdx;
+        const iso = fmtISO(cells[cellIdx]);
+        const list = byDate.get(iso) || [];
+        const r = btn.getBoundingClientRect();
+        showContextMenu(r.left, r.bottom + 4, list.map((it) => ({
+          icon: it.kind === 'milestone' ? '◇' : it.kind === 'deliverable' ? '◆' : it.kind === 'cr' ? '⇆' : it.kind === 'meeting' ? '⊕' : '·',
+          label: it.label,
+          onClick: it.run || (() => {}),
+        })));
+      });
+    });
+
+    // Wire arrow-key navigation once globally (re-renders share state)
+    if (!calState.keyWired) {
+      calState.keyWired = true;
+      document.addEventListener('keydown', (e) => {
+        if (state.currentView !== 'calendar') return;
+        const inField = ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName) || e.target.isContentEditable;
+        if (inField) return;
+        if (e.key === 'ArrowLeft')  { e.preventDefault(); calState.monthOffset -= 1; render(); }
+        if (e.key === 'ArrowRight') { e.preventDefault(); calState.monthOffset += 1; render(); }
+      });
+    }
   }
 
   /* ---------------------- Phase C: command palette --------------------- */
