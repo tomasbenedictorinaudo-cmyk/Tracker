@@ -1302,6 +1302,21 @@ input, select, textarea { font: inherit; color: inherit; }
 .icon-btn.danger { color: var(--bad); opacity: .55; }
 .icon-btn.danger:hover { background: rgba(248,113,113,.12); color: var(--bad); border-color: var(--bad); opacity: 1; }
 
+/* Small inline count pill — used on page-head buttons like 'Archive 12' */
+.badge-count {
+  display: inline-block;
+  padding: 0 6px;
+  margin-left: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-3);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--text-faint);
+  letter-spacing: 0;
+}
+
 .primary, .ghost {
   border-radius: var(--radius-sm);
   padding: 7px 12px;

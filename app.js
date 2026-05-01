@@ -896,12 +896,14 @@
     const head = document.createElement('div');
     head.className = 'page-head';
     const liveActions = (proj.actions || []).filter((a) => !a.deletedAt);
+    const archivedCount = (proj.actions || []).filter((a) => a.deletedAt).length;
     head.innerHTML = `
       <div>
         <div class="page-title">${escapeHTML(proj.name)}</div>
         <div class="page-sub">${liveActions.length} actions • ${proj.deliverables?.length || 0} deliverables • ${proj.milestones?.length || 0} milestones</div>
       </div>
       <div class="page-actions">
+        <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${archivedCount ? ` <span class="badge-count">${archivedCount}</span>` : ''}</button>
         <button class="ghost" id="btnAddAction">+ Action</button>
       </div>`;
     view.appendChild(head);
@@ -948,6 +950,10 @@
     root.appendChild(view);
 
     $('#btnAddAction').addEventListener('click', () => openQuickAdd('action'));
+    $('#btnOpenArchive').addEventListener('click', () => {
+      state.currentView = 'archive';
+      saveState(); render();
+    });
 
     // Clear-Done bulk action — archives only the done cards CURRENTLY DISPLAYED
     // (passing the topbar filters / search). Filtered-out done items are kept.
@@ -2395,6 +2401,7 @@
           <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters.</div>
         </div>
         <div class="page-actions">
+          <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${(proj.actions || []).filter((a) => a.deletedAt).length ? ` <span class="badge-count">${(proj.actions || []).filter((a) => a.deletedAt).length}</span>` : ''}</button>
           <button class="ghost" id="btnArchiveDone" title="Move all currently visible done actions to Archive">⌫ Archive done</button>
           <button class="ghost" id="btnAddAction">+ Action</button>
         </div>
@@ -2860,6 +2867,10 @@
     });
 
     $('#btnAddAction').addEventListener('click', () => openQuickAdd('action'));
+    $('#btnOpenArchive').addEventListener('click', () => {
+      state.currentView = 'archive';
+      saveState(); render();
+    });
 
     // Archive every currently-visible done action (respecting active filters)
     // → they disappear from the register, remain visible in the Archive panel.
