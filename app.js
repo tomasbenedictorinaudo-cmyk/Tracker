@@ -68,6 +68,65 @@
   // Phase A — Markdown escape for the upcoming status-report export.
   const mdEscape = (s) => String(s ?? '').replace(/([\\`*_{}\[\]()#+\-.!|>])/g, '\\$1');
 
+  // Expand a meeting record into its concrete dates within a window.
+  // Handles oneoff and recurring (day / week / month) — single source of
+  // truth so the calendar and timeline never disagree about when a meeting
+  // recurs. Caps at m.endDate (if set) and the requested grid window.
+  function expandMeetingDates(m, gridStartISO, gridEndISO) {
+    if (!m) return [];
+    if (m.kind === 'oneoff') {
+      return (m.date && m.date >= gridStartISO && m.date <= gridEndISO) ? [m.date] : [];
+    }
+    if (m.kind !== 'recurring') return [];
+    const startISO = m.startDate || todayISO();
+    const startD   = parseDate(startISO);
+    const gridS    = parseDate(gridStartISO);
+    const gridE    = parseDate(gridEndISO);
+    const cap      = m.endDate ? parseDate(m.endDate) : null;
+    const interval = Math.max(1, m.interval || 1);
+    const out = [];
+    if (m.recurUnit === 'day') {
+      let dt = new Date(startD);
+      while (dt <= gridE && (!cap || dt <= cap)) {
+        if (dt >= gridS) out.push(fmtISO(dt));
+        dt = new Date(dt.getTime() + interval * dayMs);
+      }
+    } else if (m.recurUnit === 'week') {
+      const targetDow = (typeof m.dayOfWeek === 'number') ? m.dayOfWeek : startD.getDay();
+      // First occurrence ≥ startD landing on targetDow
+      let dt = new Date(startD);
+      while (dt.getDay() !== targetDow) dt = new Date(dt.getTime() + dayMs);
+      while (dt <= gridE && (!cap || dt <= cap)) {
+        if (dt >= gridS) out.push(fmtISO(dt));
+        dt = new Date(dt.getTime() + interval * 7 * dayMs);
+      }
+    } else if (m.recurUnit === 'month') {
+      // Step `interval` months at a time on the same day-of-month as
+      // startD; clamp to last-day if the target month is shorter (Feb 30).
+      const dom = startD.getDate();
+      let y = startD.getFullYear();
+      let mo = startD.getMonth();
+      while (true) {
+        const lastDay = new Date(y, mo + 1, 0).getDate();
+        const dt = new Date(y, mo, Math.min(dom, lastDay));
+        if (dt > gridE) break;
+        if (cap && dt > cap) break;
+        if (dt >= startD && dt >= gridS) out.push(fmtISO(dt));
+        mo += interval;
+        while (mo >= 12) { mo -= 12; y += 1; }
+      }
+    }
+    return out;
+  }
+  function meetingRecurrenceLabel(m) {
+    if (m.kind === 'oneoff') return 'Meeting';
+    if (m.kind !== 'recurring') return 'Meeting';
+    const n = Math.max(1, m.interval || 1);
+    const unit = m.recurUnit === 'day' ? 'day' : m.recurUnit === 'month' ? 'month' : 'week';
+    if (n === 1) return unit === 'day' ? 'Daily' : unit === 'week' ? 'Weekly' : 'Monthly';
+    return `Every ${n} ${unit}s`;
+  }
+
   // Phase G — render tag chips for a record. Tags live on the project; a
   // record stores only ids. Unknown ids (e.g. tag was deleted) are silently
   // skipped to avoid empty chips.
@@ -3185,27 +3244,22 @@
       if (dv.dueDate) events.push({ kind: 'deliverable', date: dv.dueDate, name: dv.name, status: dv.status, sub: 'Deliverable' });
     });
     (proj.meetings || []).forEach((mt) => {
-      if (mt.kind === 'oneoff' && mt.date) {
-        events.push({ kind: 'meeting', date: mt.date, name: mt.title, sub: 'Meeting' + (mt.time ? ' ' + mt.time : '') });
-      } else if (mt.kind === 'weekly' && mt.dayOfWeek !== undefined) {
-        // Expand weekly meeting across the visible window
-        const since = mt.startDate ? parseDate(mt.startDate) : start;
-        let dt = new Date(Math.max(start.getTime(), since.getTime()));
-        while (dt.getDay() !== mt.dayOfWeek) dt = new Date(dt.getTime() + dayMs);
-        const last = new Date(start.getTime() + totalDays * dayMs);
-        let first = true;
-        while (dt <= last) {
-          events.push({
-            kind: 'meeting-weekly',
-            date: fmtISO(dt),
-            name: mt.title,
-            sub: 'Weekly' + (mt.time ? ' ' + mt.time : ''),
-            isFirst: first,
-          });
-          first = false;
-          dt = new Date(dt.getTime() + 7 * dayMs);
-        }
-      }
+      const winStartISO = fmtISO(start);
+      const winEndISO   = fmtISO(new Date(start.getTime() + totalDays * dayMs));
+      const dates = expandMeetingDates(mt, winStartISO, winEndISO);
+      if (!dates.length) return;
+      const baseLabel = meetingRecurrenceLabel(mt);
+      const sub = baseLabel + (mt.time ? ' ' + mt.time : '');
+      const isRecurring = mt.kind === 'recurring';
+      dates.forEach((iso, i) => {
+        events.push({
+          kind: isRecurring ? 'meeting-weekly' : 'meeting', // legacy class name kept for CSS; covers all recurrence
+          date: iso,
+          name: mt.title,
+          sub,
+          isFirst: i === 0,
+        });
+      });
     });
 
     // Filter to visible window and sort
@@ -5051,14 +5105,23 @@
     });
   }
 
-  // Click a meeting chip in the calendar → open this small editor.
-  // Same field set as the Quick Add (title, date, time, repeating toggle,
-  // day-of-week, end date) plus a Delete button.
+  // Click a meeting chip in the calendar → open this small editor with
+  // the same progressive-disclosure layout used by Quick Add: only the
+  // fields required for the current selection are visible. Switching
+  // toggle / unit re-shapes the schema in place so a meeting can be
+  // promoted from one-off → recurring (or vice-versa, or a different
+  // unit) without re-creating it.
   function openMeetingEditor(meetingId) {
     const proj = curProject();
     const m = (proj.meetings || []).find((x) => x.id === meetingId);
     if (!m) return;
-    const repeating = m.kind === 'weekly';
+    const repeating = m.kind === 'recurring';
+    const initUnit  = repeating ? (m.recurUnit || 'week') : 'week';
+    const initInterval = repeating ? (m.interval || 1) : 1;
+    const dowOpts = [1,2,3,4,5,6,0].map((d) => {
+      const names = { 0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday' };
+      return `<option value="${d}" ${d === (m.dayOfWeek ?? 1) ? 'selected' : ''}>${names[d]}</option>`;
+    }).join('');
     const overlay = document.createElement('div');
     overlay.className = 'overlay desc-overlay';
     overlay.innerHTML = `
@@ -5080,19 +5143,30 @@
           <div class="field">
             <label class="qa-toggle">
               <input type="checkbox" id="mtgRepeats" ${repeating ? 'checked' : ''} />
-              <span>Repeating meeting (weekly)</span>
+              <span>Repeating meeting</span>
             </label>
           </div>
-          <div class="qa-row" id="mtgRepeatRow" ${repeating ? '' : 'hidden'}>
-            <div class="field"><label>Day of week</label>
-              <select id="mtgDow">
-                ${[1,2,3,4,5,6,0].map((d) => {
-                  const names = { 0: 'Sunday', 1: 'Monday', 2: 'Tuesday', 3: 'Wednesday', 4: 'Thursday', 5: 'Friday', 6: 'Saturday' };
-                  return `<option value="${d}" ${d === (m.dayOfWeek ?? 1) ? 'selected' : ''}>${names[d]}</option>`;
-                }).join('')}
-              </select>
+          <div id="mtgRecurWrap" ${repeating ? '' : 'hidden'}>
+            <div class="qa-row qa-row-tight">
+              <div class="field" style="flex: 0 0 auto;">
+                <label>Every</label>
+                <input id="mtgInterval" type="number" min="1" max="99" value="${initInterval}" style="width:64px;" />
+              </div>
+              <div class="field" style="flex: 1;">
+                <label>&nbsp;</label>
+                <select id="mtgUnit">
+                  <option value="day"   ${initUnit === 'day'   ? 'selected' : ''}>Day(s)</option>
+                  <option value="week"  ${initUnit === 'week'  ? 'selected' : ''}>Week(s)</option>
+                  <option value="month" ${initUnit === 'month' ? 'selected' : ''}>Month(s)</option>
+                </select>
+              </div>
+              <div class="field" id="mtgDowField" ${initUnit === 'week' ? '' : 'hidden'}>
+                <label>On</label>
+                <select id="mtgDow">${dowOpts}</select>
+              </div>
             </div>
-            <div class="field"><label>Ends <span class="muted">— optional</span></label>
+            <div class="field">
+              <label>Ends <span class="muted">— optional</span></label>
               <input id="mtgEndDate" type="date" value="${m.endDate || ''}" />
             </div>
           </div>
@@ -5107,21 +5181,28 @@
     setTimeout(() => document.getElementById('mtgTitle').focus(), 30);
     const close = () => overlay.remove();
     const repeatChk = overlay.querySelector('#mtgRepeats');
-    const repeatRow = overlay.querySelector('#mtgRepeatRow');
+    const recurWrap = overlay.querySelector('#mtgRecurWrap');
     const dateInput = overlay.querySelector('#mtgDate');
+    const unitSel   = overlay.querySelector('#mtgUnit');
+    const dowField  = overlay.querySelector('#mtgDowField');
     const dowSel    = overlay.querySelector('#mtgDow');
     const dateLbl   = overlay.querySelector('#mtgDateLbl');
     function syncDowFromDate() {
       const v = dateInput.value;
-      if (!v) return;
-      dowSel.value = String(parseDate(v).getDay());
+      if (v) dowSel.value = String(parseDate(v).getDay());
     }
     repeatChk.addEventListener('change', () => {
-      repeatRow.hidden = !repeatChk.checked;
+      recurWrap.hidden = !repeatChk.checked;
       dateLbl.textContent = repeatChk.checked ? 'Start date' : 'Date';
-      if (repeatChk.checked) syncDowFromDate();
+      if (repeatChk.checked && unitSel.value === 'week') syncDowFromDate();
     });
-    dateInput.addEventListener('change', () => { if (repeatChk.checked) syncDowFromDate(); });
+    unitSel.addEventListener('change', () => {
+      dowField.hidden = unitSel.value !== 'week';
+      if (unitSel.value === 'week') syncDowFromDate();
+    });
+    dateInput.addEventListener('change', () => {
+      if (repeatChk.checked && unitSel.value === 'week') syncDowFromDate();
+    });
     overlay.querySelector('#mtgClose').addEventListener('click', close);
     overlay.querySelector('#mtgCancel').addEventListener('click', close);
     overlay.querySelector('#mtgSave').addEventListener('click', () => {
@@ -5129,25 +5210,32 @@
       if (!title) { toast('Title required'); return; }
       const date = dateInput.value || todayISO();
       const time = overlay.querySelector('#mtgTime').value || null;
-      const isWeekly = repeatChk.checked;
-      // Normalize: changing from one-off → weekly clears m.date and sets
-      // startDate, and vice versa, so the schema stays clean.
+      const isRepeating = repeatChk.checked;
       m.title = title;
       m.time = time;
-      if (isWeekly) {
-        const ed = overlay.querySelector('#mtgEndDate').value || null;
-        if (ed && ed < date) { toast('End date can\'t be before the start date'); return; }
-        m.kind = 'weekly';
-        m.dayOfWeek = parseInt(dowSel.value, 10);
-        m.startDate = date;
-        m.endDate = ed;
-        delete m.date;
-      } else {
+      if (!isRepeating) {
         m.kind = 'oneoff';
         m.date = date;
         m.endDate = null;
+        delete m.recurUnit;
+        delete m.interval;
         delete m.dayOfWeek;
         delete m.startDate;
+      } else {
+        const interval = Math.max(1, parseInt(overlay.querySelector('#mtgInterval').value, 10) || 1);
+        const unit = unitSel.value === 'day' ? 'day'
+                   : unitSel.value === 'month' ? 'month'
+                   : 'week';
+        const ed = overlay.querySelector('#mtgEndDate').value || null;
+        if (ed && ed < date) { toast('End date can\'t be before the start date'); return; }
+        m.kind = 'recurring';
+        m.recurUnit = unit;
+        m.interval  = interval;
+        m.startDate = date;
+        m.endDate   = ed;
+        if (unit === 'week') m.dayOfWeek = parseInt(dowSel.value, 10);
+        else delete m.dayOfWeek;
+        delete m.date;
       }
       commit('meeting-edit');
       close();
@@ -8221,59 +8309,84 @@
           <div class="field"><label>Date</label><input id="qDate" type="date" value="${todayISO()}" /></div>
         </div>`;
     } else if (qaType === 'meeting') {
-      // Progressive disclosure: title + date + time always visible; the
-      // periodicity (day-of-week + end date) only surface when 'Repeating
-      // weekly' is checked. Date field doubles as 'start' for weekly mode.
-      const kind = qaInit.mtKind || 'oneoff';
-      const repeating = kind === 'weekly';
+      // Progressive disclosure: title / date / time / repeating-toggle are
+      // always visible. When repeating is on, reveal a single periodicity
+      // row ("Every [n] [unit]") plus optional end-date — and only show the
+      // day-of-week selector when the unit is "Week(s)". When off, none
+      // of those controls render.
+      const repeating = qaInit.mtKind === 'recurring';
+      const initUnit  = qaInit.mtUnit || 'week';
       body.innerHTML = `
         <div class="field"><label>Title</label><input id="qTitle" placeholder="e.g. Weekly standup, PDR walkthrough" /></div>
         <div class="qa-row">
-          <div class="field"><label>${repeating ? 'Start date' : 'Date'}</label><input id="qDate" type="date" value="${todayISO()}" /></div>
-          <div class="field"><label>Time (optional)</label><input id="qTime" type="time" /></div>
+          <div class="field"><label id="qDateLbl">${repeating ? 'Start date' : 'Date'}</label><input id="qDate" type="date" value="${todayISO()}" /></div>
+          <div class="field"><label>Time <span class="muted">— optional</span></label><input id="qTime" type="time" /></div>
         </div>
         <div class="field">
           <label class="qa-toggle">
             <input type="checkbox" id="qMtRepeats" ${repeating ? 'checked' : ''} />
-            <span>Repeating meeting (weekly)</span>
+            <span>Repeating meeting</span>
           </label>
         </div>
-        <div class="qa-row" id="qMtRepeatRow" ${repeating ? '' : 'hidden'}>
-          <div class="field"><label>Day of week</label>
-            <select id="qDow">
-              <option value="1">Monday</option>
-              <option value="2">Tuesday</option>
-              <option value="3">Wednesday</option>
-              <option value="4">Thursday</option>
-              <option value="5">Friday</option>
-              <option value="6">Saturday</option>
-              <option value="0">Sunday</option>
-            </select>
+        <div id="qMtRecurWrap" ${repeating ? '' : 'hidden'}>
+          <div class="qa-row qa-row-tight">
+            <div class="field" style="flex: 0 0 auto;">
+              <label>Every</label>
+              <input id="qInterval" type="number" min="1" max="99" value="1" style="width:64px;" />
+            </div>
+            <div class="field" style="flex: 1;">
+              <label>&nbsp;</label>
+              <select id="qUnit">
+                <option value="day"   ${initUnit === 'day'   ? 'selected' : ''}>Day(s)</option>
+                <option value="week"  ${initUnit === 'week'  ? 'selected' : ''}>Week(s)</option>
+                <option value="month" ${initUnit === 'month' ? 'selected' : ''}>Month(s)</option>
+              </select>
+            </div>
+            <div class="field" id="qDowField" ${initUnit === 'week' ? '' : 'hidden'}>
+              <label>On</label>
+              <select id="qDow">
+                <option value="1">Monday</option>
+                <option value="2">Tuesday</option>
+                <option value="3">Wednesday</option>
+                <option value="4">Thursday</option>
+                <option value="5">Friday</option>
+                <option value="6">Saturday</option>
+                <option value="0">Sunday</option>
+              </select>
+            </div>
           </div>
-          <div class="field"><label>Ends <span class="muted">— optional</span></label><input id="qEndDate" type="date" /></div>
+          <div class="field">
+            <label>Ends <span class="muted">— optional</span></label>
+            <input id="qEndDate" type="date" />
+          </div>
         </div>`;
-      // Toggle the periodicity row on checkbox change. Default the day-of-week
-      // selector to whatever weekday the start date falls on, so users don't
-      // have to set it twice.
       const repeatChk = body.querySelector('#qMtRepeats');
-      const repeatRow = body.querySelector('#qMtRepeatRow');
+      const recurWrap = body.querySelector('#qMtRecurWrap');
       const dateInput = body.querySelector('#qDate');
+      const unitSel   = body.querySelector('#qUnit');
+      const dowField  = body.querySelector('#qDowField');
       const dowSel    = body.querySelector('#qDow');
+      const dateLbl   = body.querySelector('#qDateLbl');
       function syncDowFromDate() {
         const v = dateInput.value;
-        if (!v) return;
-        dowSel.value = String(parseDate(v).getDay());
+        if (v) dowSel.value = String(parseDate(v).getDay());
       }
-      if (repeating) syncDowFromDate();
+      if (repeating && initUnit === 'week') syncDowFromDate();
       repeatChk.addEventListener('change', () => {
-        qaInit.mtKind = repeatChk.checked ? 'weekly' : 'oneoff';
-        repeatRow.hidden = !repeatChk.checked;
-        if (repeatChk.checked) syncDowFromDate();
-        // Re-label Date field to make the semantic shift obvious
-        const lbl = dateInput.closest('.field')?.querySelector('label');
-        if (lbl) lbl.textContent = repeatChk.checked ? 'Start date' : 'Date';
+        recurWrap.hidden = !repeatChk.checked;
+        dateLbl.textContent = repeatChk.checked ? 'Start date' : 'Date';
+        qaInit.mtKind = repeatChk.checked ? 'recurring' : 'oneoff';
+        if (repeatChk.checked && unitSel.value === 'week') syncDowFromDate();
       });
-      dateInput.addEventListener('change', () => { if (repeatChk.checked) syncDowFromDate(); });
+      unitSel.addEventListener('change', () => {
+        qaInit.mtUnit = unitSel.value;
+        // Day-of-week selector is only relevant for the 'week' unit.
+        dowField.hidden = unitSel.value !== 'week';
+        if (unitSel.value === 'week') syncDowFromDate();
+      });
+      dateInput.addEventListener('change', () => {
+        if (repeatChk.checked && unitSel.value === 'week') syncDowFromDate();
+      });
     } else if (qaType === 'person') {
       body.innerHTML = `
         <div class="field"><label>Name</label><input id="qName" /></div>
@@ -8406,20 +8519,26 @@
     } else if (qaType === 'meeting') {
       const title = $('#qTitle').value.trim();
       if (!title) return toast('Title required');
-      // Repeating? Source of truth is the checkbox state at submit time.
       const repeating = !!$('#qMtRepeats')?.checked;
-      const kind = repeating ? 'weekly' : 'oneoff';
       const date = $('#qDate').value || todayISO();
       const time = $('#qTime').value || null;
-      const m = { id: uid('mtg'), kind, title, time, endDate: null };
-      if (kind === 'oneoff') {
+      const m = { id: uid('mtg'), title, time, endDate: null };
+      if (!repeating) {
+        m.kind = 'oneoff';
         m.date = date;
       } else {
-        m.dayOfWeek = parseInt($('#qDow').value, 10);
-        m.startDate = date;
+        const interval = Math.max(1, parseInt($('#qInterval').value, 10) || 1);
+        const unit = $('#qUnit').value === 'day' ? 'day'
+                   : $('#qUnit').value === 'month' ? 'month'
+                   : 'week';
         const ed = $('#qEndDate')?.value || '';
         if (ed && ed < date) { toast('End date can\'t be before the start date'); return; }
-        m.endDate = ed || null;
+        m.kind      = 'recurring';
+        m.recurUnit = unit;
+        m.interval  = interval;
+        m.startDate = date;
+        m.endDate   = ed || null;
+        if (unit === 'week') m.dayOfWeek = parseInt($('#qDow').value, 10);
       }
       proj.meetings = proj.meetings || [];
       proj.meetings.push(m);
@@ -9379,9 +9498,25 @@
         m.kind = m.kind || 'oneoff';
         m.title = m.title || '';
         m.time = m.time || null;
-        if (m.kind === 'oneoff') m.date = m.date || todayISO();
-        else { m.dayOfWeek = (typeof m.dayOfWeek === 'number') ? m.dayOfWeek : 1; m.startDate = m.startDate || todayISO(); }
-        // Optional end-date for weekly meetings — null means 'never ends'
+        // Migration: legacy 'weekly' kind → unified 'recurring' with
+        // recurUnit/interval. Old data continues to work because all
+        // consumers go through expandMeetingDates() which only sees the
+        // new shape after normalizeState has run.
+        if (m.kind === 'weekly') {
+          m.kind = 'recurring';
+          m.recurUnit = 'week';
+          m.interval = m.interval || 1;
+        }
+        if (m.kind === 'oneoff') {
+          m.date = m.date || todayISO();
+        } else if (m.kind === 'recurring') {
+          m.recurUnit = (m.recurUnit === 'day' || m.recurUnit === 'week' || m.recurUnit === 'month') ? m.recurUnit : 'week';
+          m.interval  = (typeof m.interval === 'number' && m.interval >= 1) ? Math.floor(m.interval) : 1;
+          m.startDate = m.startDate || todayISO();
+          if (m.recurUnit === 'week') {
+            m.dayOfWeek = (typeof m.dayOfWeek === 'number') ? m.dayOfWeek : parseDate(m.startDate).getDay();
+          }
+        }
         if (m.endDate === undefined) m.endDate = null;
       });
 
@@ -10679,7 +10814,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         tone: a.status === 'done' ? 'muted' : (a.status === 'blocked' ? 'bad' : 'accent'),
         label: a.title,
         sub: personName(a.owner),
-        icon: '·',
+        // Checkbox glyph reflects status — filled box for done, empty
+        // outline otherwise. Reads at-a-glance like a to-do checklist.
+        icon: a.status === 'done' ? '☑' : '☐',
         run: () => openDrawer(a.id),
       });
     });
@@ -10743,42 +10880,21 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       });
     });
     (proj.meetings || []).forEach((m) => {
-      if (m.kind === 'oneoff' && m.date && inRange(m.date)) {
+      const dates = expandMeetingDates(m, gridStartISO, gridEndISO);
+      if (!dates.length) return;
+      const baseLabel = meetingRecurrenceLabel(m);
+      const subBase = m.time ? `${baseLabel} · ${m.time}` : baseLabel;
+      dates.forEach((iso) => {
         items.push({
-          date: m.date,
+          date: iso,
           kind: 'meeting',
           tone: 'meeting',
           label: m.title,
-          sub: m.time ? 'Meeting · ' + m.time : 'Meeting',
+          sub: subBase,
           icon: '⊕',
           run: () => openMeetingEditor(m.id),
         });
-      } else if (m.kind === 'weekly' && typeof m.dayOfWeek === 'number') {
-        // Expand weekly into the grid window, respecting the optional
-        // endDate cutoff (null = never ends).
-        const start = parseDate(gridStartISO);
-        const gridEnd = parseDate(gridEndISO);
-        const end = m.endDate
-          ? new Date(Math.min(gridEnd.getTime(), parseDate(m.endDate).getTime()))
-          : gridEnd;
-        let dt = new Date(start);
-        while (dt.getDay() !== m.dayOfWeek) dt = new Date(dt.getTime() + dayMs);
-        const since = m.startDate ? parseDate(m.startDate) : start;
-        while (dt <= end) {
-          if (dt >= since) {
-            items.push({
-              date: fmtISO(dt),
-              kind: 'meeting',
-              tone: 'meeting',
-              label: m.title,
-              sub: m.time ? 'Weekly · ' + m.time : 'Weekly',
-              icon: '⊕',
-              run: () => openMeetingEditor(m.id),
-            });
-          }
-          dt = new Date(dt.getTime() + 7 * dayMs);
-        }
-      }
+      });
     });
     return items;
   }
@@ -10860,7 +10976,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       <div class="cal-legend" aria-hidden="true">
         <span class="cal-legend-item"><span class="cal-chip-icon kind-milestone">◇</span> Milestone</span>
         <span class="cal-legend-item"><span class="cal-chip-icon kind-deliverable">◆</span> Deliverable</span>
-        <span class="cal-legend-item"><span class="cal-chip-icon kind-action">·</span> Action due</span>
+        <span class="cal-legend-item"><span class="cal-chip-icon kind-action">☐</span> Action due <span class="cal-chip-icon kind-action" style="color:var(--text-faint);">☑</span> done</span>
         <span class="cal-legend-item"><span class="cal-chip-icon kind-cr">⇆</span> CR decided</span>
         <span class="cal-legend-item"><span class="cal-chip-icon kind-meeting">⊕</span> Meeting</span>
       </div>
