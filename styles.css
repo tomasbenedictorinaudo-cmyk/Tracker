@@ -3239,17 +3239,19 @@ input[type="date"].reg-inp {
 /* Lateness 'drag tail' — a small horizontal trail whose length scales
    with days late. Length encodes magnitude, the +Nd label gives the
    precise read. Capped at 30 days of width so a 90-day-late item
-   doesn't elbow the title cell. */
+   doesn't elbow the title cell. A small ⏰ icon anchors the left end
+   so the metaphor reads at first glance even before scanning the
+   number — the gradient then 'drags' rightward to the +Nd label. */
 .reg-late-tail {
   --bad-rgb: 248, 113, 121;
   display: inline-flex;
   align-items: center;
-  justify-content: flex-end;
   flex-shrink: 0;
   height: 16px;
-  width: calc(22px + var(--days, 0) * 1.4px);
+  width: calc(40px + var(--days, 0) * 1.4px);
   margin-left: 6px;
-  padding: 0 6px 0 0;
+  padding: 0 6px 0 4px;
+  gap: 4px;
   border-left: 2px solid rgb(var(--bad-rgb));
   border-radius: 0 8px 8px 0;
   background: linear-gradient(
@@ -3265,6 +3267,15 @@ input[type="date"].reg-inp {
   font-variant-numeric: tabular-nums;
   cursor: default;
   transition: filter var(--transition);
+}
+.reg-late-icon {
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
+  filter: hue-rotate(-8deg) saturate(1.25);
+}
+.reg-late-num {
+  margin-left: auto;
 }
 .reg-row:hover .reg-late-tail { filter: brightness(1.15); }
 

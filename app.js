@@ -2562,7 +2562,7 @@
       const isOverdue = a.status !== 'done' && a.due && dayDiff(a.due, todayISO()) < 0;
       const lateDays = isOverdue ? Math.abs(dayDiff(a.due, todayISO())) : 0;
       const dragTail = isOverdue
-        ? `<span class="reg-late-tail" style="--days:${Math.min(lateDays, 30)};" title="Late by ${lateDays} day${lateDays === 1 ? '' : 's'} · was due ${escapeHTML(fmtDate(a.due))}">+${lateDays}d</span>`
+        ? `<span class="reg-late-tail" style="--days:${Math.min(lateDays, 30)};" title="Late by ${lateDays} day${lateDays === 1 ? '' : 's'} · was due ${escapeHTML(fmtDate(a.due))}"><span class="reg-late-icon" aria-hidden="true">⏰</span><span class="reg-late-num">+${lateDays}d</span></span>`
         : '';
       return `
         <div class="reg-row prio-${lvl.id} ${isOverdue ? 'is-overdue' : ''}" data-id="${a.id}"${tint}>
