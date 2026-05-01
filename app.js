@@ -2306,7 +2306,12 @@
       case 'title':          return (a.title || '').toLowerCase();
       case 'component':      return (findComponent(proj, a.component)?.name || 'zzz').toLowerCase();
       case 'owner':          return personName(a.owner).toLowerCase();
-      case 'status':         return ['todo','doing','blocked','done'].indexOf(a.status);
+      // Open states first (todo · doing · blocked), then both closed
+       // states grouped at the same extreme (done · cancelled). Sorting
+       // ascending puts what's open at the top; descending pushes the
+       // closed pile up. Cancelled was previously missing from the
+       // index, which broke the order entirely.
+      case 'status':         return ['todo','doing','blocked','done','cancelled'].indexOf(a.status);
       case 'priority':       return ['critical','high','med','low'].indexOf(a.priorityLevel || 'med');
       case 'due':            return a.due || '9999-99-99';
       case 'predicted':      return predictedCompletion(a) || '9999-99-99';
