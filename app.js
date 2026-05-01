@@ -8705,6 +8705,11 @@
         status: $('#qStatus').value,
         component: $('#qComp')?.value || null,
       });
+      // Invalidate the calendar window so the auto-extension picks up
+      // the new record on the next render (the new date may be outside
+      // the cached window).
+      calState.windowAnchorOffset = null;
+      calState.firstWeekStart = null;
     } else if (qaType === 'milestone') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
@@ -8721,6 +8726,11 @@
         status: 'todo',
         component: $('#qComp')?.value || null,
       });
+      // Invalidate the calendar window so the auto-extension picks up
+      // the new record on the next render (its date may be outside
+      // the cached window).
+      calState.windowAnchorOffset = null;
+      calState.firstWeekStart = null;
     } else if (qaType === 'risk') {
       const title = $('#qTitle').value.trim();
       if (!title) return toast('Title required');
@@ -11087,9 +11097,48 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const anchor = new Date(today.getFullYear(), today.getMonth() + calState.monthOffset, 1);
       const dow = (anchor.getDay() + 6) % 7; // Mon=0
       const monthGridStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1 - dow);
-      // Lead with 4 weeks before the anchor month start, 12 weeks total
-      calState.firstWeekStart = new Date(monthGridStart.getTime() - 4 * 7 * dayMs);
-      calState.weekCount = 12;
+      // Default: 4 weeks lead-in, 12 weeks total
+      let firstWeekStart = new Date(monthGridStart.getTime() - 4 * 7 * dayMs);
+      let weekCount = 12;
+
+      // Auto-extend the initial window so every milestone + deliverable
+      // in the project is visible without manual scrolling. Capped at
+      // ±18 months from today so very long-lived projects don't render
+      // a runaway window. The user can still scroll past these bounds
+      // — extension is only on initial paint after a re-anchor.
+      const proj = curProject();
+      if (proj) {
+        const todayMs    = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+        const MAX_PAST   = todayMs - 18 * 30 * dayMs;
+        const MAX_FUT    = todayMs + 18 * 30 * dayMs;
+        const dates = [];
+        (proj.milestones   || []).forEach((m) => { if (m.date)    dates.push(parseDate(m.date).getTime()); if (m.endDate) dates.push(parseDate(m.endDate).getTime()); });
+        (proj.deliverables || []).forEach((d) => { const dt = d.dueDate || d.date; if (dt) dates.push(parseDate(dt).getTime()); });
+        const inBounds = dates.filter((t) => t >= MAX_PAST && t <= MAX_FUT);
+        if (inBounds.length) {
+          const minMs = Math.min(...inBounds);
+          const maxMs = Math.max(...inBounds);
+          // Extend backward if any date is before the current window start
+          const winStartMs = firstWeekStart.getTime();
+          if (minMs < winStartMs) {
+            let newStart = new Date(minMs);
+            while (newStart.getDay() !== 1) newStart = new Date(newStart.getTime() - dayMs);
+            newStart = new Date(newStart.getTime() - 7 * dayMs); // 1-week buffer
+            const addedWeeks = Math.ceil((winStartMs - newStart.getTime()) / (7 * dayMs));
+            firstWeekStart = newStart;
+            weekCount += addedWeeks;
+          }
+          // Extend forward if any date is after the current window end
+          const winEndMs = firstWeekStart.getTime() + weekCount * 7 * dayMs;
+          if (maxMs > winEndMs) {
+            const extraWeeks = Math.ceil((maxMs - winEndMs) / (7 * dayMs)) + 1;
+            weekCount += extraWeeks;
+          }
+        }
+      }
+
+      calState.firstWeekStart = firstWeekStart;
+      calState.weekCount = weekCount;
       calState.windowAnchorOffset = calState.monthOffset;
       calState.scrollToTodayPending = true;
     }
