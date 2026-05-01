@@ -11485,6 +11485,109 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         if (e.key === 'ArrowRight') { e.preventDefault(); calState.monthOffset += 1; render(); }
       });
     }
+
+    // Drag-to-pan time. Both formats accept click-and-drag on empty
+    // body space (chips and buttons opt out). Month view lives-translates
+    // the grid then snaps to whole months on release; Timeline view
+    // drag-scrolls within the existing horizontally-scrollable container,
+    // and any over-pull at the edges accumulates into a month-shift on
+    // release so the user can pan continuously past the visible window.
+    if (calState.format === 'month') wireMonthGridDrag(view);
+    else                              wireTimelineDragPan(view);
+  }
+
+  // — Drag-pan helpers —
+  // Common rule: ignore drags that started on a chip / button / link /
+  // form control so click-throughs still work.
+  function _dragIgnoreTarget(t) {
+    return !!t.closest('.cal-chip, .tl-chip, .cal-more, button, a, input, select, textarea, [contenteditable="true"]');
+  }
+  function wireMonthGridDrag(viewEl) {
+    const grid = viewEl.querySelector('.cal-grid');
+    if (!grid) return;
+    let active = false;
+    let startX = 0;
+    let dx = 0;
+    const PX_PER_MONTH = 200; // sensitivity — ~200 px of horizontal drag = 1 month
+    grid.style.cursor = 'grab';
+    grid.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (_dragIgnoreTarget(e.target)) return;
+      active = true; startX = e.clientX; dx = 0;
+      grid.style.cursor = 'grabbing';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    // Attach move/up at render time and leave them attached for the
+    // lifetime of this view's render. They no-op when `active` is false,
+    // which is the rest state. (Earlier we used { once: true } for mouseup
+    // — that broke after the first drag because the listener was removed.)
+    function onMove(e) {
+      if (!active) return;
+      dx = e.clientX - startX;
+      grid.style.transform = `translateX(${dx}px)`;
+    }
+    function onUp() {
+      if (!active) return;
+      active = false;
+      grid.style.cursor = 'grab';
+      grid.style.transform = '';
+      document.body.style.userSelect = '';
+      const months = Math.round(-dx / PX_PER_MONTH);
+      if (months !== 0) {
+        calState.monthOffset += months;
+        render();
+      }
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }
+  function wireTimelineDragPan(viewEl) {
+    const scroll = viewEl.querySelector('.tl-scroll');
+    if (!scroll) return;
+    let active = false;
+    let startX = 0;
+    let startScrollLeft = 0;
+    let overflowPx = 0; // accumulated pull past the edges, used for month-shift on release
+    const PX_PER_MONTH = 220;
+    scroll.style.cursor = 'grab';
+    scroll.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (_dragIgnoreTarget(e.target)) return;
+      active = true;
+      startX = e.clientX;
+      startScrollLeft = scroll.scrollLeft;
+      overflowPx = 0;
+      scroll.style.cursor = 'grabbing';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    function onMove(e) {
+      if (!active) return;
+      const dx = e.clientX - startX;
+      const desired = startScrollLeft - dx;
+      const max = Math.max(0, scroll.scrollWidth - scroll.clientWidth);
+      // Clamp scroll to [0, max] and remember any overflow so we can
+      // convert it to a month-shift on release.
+      if (desired < 0)        { scroll.scrollLeft = 0;   overflowPx = desired; }
+      else if (desired > max) { scroll.scrollLeft = max; overflowPx = desired - max; }
+      else                    { scroll.scrollLeft = desired; overflowPx = 0; }
+    }
+    function onUp() {
+      if (!active) return;
+      active = false;
+      scroll.style.cursor = 'grab';
+      document.body.style.userSelect = '';
+      // If the user pulled past either edge, convert the overflow to
+      // a month shift so panning feels continuous past the visible window.
+      const months = Math.round(overflowPx / PX_PER_MONTH);
+      if (months !== 0) {
+        calState.monthOffset += months;
+        render();
+      }
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   }
 
   /* ---------------------- Phase C: command palette --------------------- */
