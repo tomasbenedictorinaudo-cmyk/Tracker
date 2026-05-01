@@ -11128,6 +11128,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         // outline otherwise. Reads at-a-glance like a to-do checklist.
         icon: a.status === 'done' ? '☑' : '☐',
         tint: cmpRgb,
+        _record: a,                  // exposed so the timeline can drag-mutate
         run: () => openDrawer(a.id),
       });
     });
@@ -11163,6 +11164,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           icon,
           rangePos,
           tint: cmpRgb,
+          _record: m,
           run: () => openMilestoneEditor(m.id),
         });
       }
@@ -11180,6 +11182,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         sub: cmp ? `Deliverable · ${cmp.name}` : 'Deliverable',
         icon: '◆',
         tint: cmpRgb,
+        _record: d,
         run: () => openDeliverableEditor(d.id),
       });
     });
@@ -11529,12 +11532,20 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
 
     const todayX = (todayISO_ >= startISO && todayISO_ <= endISO) ? xFor(todayISO_) : null;
 
-    // Run-callback resolution
+    // Run-callback resolution + drag-mutation pointer per chip. Each
+    // entry holds { run, drag } where drag (when present) carries
+    // { kind, record } so the timeline drag handler can mutate the
+    // source record directly without going through the editor.
     calState._tlRunMap = new Map();
+    // Stash window/zoom for the hover marker + drag math
+    calState._tlWindowStartMs = windowStart.getTime();
     let _tlRunCounter = 0;
     function runKey(it) {
       const k = 'tl-' + (++_tlRunCounter);
-      calState._tlRunMap.set(k, it.run);
+      const drag = (it.kind === 'action' || it.kind === 'deliverable' || it.kind === 'milestone') && it._record
+        ? { kind: it.kind, record: it._record }
+        : null;
+      calState._tlRunMap.set(k, { run: it.run, drag });
       return k;
     }
 
@@ -11959,12 +11970,20 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     });
 
     // Timeline-mode chip / Table-mode row wiring — both populate
-    // calState._tlRunMap, so a single resolver works for both.
+    // calState._tlRunMap, so a single resolver works for both. Each
+    // map entry is { run, drag }; click invokes run.
     if (calState.format === 'timeline' || calState.format === 'table') {
       view.querySelectorAll('[data-tl-run-key]').forEach((el) => {
         el.addEventListener('click', (e) => {
+          if (calState._tlSuppressNextClick) {
+            calState._tlSuppressNextClick = false;
+            e.stopPropagation();
+            e.preventDefault();
+            return;
+          }
           e.stopPropagation();
-          const run = calState._tlRunMap?.get(el.dataset.tlRunKey);
+          const entry = calState._tlRunMap?.get(el.dataset.tlRunKey);
+          const run = entry && (entry.run || entry); // back-compat: also accept raw fns
           if (typeof run === 'function') run();
         });
       });
@@ -12032,7 +12051,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // and any over-pull at the edges accumulates into a month-shift on
     // release so the user can pan continuously past the visible window.
     if (calState.format === 'month') wireMonthGridDrag(view);
-    else                              wireTimelineDragPan(view);
+    else if (calState.format === 'timeline') {
+      wireTimelineDragPan(view);
+      wireTimelineHoverMarker(view);
+      wireTimelineEventDrag(view);
+    }
 
     // Month view: vertical scroll-to-reveal-more-weeks. When the user
     // scrolls within ~200 px of the top or bottom edge, prepend / append
@@ -12246,6 +12269,146 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     }
     document.addEventListener('mousemove', onMove);
     document.addEventListener('mouseup', onUp);
+  }
+
+  // — Hover indicator on the timeline. Shows a small vertical mark + a
+  //   date label that follows the cursor. Suppressed during drag so the
+  //   visuals don't fight each other.
+  function wireTimelineHoverMarker(viewEl) {
+    const scroll = viewEl.querySelector('.tl-scroll');
+    const stage  = viewEl.querySelector('.tl-stage');
+    if (!scroll || !stage) return;
+    const marker = document.createElement('div');
+    marker.className = 'tl-hover-marker';
+    marker.innerHTML = '<div class="tl-hover-line"></div><div class="tl-hover-label"></div>';
+    marker.style.display = 'none';
+    stage.appendChild(marker);
+    const label = marker.querySelector('.tl-hover-label');
+    function updateFromEvent(e) {
+      if (calState._tlDragging) { marker.style.display = 'none'; return; }
+      const stageRect = stage.getBoundingClientRect();
+      const xInStage = e.clientX - stageRect.left;
+      if (xInStage < 0 || xInStage > stage.clientWidth) { marker.style.display = 'none'; return; }
+      const pxPerDay = clamp(calState.tlPxPerDay || 26, 0.5, 80);
+      const dayOffset = xInStage / pxPerDay;
+      const ms = (calState._tlWindowStartMs || 0) + dayOffset * dayMs;
+      const d = new Date(ms);
+      const txt = d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+      marker.style.left = xInStage + 'px';
+      label.textContent = txt;
+      marker.style.display = 'block';
+    }
+    scroll.addEventListener('mousemove', updateFromEvent);
+    scroll.addEventListener('mouseleave', () => { marker.style.display = 'none'; });
+  }
+
+  // — Drag-to-move (and edge-resize for milestone ranges) on the timeline.
+  //   Click without movement still opens the editor (the click event fires
+  //   normally); a real drag updates the underlying record's date(s) and
+  //   commits, suppressing the trailing click so the editor doesn't pop up.
+  function wireTimelineEventDrag(viewEl) {
+    const stage = viewEl.querySelector('.tl-stage');
+    if (!stage) return;
+    const RESIZE_HANDLE_PX = 8;
+    function shiftIso(iso, days) {
+      if (!iso) return iso;
+      const d = parseDate(iso);
+      d.setDate(d.getDate() + days);
+      return fmtISO(d);
+    }
+    stage.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      const target = e.target.closest('.tl-marker, .tl-range-bar');
+      if (!target) return;
+      const key = target.dataset.tlRunKey;
+      const entry = calState._tlRunMap?.get(key);
+      if (!entry?.drag) return;
+      const drag = entry.drag;
+
+      // Determine drag mode for range bars: edges resize, middle moves.
+      let mode = 'move';
+      const isRange = target.classList.contains('tl-range-bar');
+      if (isRange) {
+        const r = target.getBoundingClientRect();
+        if (e.clientX - r.left < RESIZE_HANDLE_PX) mode = 'resize-left';
+        else if (r.right - e.clientX < RESIZE_HANDLE_PX) mode = 'resize-right';
+      }
+
+      e.stopPropagation();
+      e.preventDefault();
+      calState._tlDragging = true;
+      const startX = e.clientX;
+      const initialLeft  = parseFloat(target.style.left)  || 0;
+      const initialWidth = isRange ? (parseFloat(target.style.width) || 0) : 0;
+      const pxPerDay = clamp(calState.tlPxPerDay || 26, 0.5, 80);
+      const prevCursor = document.body.style.cursor;
+      document.body.style.cursor = (mode === 'move') ? 'grabbing' : 'ew-resize';
+      target.style.zIndex = 10;
+      let movedEnough = false;
+
+      function onMove(em) {
+        const dx = em.clientX - startX;
+        if (Math.abs(dx) >= 4) movedEnough = true;
+        if (mode === 'move') {
+          target.style.left = (initialLeft + dx) + 'px';
+        } else if (mode === 'resize-right') {
+          target.style.width = Math.max(20, initialWidth + dx) + 'px';
+        } else if (mode === 'resize-left') {
+          const newWidth = initialWidth - dx;
+          if (newWidth >= 20) {
+            target.style.left  = (initialLeft + dx) + 'px';
+            target.style.width = newWidth + 'px';
+          }
+        }
+      }
+      function onUp(em) {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.style.cursor = prevCursor;
+        calState._tlDragging = false;
+        if (!movedEnough) return; // pure click — let the click handler open the editor
+
+        // Suppress the trailing click on this marker (otherwise the editor
+        // would open after every drag).
+        calState._tlSuppressNextClick = true;
+        // Reset for next render
+        setTimeout(() => { calState._tlSuppressNextClick = false; }, 200);
+
+        const dx = em.clientX - startX;
+        const dDays = Math.round(dx / pxPerDay);
+        if (dDays === 0) return;
+
+        const r = drag.record;
+        const today = todayISO();
+        if (mode === 'move') {
+          if (drag.kind === 'action') {
+            const oldDue = r.due;
+            if (r.due) r.due = shiftIso(r.due, dDays);
+            r.updatedAt = today;
+            r.history = r.history || [];
+            r.history.push({ at: today, what: `Due: ${oldDue || '—'} → ${r.due || '—'} (timeline drag)` });
+          } else if (drag.kind === 'deliverable') {
+            if (r.dueDate) r.dueDate = shiftIso(r.dueDate, dDays);
+          } else if (drag.kind === 'milestone') {
+            if (r.date) r.date = shiftIso(r.date, dDays);
+            if (r.endDate) r.endDate = shiftIso(r.endDate, dDays);
+          }
+        } else if (mode === 'resize-right' && drag.kind === 'milestone') {
+          if (r.endDate) {
+            const ne = shiftIso(r.endDate, dDays);
+            if (ne >= r.date) r.endDate = ne;
+          }
+        } else if (mode === 'resize-left' && drag.kind === 'milestone') {
+          if (r.date) {
+            const ns = shiftIso(r.date, dDays);
+            if (!r.endDate || ns <= r.endDate) r.date = ns;
+          }
+        }
+        commit('timeline-drag');
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
   }
 
   /* ---------------------- Phase C: command palette --------------------- */

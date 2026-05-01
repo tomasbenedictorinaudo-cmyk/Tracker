@@ -1428,6 +1428,56 @@ input, select, textarea { font: inherit; color: inherit; }
   pointer-events: none;
   z-index: 1;
 }
+
+/* Hover indicator — follows the cursor while over the timeline,
+   shows the date the cursor is pointing at. */
+.tl-hover-marker {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  z-index: 6;
+}
+.tl-hover-line {
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 1px;
+  background: rgb(179, 137, 255);
+  opacity: .55;
+}
+.tl-hover-label {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  padding: 2px 8px;
+  background: rgb(179, 137, 255);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  border-radius: 3px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 2px 6px rgba(0,0,0,.35);
+}
+
+/* Drag affordances: range bars expose 'ew-resize' near the edges
+   (matched by the JS handle threshold) and 'grab' in the middle.
+   Point markers always show 'grab'. The body cursor flips to
+   'grabbing' or 'ew-resize' during an active drag. */
+.tl-range-bar { cursor: grab; }
+.tl-range-bar::before,
+.tl-range-bar::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  width: 8px;
+  height: 100%;
+  cursor: ew-resize;
+}
+.tl-range-bar::before { left: 0; }
+.tl-range-bar::after  { right: 0; }
+.tl-marker .tl-marker-card { cursor: grab; }
 .tl-empty {
   position: absolute;
   top: 50%; left: 50%;
