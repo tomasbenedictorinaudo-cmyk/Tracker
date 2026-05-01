@@ -1234,9 +1234,12 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .cal-more:hover { background: var(--bg-3); color: var(--text); }
 
-/* Calendar — Timeline format. Same window as the month grid, but
-   one swim-lane per kind. Chips are absolutely-positioned by date
-   offset; ranged milestones stretch as a bar across days. */
+/* Calendar — Timeline format.
+   Top: a graduated SVG arrow axis with zoom-aware ticks (Day = every
+   day, Week = every Monday, Month = every 1st). Below: one lane per
+   kind, chips absolutely positioned, packed into sub-rows so two
+   overlapping events never occlude each other.
+*/
 .cal-timeline {
   border: 1px solid var(--line);
   border-radius: var(--radius-sm);
@@ -1273,62 +1276,73 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .tl-axis-spacer {
   background: var(--bg-2);
-}
-.tl-axis-track {
-  display: flex;
-  position: relative;
-  background: var(--bg-2);
-  height: 26px;
-  border-bottom: 1px solid var(--line);
-}
-.tl-axis-cell {
-  flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-start;
-  padding-left: 4px;
-  font-size: 10px;
+  justify-content: center;
+}
+.tl-axis-zoom-hint {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
   color: var(--text-faint);
-  border-right: 1px solid transparent;
+}
+.tl-axis-track {
+  position: relative;
+  background: var(--bg-2);
+  height: 42px;
+  border-bottom: 1px solid var(--line);
+}
+.tl-axis-svg {
+  display: block;
+  color: var(--text-faint);
+}
+.tl-axis-line {
+  stroke: currentColor;
+  stroke-width: 1.5;
+  opacity: .9;
+}
+.tl-axis-arrow {
+  fill: currentColor;
+  opacity: .9;
+}
+.tl-axis-tick {
+  stroke: currentColor;
+  stroke-width: 1;
+  opacity: .55;
+}
+.tl-axis-tick.major {
+  stroke-width: 1.5;
+  opacity: 1;
+  color: var(--text-dim);
+}
+.tl-axis-label {
+  font-size: 10px;
+  fill: var(--text-faint);
+  font-family: inherit;
   font-variant-numeric: tabular-nums;
 }
-.tl-axis-cell.is-mon {
-  border-right-color: var(--line);
-  color: var(--text-dim);
+.tl-axis-label.major {
+  fill: var(--text);
   font-weight: 600;
 }
-.tl-axis-cell.is-today {
-  color: var(--accent);
-  font-weight: 700;
+.tl-today-tick {
+  stroke: var(--accent);
+  stroke-width: 2;
+  opacity: .9;
+}
+
+.tl-lane-track {
+  position: relative;
+  min-height: 38px;
 }
 .tl-today-line {
   position: absolute;
   top: 0; bottom: 0;
   width: 2px;
   background: var(--accent);
-  opacity: .55;
+  opacity: .35;
   pointer-events: none;
-}
-.tl-lane-track {
-  position: relative;
-  height: 36px;
-  background-image: repeating-linear-gradient(
-    to right,
-    transparent 0,
-    transparent 29px,
-    rgba(255,255,255,.04) 29px,
-    rgba(255,255,255,.04) 30px
-  );
-  background-size: 210px 100%;
-}
-:root[data-theme="light"] .tl-lane-track {
-  background-image: repeating-linear-gradient(
-    to right,
-    transparent 0,
-    transparent 29px,
-    rgba(0,0,0,.05) 29px,
-    rgba(0,0,0,.05) 30px
-  );
 }
 .tl-lane-empty {
   position: absolute;
@@ -1341,41 +1355,61 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .tl-chip {
   position: absolute;
-  top: 6px;
-  height: 24px;
+  height: 22px;
   padding: 0 6px;
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 4px;
   font-size: 11px;
+  line-height: 1;
   color: var(--text);
   cursor: pointer;
   text-align: left;
   overflow: hidden;
-  transition: background var(--transition), border-color var(--transition);
+  transition: background var(--transition), border-color var(--transition), transform var(--transition), box-shadow var(--transition);
+  white-space: nowrap;
 }
-.tl-chip:hover {
-  background: var(--bg-3);
-  border-color: var(--line-2);
-  z-index: 3;
+.tl-chip .cal-chip-icon {
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+  font-size: 11px;
 }
 .tl-chip .cal-chip-label {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
 }
-/* Apply the same component-tint as the month chips do */
+.tl-chip:hover {
+  background: var(--bg-3);
+  border-color: var(--line-2);
+  z-index: 5;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 10px rgba(0,0,0,.32);
+}
+/* Component tint — left-edge stripe + soft fill, matching month chips */
 .tl-chip.has-tint {
   border-left: 3px solid rgb(var(--cal-chip-tint));
   padding-left: 3px;
   background: rgba(var(--cal-chip-tint), .14);
 }
 .tl-chip.has-tint:hover { background: rgba(var(--cal-chip-tint), .26); }
-/* Ranged-milestone start chip: keep rounded both sides since the bar
-   is one continuous element on the timeline (no middle/end siblings). */
+/* Per-kind icon colour (mirrors the month chip rules so the eye
+   maps icon → kind across the two formats) */
+.tl-chip.kind-milestone   .cal-chip-icon { color: rgb(179, 137, 255); font-weight: 700; }
+.tl-chip.kind-deliverable .cal-chip-icon { color: rgb(251, 191, 36); }
+.tl-chip.kind-meeting     .cal-chip-icon { color: rgb(20, 184, 166); }
+.tl-chip.cal-chip-accent  .cal-chip-icon { color: var(--accent); }
+.tl-chip.cal-chip-bad     .cal-chip-icon { color: var(--bad); }
+.tl-chip.cal-chip-good    .cal-chip-icon { color: var(--ok, #34d399); }
+.tl-chip.cal-chip-muted   .cal-chip-icon { color: var(--text-faint); }
+/* Ranged-milestone start chip: round both ends since the bar is one
+   continuous element here (no middle/end siblings on the timeline). */
 .tl-chip.kind-milestone.is-start { border-radius: 4px; }
 
 /* … overflow button on rows / cards */

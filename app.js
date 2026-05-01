@@ -11029,6 +11029,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     firstWeekStart: null,
     weekCount: 12,
     windowAnchorOffset: null,
+    // Timeline-mode zoom — tick granularity tracks the zoom strictly:
+    // 'day' = ticks every day, 'week' = every Monday, 'month' = every
+    // 1st-of-month. Never intermediates. Pixel scale + window length
+    // also follow the zoom.
+    tlZoom: 'day',
     // Per-kind visibility filters. The legend doubles as the filter
     // strip: clicking a pill toggles its kind on/off. Persists across
     // month navigation but resets on reload (intentional — fresh
@@ -11053,6 +11058,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       calState.firstWeekStart = new Date(monthGridStart.getTime() - 4 * 7 * dayMs);
       calState.weekCount = 12;
       calState.windowAnchorOffset = calState.monthOffset;
+      calState.scrollToTodayPending = true;
     }
   }
   function calendarMonthBounds() {
@@ -11185,9 +11191,220 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     });
     return items;
   }
-  // Horizontal swim-lane variant of the calendar — same window, same data,
-  // same chips — but laid out with one lane per kind, with chips placed by
-  // date offset and ranged milestones stretching across days as a bar.
+  // Timeline format. A graduated arrow axis on top, swim-lanes underneath
+  // (one per kind), events packed greedily into sub-rows per lane so two
+  // overlapping events never occlude each other. The zoom tier strictly
+  // controls tick granularity (Day / Week / Month — never intermediates)
+  // and the pixel-per-day scale.
+  const TL_ZOOM_PROFILES = {
+    day:   { pxPerDay: 26,         windowDays: 84  /*  ~12 weeks */ },
+    week:  { pxPerDay: 30 / 7,     windowDays: 196 /*  ~28 weeks */ },
+    month: { pxPerDay: 60 / 30,    windowDays: 730 /*  ~24 months */ },
+  };
+  function renderCalendarTimelineV2() {
+    const proj = curProject();
+    const todayISO_ = todayISO();
+    const todayD = parseDate(todayISO_);
+    const z = TL_ZOOM_PROFILES[calState.tlZoom] || TL_ZOOM_PROFILES.day;
+
+    // Anchor: a Monday near the visible window so ticks land cleanly.
+    // Lead the window with ~30% behind the anchor month so the user starts
+    // with some history visible to the left of today.
+    const anchor = new Date(todayD.getFullYear(), todayD.getMonth() + calState.monthOffset, 1);
+    let windowStart = new Date(anchor.getTime() - Math.floor(z.windowDays * 0.3) * dayMs);
+    while (windowStart.getDay() !== 1) windowStart = new Date(windowStart.getTime() - dayMs);
+    const totalDays = z.windowDays;
+    const windowEnd = new Date(windowStart.getTime() + (totalDays - 1) * dayMs);
+    const totalPx = Math.round(totalDays * z.pxPerDay);
+    const startISO = fmtISO(windowStart);
+    const endISO   = fmtISO(windowEnd);
+
+    // Day → x-pixel offset
+    const xFor = (iso) => Math.round((parseDate(iso).getTime() - windowStart.getTime()) / dayMs * z.pxPerDay);
+    const minChipPx = Math.max(20, Math.round(z.pxPerDay));
+
+    // Build items for the visible window
+    const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
+    const filtered = allItems.filter((it) => calState.visible[it.kind] !== false);
+    // Drop milestone middle/end positions — start chip's width covers the range.
+    const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
+
+    // Per-event start/end ISO. For ranged milestones, look up the matching
+    // 'end' position to derive the bar's end date.
+    function endIsoFor(it) {
+      if (it.kind === 'milestone' && it.rangePos === 'start') {
+        const same = filtered.filter((x) => x.kind === 'milestone' && x.label === it.label && x.date >= it.date);
+        return same.reduce((mx, x) => x.date > mx ? x.date : mx, it.date);
+      }
+      return it.date;
+    }
+
+    // Build per-lane structure
+    const laneOrder  = ['milestone', 'deliverable', 'action', 'meeting', 'cr'];
+    const laneLabels = { milestone: 'Milestones', deliverable: 'Deliverables', action: 'Actions', meeting: 'Meetings', cr: 'CRs' };
+    const laneIcons  = { milestone: '◇', deliverable: '◆', action: '☐', meeting: '⊕', cr: '⇆' };
+    const lanes = laneOrder
+      .filter((k) => calState.visible[k] !== false)
+      .map((k) => ({ kind: k, items: [] }));
+    const laneByKind = Object.fromEntries(lanes.map((l) => [l.kind, l]));
+    items.forEach((it) => {
+      const lane = laneByKind[it.kind];
+      if (!lane) return;
+      const startIso = it.date;
+      const endIso   = endIsoFor(it);
+      const left  = xFor(startIso);
+      const span  = (parseDate(endIso).getTime() - parseDate(startIso).getTime()) / dayMs + 1;
+      const width = Math.max(minChipPx, Math.round(span * z.pxPerDay));
+      lane.items.push({ ...it, _start: startIso, _end: endIso, _left: left, _width: width });
+    });
+
+    // Greedy packing per lane: place each chip in the topmost sub-row
+    // where it doesn't overlap (left/width) any earlier chip. 4-px gap
+    // between adjacent chips so they don't kiss.
+    lanes.forEach((lane) => {
+      lane.items.sort((a, b) => a._left - b._left);
+      const rowMaxRight = []; // rowMaxRight[i] = max right edge of items already in row i
+      lane.items.forEach((it) => {
+        const right = it._left + it._width;
+        let placed = -1;
+        for (let i = 0; i < rowMaxRight.length; i++) {
+          if (rowMaxRight[i] + 4 <= it._left) {
+            rowMaxRight[i] = right;
+            placed = i;
+            break;
+          }
+        }
+        if (placed < 0) {
+          placed = rowMaxRight.length;
+          rowMaxRight.push(right);
+        }
+        it._row = placed;
+      });
+      lane.rowCount = Math.max(1, rowMaxRight.length);
+    });
+
+    // Tick generation — strict per-zoom granularity.
+    const ticks = []; // { x, label, major }
+    if (calState.tlZoom === 'day') {
+      for (let d = 0; d < totalDays; d++) {
+        const dt = new Date(windowStart.getTime() + d * dayMs);
+        const x = Math.round(d * z.pxPerDay);
+        const isMon = dt.getDay() === 1;
+        const isFirst = dt.getDate() === 1;
+        const label = isFirst
+          ? dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+          : isMon ? String(dt.getDate()) : '';
+        ticks.push({ x, label, major: isMon || isFirst });
+      }
+    } else if (calState.tlZoom === 'week') {
+      // Tick at every Monday in the window
+      let d = new Date(windowStart);
+      while (d <= windowEnd) {
+        const offset = Math.round((d.getTime() - windowStart.getTime()) / dayMs);
+        const x = Math.round(offset * z.pxPerDay);
+        const isFirst = d.getDate() <= 7; // first Monday of month region
+        const label = isFirst
+          ? d.toLocaleDateString(undefined, { month: 'short' })
+          : `W${isoWeekNumber(d)}`;
+        ticks.push({ x, label, major: isFirst });
+        d = new Date(d.getTime() + 7 * dayMs);
+      }
+    } else { // 'month'
+      // Tick at every 1st of month within the window
+      let cur = new Date(windowStart.getFullYear(), windowStart.getMonth(), 1);
+      if (cur < windowStart) cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      while (cur <= windowEnd) {
+        const offset = Math.round((cur.getTime() - windowStart.getTime()) / dayMs);
+        const x = Math.round(offset * z.pxPerDay);
+        const isJan = cur.getMonth() === 0;
+        const label = isJan
+          ? cur.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+          : cur.toLocaleDateString(undefined, { month: 'short' });
+        ticks.push({ x, label, major: isJan });
+        cur = new Date(cur.getFullYear(), cur.getMonth() + 1, 1);
+      }
+    }
+
+    // Today line position
+    const todayX = (todayISO_ >= startISO && todayISO_ <= endISO) ? xFor(todayISO_) : null;
+
+    // SVG arrow axis. Slight overshoot (12 px) so the arrowhead isn't clipped.
+    const axisOvershoot = 12;
+    const axisW = totalPx + axisOvershoot;
+    const axisHTML = `
+      <svg class="tl-axis-svg" width="${axisW}" height="42" viewBox="0 0 ${axisW} 42" preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" y1="14" x2="${totalPx}" y2="14" class="tl-axis-line"/>
+        <polygon points="${totalPx},9 ${axisW},14 ${totalPx},19" class="tl-axis-arrow"/>
+        ${ticks.map((t) => `
+          <line x1="${t.x}" y1="${t.major ? 8 : 11}" x2="${t.x}" y2="${t.major ? 20 : 17}" class="tl-axis-tick ${t.major ? 'major' : ''}"/>
+          ${t.label ? `<text x="${t.x + 3}" y="32" class="tl-axis-label ${t.major ? 'major' : ''}">${escapeHTML(t.label)}</text>` : ''}
+        `).join('')}
+        ${todayX != null ? `<line x1="${todayX}" y1="0" x2="${todayX}" y2="42" class="tl-today-tick"/>` : ''}
+      </svg>`;
+
+    // Click resolution: V2 builds its own item set with its own window
+    // (zoom-dependent), so we maintain a small map from a unique chip
+    // key to the item's run() callback. The outer click handler reads
+    // this map by key — independent of any byDate or filtered-list state
+    // outside V2.
+    calState._tlRunMap = new Map();
+    let _tlRunCounter = 0;
+    function runKey(it) {
+      const k = 'tl-' + (++_tlRunCounter);
+      calState._tlRunMap.set(k, it.run);
+      return k;
+    }
+
+    // Render lanes — chips placed absolutely with row-based vertical packing.
+    const ROW_PX = 26;     // chip + gap height per sub-row
+    const ROW_PAD = 6;     // top padding inside lane
+    function renderLaneV2(lane) {
+      const laneH = ROW_PAD * 2 + lane.rowCount * ROW_PX;
+      const chipsHTML = lane.items.map((it) => {
+        const top = ROW_PAD + it._row * ROW_PX;
+        const tintStyle = it.tint ? `--cal-chip-tint:${it.tint};` : '';
+        const tintCls = it.tint ? ' has-tint' : '';
+        const rangeCls = it.rangePos ? ` is-${it.rangePos}` : '';
+        return `
+          <button class="tl-chip cal-chip-${it.tone} kind-${it.kind}${rangeCls}${tintCls}"
+                  style="left:${it._left}px;width:${it._width}px;top:${top}px;${tintStyle}"
+                  data-tl-run-key="${runKey(it)}"
+                  title="${escapeHTML(it.label)} — ${escapeHTML(it.sub || '')}">
+            <span class="cal-chip-icon" aria-hidden="true">${escapeHTML(it.icon || '·')}</span>
+            <span class="cal-chip-label">${escapeHTML(it.label)}</span>
+          </button>`;
+      }).join('');
+      const empty = !lane.items.length ? '<div class="tl-lane-empty">— none</div>' : '';
+      return `
+        <div class="tl-lane">
+          <div class="tl-lane-label">
+            <span class="cal-chip-icon kind-${lane.kind}">${laneIcons[lane.kind]}</span>
+            ${escapeHTML(laneLabels[lane.kind])}
+          </div>
+          <div class="tl-lane-track" style="width:${totalPx}px;height:${laneH}px;">
+            ${chipsHTML}
+            ${empty}
+            ${todayX != null ? `<div class="tl-today-line" style="left:${todayX}px;"></div>` : ''}
+          </div>
+        </div>`;
+    }
+
+    return `
+      <div class="cal-timeline">
+        <div class="tl-scroll">
+          <div class="tl-axis-row">
+            <div class="tl-lane-label tl-axis-spacer">
+              <div class="tl-axis-zoom-hint">${calState.tlZoom === 'day' ? 'days' : calState.tlZoom === 'week' ? 'weeks' : 'months'}</div>
+            </div>
+            <div class="tl-axis-track" style="width:${axisW}px;">
+              ${axisHTML}
+            </div>
+          </div>
+          ${lanes.map(renderLaneV2).join('')}
+        </div>
+      </div>`;
+  }
+  // Old timeline (kept temporarily for reference; renderCalendar now uses v2)
   function renderCalendarTimeline(cells, items, byDate, todayISO_) {
     const startMs = cells[0].getTime();
     const totalDays = cells.length;
@@ -11409,6 +11626,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <button type="button" class="seg-btn ${calState.format === 'month'    ? 'active' : ''}" data-cal-format="month"    title="Month grid view">Month</button>
             <button type="button" class="seg-btn ${calState.format === 'timeline' ? 'active' : ''}" data-cal-format="timeline" title="Horizontal timeline view">Timeline</button>
           </div>
+          ${calState.format === 'timeline' ? `
+            <div class="seg" role="tablist" aria-label="Timeline zoom">
+              <button type="button" class="seg-btn ${calState.tlZoom === 'day'   ? 'active' : ''}" data-tl-zoom="day"   title="Tick every day">Day</button>
+              <button type="button" class="seg-btn ${calState.tlZoom === 'week'  ? 'active' : ''}" data-tl-zoom="week"  title="Tick every Monday">Week</button>
+              <button type="button" class="seg-btn ${calState.tlZoom === 'month' ? 'active' : ''}" data-tl-zoom="month" title="Tick every 1st of month">Month</button>
+            </div>` : ''}
           <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
           <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
           <button class="ghost" id="calAddMtg"  title="Add a meeting (one-off or recurring)">+ Meeting</button>
@@ -11442,7 +11665,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           </div>
           <div class="cal-grid" id="calGrid">${cellHTML}</div>
         </div>
-      ` : renderCalendarTimeline(cells, items, byDate, todayISO_)}`;
+      ` : renderCalendarTimelineV2()}`;
     root.appendChild(view);
 
     $('#calPrev').addEventListener('click', () => { calState.monthOffset -= 1; render(); });
@@ -11462,6 +11685,16 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       });
     });
 
+    // Timeline zoom toggle (Day / Week / Month)
+    view.querySelectorAll('[data-tl-zoom]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const z = btn.dataset.tlZoom;
+        if (calState.tlZoom === z) return;
+        calState.tlZoom = z;
+        render();
+      });
+    });
+
     // Legend pills double as visibility filters
     view.querySelectorAll('[data-toggle-kind]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -11471,17 +11704,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       });
     });
 
-    // Timeline-mode chip + bar wiring (mirrors the month-grid wiring)
+    // Timeline-mode chip wiring — resolve via calState._tlRunMap which
+    // V2 populates while rendering. Independent of any outer byDate.
     if (calState.format === 'timeline') {
-      view.querySelectorAll('[data-tl-item-key]').forEach((el) => {
+      view.querySelectorAll('[data-tl-run-key]').forEach((el) => {
         el.addEventListener('click', (e) => {
           e.stopPropagation();
-          const key = el.dataset.tlItemKey;
-          // key encodes "iso:idx" — find the matching item
-          const [iso, idxStr] = key.split('|');
-          const idx = parseInt(idxStr, 10);
-          const it = (byDate.get(iso) || [])[idx];
-          if (it && typeof it.run === 'function') it.run();
+          const run = calState._tlRunMap?.get(el.dataset.tlRunKey);
+          if (typeof run === 'function') run();
         });
       });
     }
@@ -11546,13 +11776,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const grid = viewEl.querySelector('#calGrid');
     if (!grid) return;
     const sub = viewEl.querySelector('#calPageSub');
-    let extending = false; // re-entry guard during prepend/append
     function rowHeight() {
       const first = grid.querySelector('.cal-cell');
       return first ? first.getBoundingClientRect().height : 110;
     }
     function visibleCenterDate() {
-      // Use the row at the vertical center of the viewport.
       const rh = rowHeight();
       if (!rh) return null;
       const rowsFromTop = Math.floor((grid.scrollTop + grid.clientHeight / 2) / rh);
@@ -11568,50 +11796,68 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       sub.textContent = `${lbl} · scroll vertically for more weeks · ← / → for months`;
     }
     function extendTop() {
-      if (extending) return;
-      extending = true;
+      if (calState.calExtending) return;
+      calState.calExtending = true;
       const ADD = 4;
       const beforeH = grid.scrollHeight;
       const newStart = new Date(calState.firstWeekStart);
       newStart.setDate(newStart.getDate() - ADD * 7);
       calState.firstWeekStart = newStart;
       calState.weekCount += ADD;
-      // Re-render and restore scroll position so the user's view doesn't
-      // jump by the height of the prepended rows.
       const prevTop = grid.scrollTop;
+      // Cache the scroll target so the next wireMonthGridScroll mount
+      // (which runs as part of render()) can apply it without re-doing
+      // a scroll-to-today and without firing a recursive extend.
+      calState.suppressNextExtendUntilScrollTop = true;
       render();
       const newGrid = $('#calGrid');
       if (newGrid) {
         const afterH = newGrid.scrollHeight;
         newGrid.scrollTop = prevTop + (afterH - beforeH);
       }
-      extending = false;
+      calState.calExtending = false;
     }
     function extendBottom() {
-      if (extending) return;
-      extending = true;
+      if (calState.calExtending) return;
+      calState.calExtending = true;
       const ADD = 4;
       calState.weekCount += ADD;
       const prevTop = grid.scrollTop;
+      calState.suppressNextExtendUntilScrollTop = true;
       render();
       const newGrid = $('#calGrid');
       if (newGrid) newGrid.scrollTop = prevTop;
-      extending = false;
+      calState.calExtending = false;
     }
     grid.addEventListener('scroll', () => {
+      // Suppress one round of edge-detection when the scrollTop was set
+      // programmatically (during extend / scroll-to-today). Without this
+      // guard, the synthetic scroll event re-triggers extendTop and we
+      // loop forever.
+      if (calState.suppressNextExtendUntilScrollTop) {
+        calState.suppressNextExtendUntilScrollTop = false;
+        refreshSub();
+        return;
+      }
       const max = grid.scrollHeight - grid.clientHeight;
       if (grid.scrollTop < 200) extendTop();
       else if (grid.scrollTop > max - 200) extendBottom();
       refreshSub();
     });
-    // First paint: scroll today's row into the upper third of the viewport
-    // (so a few weeks of context above are visible without scrolling).
-    const todayCell = grid.querySelector('.cal-cell.today');
-    if (todayCell) {
-      const rh = rowHeight();
-      const todayIdx = +todayCell.dataset.cellIdx;
-      const todayRow = Math.floor(todayIdx / 7);
-      grid.scrollTop = Math.max(0, todayRow * rh - 80);
+    // Scroll-to-today only when the window was just (re-)anchored —
+    // i.e. on first mount, after Today, after ‹ / ›, or after the format
+    // toggle. Re-renders triggered by extendTop / extendBottom keep their
+    // explicit scrollTop set by the extend caller.
+    if (calState.scrollToTodayPending) {
+      const todayCell = grid.querySelector('.cal-cell.today');
+      if (todayCell) {
+        const rh = rowHeight();
+        const todayIdx = +todayCell.dataset.cellIdx;
+        const todayRow = Math.floor(todayIdx / 7);
+        calState.suppressNextExtendUntilScrollTop = true;
+        grid.scrollTop = Math.max(0, todayRow * rh - 80);
+      }
+      calState.scrollToTodayPending = false;
     }
     refreshSub();
   }
