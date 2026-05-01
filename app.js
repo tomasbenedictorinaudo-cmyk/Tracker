@@ -10904,12 +10904,13 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const mod = isMac ? '⌘' : 'Ctrl';
     const sections = [
       ['Global', [
-        [`${mod}+K`,             'Open Quick Add'],
+        [`${mod}+K`,             'Open command palette'],
         [`${mod}+Z`,             'Undo'],
         [`${mod}+Shift+Z`,       'Redo'],
         [`${mod}+\\`,            'Toggle meeting notes'],
         [`/`,                    'Focus search'],
         [`?`,                    'Open this cheatsheet'],
+        [`← / →`,                'Calendar: previous / next month'],
       ]],
       ['Editing', [
         ['Right-click any row',  'Edit / status / delete menu'],
@@ -10938,8 +10939,16 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <div class="help-row"><kbd>${escapeHTML(k)}</kbd><span>${escapeHTML(v)}</span></div>
           `).join('')}
         </div>
-      </div>`).join('');
+      </div>`).join('') + `
+      <div class="help-section">
+        <div class="help-section-title">Re-run intro</div>
+        <div class="help-row"><button class="ghost" id="btnHelpRunTour" style="padding:5px 10px;font-size:12px;">Run 5-step tour</button><span>Get the guided introduction again.</span></div>
+      </div>`;
     overlay.hidden = false;
+    $('#btnHelpRunTour')?.addEventListener('click', () => {
+      $('#helpOverlay').hidden = true;
+      runTour(0);
+    });
   }
 
   /* ----------------------------- wire-up ----------------------------- */
