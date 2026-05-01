@@ -1066,18 +1066,17 @@ input, select, textarea { font: inherit; color: inherit; }
    with the grid's outer border. */
 .cal-cell:nth-child(8n) { border-right: 0; }
 /* Alternating month bands. Odd months (Feb / Apr / Jun…) get a quiet
-   tinted background; even months (Jan / Mar / May…) keep the default.
-   The difference is small but enough that the eye can pick out month
-   boundaries while scrolling continuously through many months. The
-   first-of-month inline tag ('Apr 1', 'May 1' …) provides the
-   precise boundary marker. Compare to the previous in-month/
-   out-of-month dimming, which only worked when paging by month and
-   read incorrectly under continuous scroll. */
-.cal-cell.month-band { background: rgba(255,255,255,.025); }
-:root[data-theme="light"] .cal-cell.month-band { background: rgba(0,0,0,.018); }
+   violet tint that matches the brand mark / Quick-add button (#b389ff
+   = rgb(179,137,255)); even months keep the default background. The
+   tint is faint enough not to hurt readability but distinct enough
+   not to confuse with the weekend tint (which is a warm white wash).
+   First-of-month inline tag ('Apr 1', 'May 1' …) marks the precise
+   boundary. */
+.cal-cell.month-band { background: rgba(179,137,255,.07); }
+:root[data-theme="light"] .cal-cell.month-band { background: rgba(179,137,255,.10); }
 .cal-cell.weekend { background: rgba(255,255,255,.012); }
-.cal-cell.month-band.weekend { background: rgba(255,255,255,.04); }
-:root[data-theme="light"] .cal-cell.month-band.weekend { background: rgba(0,0,0,.03); }
+.cal-cell.month-band.weekend { background: rgba(179,137,255,.11); }
+:root[data-theme="light"] .cal-cell.month-band.weekend { background: rgba(179,137,255,.14); }
 .cal-cell.today { box-shadow: inset 0 0 0 2px var(--accent); }
 .cal-cell.today .cal-day-num { color: var(--accent); font-weight: 700; }
 .cal-day-num {
