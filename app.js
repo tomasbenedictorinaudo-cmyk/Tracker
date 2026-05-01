@@ -11623,7 +11623,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         </div>
         <div class="page-actions">
           <div class="seg" role="tablist" aria-label="Calendar format">
-            <button type="button" class="seg-btn ${calState.format === 'month'    ? 'active' : ''}" data-cal-format="month"    title="Month grid view">Month</button>
+            <button type="button" class="seg-btn ${calState.format === 'month'    ? 'active' : ''}" data-cal-format="month"    title="Calendar view (vertical week grid)">Calendar</button>
             <button type="button" class="seg-btn ${calState.format === 'timeline' ? 'active' : ''}" data-cal-format="timeline" title="Horizontal timeline view">Timeline</button>
           </div>
           ${calState.format === 'timeline' ? `
