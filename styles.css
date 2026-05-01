@@ -553,6 +553,94 @@ input, select, textarea { font: inherit; color: inherit; }
   margin: 2px 0 6px 4px;
 }
 
+/* Phase F — depends-on multi-select + Gantt arrows + critical path */
+.depends-input {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.depends-chips {
+  display: flex; flex-wrap: wrap; gap: 5px;
+  min-height: 0;
+}
+.dep-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 4px 3px 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text);
+  max-width: 240px;
+}
+.dep-chip-text {
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  max-width: 200px;
+}
+.dep-chip-x {
+  background: transparent; border: 0;
+  width: 16px; height: 16px; line-height: 1;
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 14px;
+  cursor: pointer;
+}
+.dep-chip-x:hover { background: var(--bg-1); color: var(--text); }
+
+.depends-search { position: relative; }
+.depends-search input {
+  width: 100%;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  color: var(--text);
+  font-size: 12px;
+}
+.depends-search input:focus { outline: none; border-color: var(--accent); }
+.depends-results {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 2px);
+  left: 0; right: 0;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 22px rgba(0,0,0,.35);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.depends-result {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+}
+.depends-result:hover { background: var(--bg-2); }
+.depends-result-meta { color: var(--text-faint); font-size: 11px; }
+.depends-empty { padding: 8px 10px; font-size: 12px; color: var(--text-faint); }
+
+/* Gantt connector arrows */
+.tl-dep-svg { pointer-events: none; }
+.tl-dep-arrow {
+  stroke: var(--text-faint);
+  stroke-width: 1.5;
+  opacity: .55;
+  color: var(--text-faint);
+}
+.tl-dep-arrow.critical {
+  stroke: var(--bad);
+  stroke-width: 2;
+  opacity: .9;
+  color: var(--bad);
+}
+/* Critical-path bars get a faint red ring without overpainting status colors */
+.tl-bar.critical-path {
+  outline: 1.5px solid var(--bad);
+  outline-offset: -1px;
+  box-shadow: 0 0 0 2px rgba(248,113,113,.18);
+}
+
 .nav-item {
   display: flex; align-items: center; gap: 10px;
   width: 100%;

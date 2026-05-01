@@ -3185,6 +3185,13 @@
       eventsRow.appendChild(m);
     });
 
+    // Critical-path detection — for every open milestone, walk back via
+    // dependsOn to find the longest unbroken chain. Every action on that
+    // chain gets a class on its bar; it also includes the actions linked
+    // to the milestone via a.milestone (since the milestone date is the
+    // chain's endpoint).
+    const criticalSet = computeCriticalActions(proj);
+
     // Draw bars
     actions.forEach((a) => {
       if (!a.due) return;
@@ -3208,7 +3215,7 @@
       const onHoliday = (holDue || holStart) && a.status !== 'done';
       const overload = actOverloads[a.id];
       const cmt = (typeof a.commitment === 'number') ? a.commitment : 100;
-      bar.className = `tl-bar ${a.status} ${dueCls === 'late' && a.status !== 'done' ? 'late' : ''} ${onHoliday ? 'holiday-conflict' : ''} ${overload ? 'over-allocated' : ''}`;
+      bar.className = `tl-bar ${a.status} ${dueCls === 'late' && a.status !== 'done' ? 'late' : ''} ${onHoliday ? 'holiday-conflict' : ''} ${overload ? 'over-allocated' : ''} ${criticalSet.has(a.id) ? 'critical-path' : ''}`;
       bar.style.left = left + 'px';
       bar.style.width = w + 'px';
       bar.dataset.id = a.id;
@@ -3268,6 +3275,130 @@
         toast('Action created — double-click bar to edit');
       });
     });
+
+    // Phase F — render dependency arrows on top of all bars. Drawn last so
+    // they sit above the grid lines, but pointer-events: none so bars stay
+    // interactive.
+    drawDependencyArrows(actions, gridEl, criticalSet);
+  }
+
+  // Walk back from every open milestone through dependsOn to flag the
+  // critical actions. Returns a Set of action ids on the longest chain to
+  // each open milestone (plus the actions directly linked to it).
+  function computeCriticalActions(proj) {
+    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    const byId = new Map(acts.map((a) => [a.id, a]));
+    const critical = new Set();
+    const depths = new Map();
+    const onStack = new Set();
+    function depth(id) {
+      if (depths.has(id)) return depths.get(id);
+      if (onStack.has(id)) return 0; // cycle guard
+      onStack.add(id);
+      const a = byId.get(id);
+      if (!a) { onStack.delete(id); return 0; }
+      const deps = (a.dependsOn || []).filter((d) => byId.has(d));
+      let best = 0;
+      deps.forEach((d) => { best = Math.max(best, depth(d)); });
+      onStack.delete(id);
+      depths.set(id, 1 + best);
+      return 1 + best;
+    }
+    function chain(id) {
+      const a = byId.get(id);
+      if (!a || critical.has(id)) return;
+      critical.add(id);
+      const deps = (a.dependsOn || []).filter((d) => byId.has(d));
+      if (!deps.length) return;
+      let bestDep = null, bestVal = -1;
+      deps.forEach((d) => { const v = depth(d); if (v > bestVal) { bestVal = v; bestDep = d; } });
+      if (bestDep) chain(bestDep);
+    }
+    (proj.milestones || []).forEach((m) => {
+      if (m.done || m.status === 'done') return;
+      const targets = acts.filter((a) => a.milestone === m.id && !isClosedStatus(a.status));
+      targets.forEach((t) => { depth(t.id); chain(t.id); });
+    });
+    return critical;
+  }
+
+  function drawDependencyArrows(actions, gridEl, criticalSet) {
+    const bars = Array.from(gridEl.querySelectorAll('.tl-bar[data-id]'));
+    if (!bars.length) return;
+    const byId = new Map(actions.map((a) => [a.id, a]));
+    const barById = new Map(bars.map((b) => [b.dataset.id, b]));
+
+    // Need positions relative to gridEl
+    const gridRect = gridEl.getBoundingClientRect();
+    function rectOf(b) {
+      const r = b.getBoundingClientRect();
+      return {
+        x: r.left - gridRect.left + gridEl.scrollLeft,
+        y: r.top - gridRect.top + gridEl.scrollTop,
+        w: r.width,
+        h: r.height,
+      };
+    }
+    const pairs = [];
+    actions.forEach((a) => {
+      if (!a.due) return;
+      const deps = a.dependsOn || [];
+      if (!deps.length) return;
+      const target = barById.get(a.id);
+      if (!target) return;
+      deps.forEach((depId) => {
+        const src = byId.get(depId);
+        const srcBar = barById.get(depId);
+        if (!src || !srcBar) return;
+        pairs.push({ src, srcBar, dst: a, dstBar: target });
+      });
+    });
+    if (!pairs.length) return;
+
+    // SVG overlay sized to the grid's full content
+    const w = gridEl.scrollWidth || gridEl.clientWidth;
+    const h = gridEl.scrollHeight || gridEl.clientHeight;
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('class', 'tl-dep-svg');
+    svg.setAttribute('width', String(w));
+    svg.setAttribute('height', String(h));
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.style.position = 'absolute';
+    svg.style.left = '0';
+    svg.style.top = '0';
+    svg.style.pointerEvents = 'none';
+
+    const defs = document.createElementNS(NS, 'defs');
+    defs.innerHTML = `
+      <marker id="depArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="currentColor" />
+      </marker>
+      <marker id="depArrowCrit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+        <path d="M0,0 L10,5 L0,10 z" fill="#f87171" />
+      </marker>`;
+    svg.appendChild(defs);
+
+    pairs.forEach(({ src, dst, srcBar, dstBar }) => {
+      const a = rectOf(srcBar);
+      const b = rectOf(dstBar);
+      const x1 = a.x + a.w;
+      const y1 = a.y + a.h / 2;
+      const x2 = b.x;
+      const y2 = b.y + b.h / 2;
+      const isCritical = criticalSet.has(src.id) && criticalSet.has(dst.id);
+      const path = document.createElementNS(NS, 'path');
+      // Cubic bezier — a small horizontal lead-out and lead-in so connectors
+      // look intentional and don't clip into bar edges.
+      const handle = Math.max(12, Math.min(60, (x2 - x1) / 2));
+      const d = `M ${x1} ${y1} C ${x1 + handle} ${y1}, ${x2 - handle} ${y2}, ${x2 - 4} ${y2}`;
+      path.setAttribute('d', d);
+      path.setAttribute('fill', 'none');
+      path.setAttribute('class', 'tl-dep-arrow' + (isCritical ? ' critical' : ''));
+      path.setAttribute('marker-end', isCritical ? 'url(#depArrowCrit)' : 'url(#depArrow)');
+      svg.appendChild(path);
+    });
+    gridEl.appendChild(svg);
   }
 
   function showTLTooltip(html, clientX, clientY) {
@@ -7266,6 +7397,9 @@
           <select id="dMile"><option value="">—</option>${(proj.milestones || []).map((m) => `<option value="${m.id}" ${m.id === a.milestone ? 'selected' : ''}>${escapeHTML(m.name)}</option>`).join('')}</select>
         </div>
       </div>
+      <div class="field"><label>Depends on <span class="muted">— actions that must finish before this one</span></label>
+        <div class="depends-input" id="dDependsWrap"></div>
+      </div>
       <div class="field"><label>Notes / justification</label><textarea id="dNotes">${escapeHTML(a.notes || '')}</textarea></div>
       <div class="field"><label>History</label>
         <div class="history">${(a.history || []).slice(-10).reverse().map((h) => `<div class="history-item"><b>${h.at}</b> — ${escapeHTML(h.what)}</div>`).join('')}</div>
@@ -7276,6 +7410,97 @@
       </div>`;
     $('#drawer').hidden = false;
     $('#dCmt').addEventListener('input', (e) => { $('#dCmtVal').textContent = e.target.value + '%'; });
+
+    // Depends-on multi-select. Local working list mirrored back to a.dependsOn
+    // on save. Self-references and would-be cycles are filtered from the
+    // candidate dropdown so users can't create them in the first place.
+    const drawerDeps = Array.isArray(a.dependsOn) ? a.dependsOn.slice() : [];
+    function reverseDepGraph(actsList) {
+      // For cycle prevention: collect every action that already (transitively)
+      // depends on the action we're editing — those can't be added as deps.
+      const reverse = new Map();
+      actsList.forEach((x) => (x.dependsOn || []).forEach((depId) => {
+        if (!reverse.has(depId)) reverse.set(depId, new Set());
+        reverse.get(depId).add(x.id);
+      }));
+      const blocked = new Set();
+      const stack = [a.id];
+      while (stack.length) {
+        const id = stack.pop();
+        if (blocked.has(id)) continue;
+        blocked.add(id);
+        (reverse.get(id) || []).forEach((parent) => stack.push(parent));
+      }
+      return blocked;
+    }
+    function renderDepsUI() {
+      const wrap = $('#dDependsWrap');
+      const acts = (proj.actions || []).filter((x) => !x.deletedAt);
+      const byId = new Map(acts.map((x) => [x.id, x]));
+      const blocked = reverseDepGraph(acts); // includes a.id itself
+      wrap.innerHTML = `
+        <div class="depends-chips">
+          ${drawerDeps.map((id) => {
+            const dep = byId.get(id);
+            if (!dep) return '';
+            return `<span class="dep-chip" data-id="${escapeHTML(id)}">
+              <span class="dep-chip-text">${escapeHTML(dep.title)}</span>
+              <button type="button" class="dep-chip-x" data-action="remove" title="Remove">×</button>
+            </span>`;
+          }).join('')}
+        </div>
+        <div class="depends-search" data-empty="Add a dependency…">
+          <input type="text" id="dDepSearch" placeholder="Type to search actions…" autocomplete="off" />
+          <div class="depends-results" id="dDepResults" hidden></div>
+        </div>`;
+      wrap.querySelectorAll('[data-action="remove"]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.closest('.dep-chip')?.dataset.id;
+          const idx = drawerDeps.indexOf(id);
+          if (idx >= 0) drawerDeps.splice(idx, 1);
+          renderDepsUI();
+        });
+      });
+      const inp = $('#dDepSearch');
+      const results = $('#dDepResults');
+      const updateResults = () => {
+        const q = inp.value.trim().toLowerCase();
+        const candidates = acts.filter((x) =>
+          x.id !== a.id &&
+          !drawerDeps.includes(x.id) &&
+          !blocked.has(x.id));
+        const ranked = q
+          ? candidates.map((x) => ({ x, s: fuzzyScore(q, (x.title + ' ' + personName(x.owner))) }))
+              .filter((r) => r.s > 0)
+              .sort((p, q2) => q2.s - p.s)
+          : candidates.slice(0, 8).map((x) => ({ x, s: 0 }));
+        const list = ranked.slice(0, 8);
+        if (!list.length) {
+          results.innerHTML = '<div class="depends-empty">No matches</div>';
+        } else {
+          results.innerHTML = list.map((r) => `
+            <div class="depends-result" data-id="${escapeHTML(r.x.id)}">
+              <span class="depends-result-title">${escapeHTML(r.x.title)}</span>
+              <span class="depends-result-meta">${escapeHTML(personName(r.x.owner))}${r.x.due ? ' · ' + r.x.due : ''}</span>
+            </div>`).join('');
+        }
+        results.hidden = false;
+        results.querySelectorAll('.depends-result').forEach((row) => {
+          row.addEventListener('mousedown', (e) => {
+            e.preventDefault();
+            const id = row.dataset.id;
+            if (!drawerDeps.includes(id)) drawerDeps.push(id);
+            renderDepsUI();
+            setTimeout(() => $('#dDepSearch')?.focus(), 0);
+          });
+        });
+      };
+      inp.addEventListener('focus', updateResults);
+      inp.addEventListener('input', updateResults);
+      inp.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 120));
+    }
+    renderDepsUI();
+
     $('#dSave').addEventListener('click', () => {
       const oldStatus = a.status;
       const oldOwner = a.owner;
@@ -7299,6 +7524,10 @@
       }
       a.commitment = clamp(parseInt($('#dCmt').value, 10) || 100, 5, 100);
       if (oldCmt !== a.commitment) a.history.push({ at: todayISO(), what: `Commitment: ${oldCmt}% → ${a.commitment}%` });
+      const oldDeps = Array.isArray(a.dependsOn) ? a.dependsOn.slice() : [];
+      a.dependsOn = drawerDeps.slice();
+      const depsChanged = oldDeps.length !== a.dependsOn.length || oldDeps.some((d, i) => d !== a.dependsOn[i]);
+      if (depsChanged) a.history.push({ at: todayISO(), what: `Dependencies: ${oldDeps.length} → ${a.dependsOn.length}` });
       a.notes = $('#dNotes').value;
       a.updatedAt = todayISO();
       if (oldStatus !== a.status) a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${a.status}` });
