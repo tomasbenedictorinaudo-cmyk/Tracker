@@ -11792,7 +11792,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // Per-kind counts for the legend (using the unfiltered set so users
     // see the underlying total, not the post-filter count).
     const kindCounts = { milestone: 0, deliverable: 0, action: 0, cr: 0, meeting: 0 };
-    allItems.forEach((it) => { if (it.kind in kindCounts) kindCounts[it.kind]++; });
+    allItems.forEach((it) => {
+      // Ranged milestones expand into one item per day in buildCalendarItems
+      // — but for the legend counter we want one count per *record*, not
+      // per day. Skip the middle/end positions so a 5-day range
+      // milestone counts as 1.
+      if (it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')) return;
+      if (it.kind in kindCounts) kindCounts[it.kind]++;
+    });
 
     const todayISO_ = todayISO();
     const dayHeaders = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -12404,7 +12411,15 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             if (!r.endDate || ns <= r.endDate) r.date = ns;
           }
         }
+        // commit() rebuilds the calendar DOM, which makes the new
+        // .tl-scroll start at scrollLeft=0. Capture the user's current
+        // horizontal scroll and restore it on the new element so the
+        // drag doesn't auto-pan the view.
+        const liveScroll = stage.closest('.tl-scroll');
+        const savedScrollLeft = liveScroll ? liveScroll.scrollLeft : 0;
         commit('timeline-drag');
+        const newScroll = $('.tl-scroll');
+        if (newScroll) newScroll.scrollLeft = savedScrollLeft;
       }
       document.addEventListener('mousemove', onMove);
       document.addEventListener('mouseup', onUp);
