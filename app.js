@@ -10647,6 +10647,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     sc('Open Reports',          'Status report',     () => { state.currentView = 'reports'; render(); });
     sc('Toggle theme',          'Light / dark',      () => $('#btnTheme')?.click());
     sc('Toggle notes',          'Side panel',        () => $('#btnNotesToggle')?.click());
+    sc('Run tour',              '5-step intro',      () => runTour(0));
 
     state.projects.forEach((proj) => {
       // Project itself
@@ -10943,6 +10944,111 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
 
   /* ----------------------------- wire-up ----------------------------- */
 
+  /* ----------------------- Phase L: first-run tour --------------------- */
+  // 5-step Shepherd-style overlay. Pinned to the most stable selectors
+  // available; if a target isn't on screen (rare), we still show the
+  // step's body in a centered card. Sets state.settings.tourSeen on
+  // skip / finish so it never auto-fires twice.
+  const TOUR_STEPS = [
+    {
+      target: '#sidebar .nav, .sidebar nav',
+      side: 'right',
+      title: 'Navigate the project',
+      body: 'Switch views from here — Board, Register, Timeline, Calendar, Reports, plus engineering side-views like Risks and Change Requests.',
+    },
+    {
+      target: '#btnQuickAdd',
+      side: 'bottom',
+      title: 'One palette for everything',
+      body: 'Press <b>⌘K</b> (or click here) to open the universal palette. Type to search across actions, links, decisions, risks — or run quick commands like <i>+ action</i>, <i>report</i>, <i>today</i>.',
+    },
+    {
+      target: '.card[data-id]',
+      side: 'right',
+      title: 'Edit anywhere',
+      body: 'Click any card to open its drawer. Drag between columns to change status. Hover to reveal a <b>⋯</b> menu with quick actions like Mark blocked / Add note / Archive.',
+    },
+    {
+      target: '#btnInbox',
+      side: 'bottom',
+      title: 'Stay on top of what\'s slipping',
+      body: 'The bell aggregates late actions, due-soon items, aging change requests and uncovered risks. Click an item to jump to it; dismissals stick.',
+    },
+    {
+      target: '#btnHelp',
+      side: 'bottom',
+      title: 'Keyboard shortcuts',
+      body: 'Press <b>?</b> any time for the full shortcut cheatsheet. You can re-run this tour from there.',
+    },
+  ];
+  function maybeRunFirstRunTour() {
+    if (state.settings?.tourSeen) return;
+    setTimeout(() => runTour(0), 600); // wait for first render
+  }
+  function runTour(stepIdx) {
+    closeTour();
+    if (stepIdx < 0 || stepIdx >= TOUR_STEPS.length) {
+      finishTour();
+      return;
+    }
+    const step = TOUR_STEPS[stepIdx];
+    const target = document.querySelector(step.target);
+    const overlay = document.createElement('div');
+    overlay.className = 'tour-overlay';
+    overlay.innerHTML = `
+      <div class="tour-mask" id="tourMask"></div>
+      <div class="tour-card" id="tourCard">
+        <div class="tour-step">Step ${stepIdx + 1} of ${TOUR_STEPS.length}</div>
+        <div class="tour-title">${escapeHTML(step.title)}</div>
+        <div class="tour-body">${step.body}</div>
+        <div class="tour-foot">
+          <button class="ghost" id="tourSkip">Skip tour</button>
+          <button class="primary" id="tourNext">${stepIdx === TOUR_STEPS.length - 1 ? 'Finish' : 'Next →'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const card = overlay.querySelector('#tourCard');
+    const mask = overlay.querySelector('#tourMask');
+    if (target) {
+      target.classList.add('tour-highlight');
+      const r = target.getBoundingClientRect();
+      // Soft-spot the highlighted region with a ring on the mask
+      mask.style.setProperty('--spot-x', (r.left + r.width / 2) + 'px');
+      mask.style.setProperty('--spot-y', (r.top + r.height / 2) + 'px');
+      mask.style.setProperty('--spot-r', (Math.max(r.width, r.height) / 2 + 12) + 'px');
+      // Place the card to the side requested by the step (clamp to viewport)
+      const W = card.getBoundingClientRect().width || 320;
+      const H = card.getBoundingClientRect().height || 160;
+      const margin = 16;
+      let x = r.right + margin, y = r.top;
+      if (step.side === 'bottom') { x = Math.max(margin, r.left); y = r.bottom + margin; }
+      if (step.side === 'left')   { x = Math.max(margin, r.left - W - margin); y = r.top; }
+      if (step.side === 'right')  { x = r.right + margin; y = Math.max(margin, r.top); }
+      x = clamp(x, margin, innerWidth - W - margin);
+      y = clamp(y, margin, innerHeight - H - margin);
+      card.style.left = x + 'px';
+      card.style.top = y + 'px';
+    } else {
+      // No anchor — center the card and fade the mask uniformly
+      mask.classList.add('full');
+      card.style.left = '50%';
+      card.style.top = '50%';
+      card.style.transform = 'translate(-50%, -50%)';
+    }
+    overlay.querySelector('#tourSkip').addEventListener('click', () => { closeTour(); finishTour(); });
+    overlay.querySelector('#tourNext').addEventListener('click', () => runTour(stepIdx + 1));
+  }
+  function closeTour() {
+    document.querySelectorAll('.tour-highlight').forEach((el) => el.classList.remove('tour-highlight'));
+    document.querySelectorAll('.tour-overlay').forEach((el) => el.remove());
+  }
+  function finishTour() {
+    state.settings = state.settings || {};
+    state.settings.tourSeen = true;
+    saveState();
+    toast('Tour finished — press ? for shortcuts');
+  }
+
   function init() {
     state = loadState();
     // Run a single comprehensive backfill so every renderer gets the fields it
@@ -11118,6 +11224,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     setTimeout(maybeNotifyInbox, 1500);
 
     render();
+    maybeRunFirstRunTour();
   }
 
   document.addEventListener('DOMContentLoaded', init);
