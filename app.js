@@ -965,6 +965,10 @@
     });
     card.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return; // left mouse only
+      // Don't initiate drag from the ⋯ overflow button — startCardDrag
+      // hides the card via display:none on mousedown, which would tear
+      // the button out from under the click event before it fires.
+      if (e.target.closest('[data-action="overflow"]')) return;
       startCardDrag(e, card, a);
     });
     card.addEventListener('contextmenu', (e) => {
