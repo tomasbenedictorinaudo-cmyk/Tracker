@@ -11529,22 +11529,22 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   }
 
   function renderCalendar(root) {
-    const proj = curProject();
+    const proj = curProject(); // merged project (id: '__all__') when all-projects is selected
     const view = document.createElement('div');
     view.className = 'view';
-    const isAll = state.currentProjectId === '__all__';
-    if (isAll || !proj) {
+    if (!proj) {
       view.innerHTML = `
         <div class="page-head">
           <div>
             <div class="page-title">Calendar</div>
-            <div class="page-sub">Pick a project to see its month grid.</div>
+            <div class="page-sub">No project loaded.</div>
           </div>
         </div>
-        <div class="empty">Calendar is project-scoped. Choose a project from the topbar.</div>`;
+        <div class="empty">Pick a project (or 'All projects') from the topbar.</div>`;
       root.appendChild(view);
       return;
     }
+    const isMerged = state.currentProjectId === '__all__';
     const { year, month, monthLabel, cells } = calendarMonthBounds();
     const gridStartISO = fmtISO(cells[0]);
     const gridEndISO   = fmtISO(cells[cells.length - 1]);
@@ -11637,9 +11637,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
               <button type="button" class="seg-btn ${calState.tlZoom === 'week'  ? 'active' : ''}" data-tl-zoom="week"  title="Tick every Monday">Week</button>
               <button type="button" class="seg-btn ${calState.tlZoom === 'month' ? 'active' : ''}" data-tl-zoom="month" title="Tick every 1st of month">Month</button>
             </div>` : ''}
-          <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
-          <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
-          <button class="ghost" id="calAddMtg"  title="Add a meeting (one-off or recurring)">+ Meeting</button>
+          ${isMerged ? '' : `
+            <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
+            <button class="ghost" id="calAddDel"  title="Add a deliverable">+ Deliverable</button>
+            <button class="ghost" id="calAddMtg"  title="Add a meeting (one-off or recurring)">+ Meeting</button>
+          `}
           <button class="icon-btn" id="calPrev" title="Previous month (←)">‹</button>
           <button class="ghost"   id="calToday" title="Jump to current month">Today</button>
           <button class="icon-btn" id="calNext" title="Next month (→)">›</button>
@@ -11675,10 +11677,19 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
 
     $('#calPrev').addEventListener('click', () => { calState.monthOffset -= 1; render(); });
     $('#calNext').addEventListener('click', () => { calState.monthOffset += 1; render(); });
-    $('#calToday').addEventListener('click', () => { calState.monthOffset = 0; render(); });
-    $('#calAddMile').addEventListener('click', () => openQuickAdd('milestone'));
-    $('#calAddDel').addEventListener('click', () => openQuickAdd('deliverable'));
-    $('#calAddMtg').addEventListener('click', () => openQuickAdd('meeting'));
+    $('#calToday').addEventListener('click', () => {
+      // Always re-anchor to today's month, even if monthOffset is already
+      // 0 (the user may have scrolled away and 'Today' must still snap
+      // them back). Forcing firstWeekStart to null re-runs the
+      // ensureCalendarWindow re-center.
+      calState.monthOffset = 0;
+      calState.firstWeekStart = null;
+      calState.scrollToTodayPending = true;
+      render();
+    });
+    $('#calAddMile')?.addEventListener('click', () => openQuickAdd('milestone'));
+    $('#calAddDel')?.addEventListener('click', () => openQuickAdd('deliverable'));
+    $('#calAddMtg')?.addEventListener('click', () => openQuickAdd('meeting'));
 
     // Format toggle (Month / Timeline)
     view.querySelectorAll('[data-cal-format]').forEach((btn) => {
@@ -11841,9 +11852,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       // loop forever.
       if (calState.suppressNextExtendUntilScrollTop) {
         calState.suppressNextExtendUntilScrollTop = false;
+        calState.lastScrollTop = grid.scrollTop;
         refreshSub();
         return;
       }
+      calState.lastScrollTop = grid.scrollTop;
       const max = grid.scrollHeight - grid.clientHeight;
       if (grid.scrollTop < 200) extendTop();
       else if (grid.scrollTop > max - 200) extendBottom();
@@ -11851,18 +11864,34 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     });
     // Scroll-to-today only when the window was just (re-)anchored —
     // i.e. on first mount, after Today, after ‹ / ›, or after the format
-    // toggle. Re-renders triggered by extendTop / extendBottom keep their
-    // explicit scrollTop set by the extend caller.
+    // toggle. Re-renders triggered by extendTop / extendBottom keep
+    // their explicit scrollTop set by the extend caller.
     if (calState.scrollToTodayPending) {
-      const todayCell = grid.querySelector('.cal-cell.today');
-      if (todayCell) {
-        const rh = rowHeight();
-        const todayIdx = +todayCell.dataset.cellIdx;
-        const todayRow = Math.floor(todayIdx / 7);
+      // Show the WHOLE month containing today: scroll so the row
+      // holding the 1st-of-month is at the top of the viewport.
+      // Use getBoundingClientRect-relative math because the grid
+      // doesn't have position:relative and offsetTop would resolve
+      // against a far ancestor.
+      const today = new Date();
+      const ymPrefix = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-01`;
+      const targetCell = grid.querySelector(`.cal-cell[data-iso="${ymPrefix}"]`)
+                       || grid.querySelector('.cal-cell.today');
+      if (targetCell) {
+        const gridTop = grid.getBoundingClientRect().top;
+        const cellTop = targetCell.getBoundingClientRect().top;
+        const delta = cellTop - gridTop;
+        const max = Math.max(0, grid.scrollHeight - grid.clientHeight);
         calState.suppressNextExtendUntilScrollTop = true;
-        grid.scrollTop = Math.max(0, todayRow * rh - 80);
+        grid.scrollTop = clamp(grid.scrollTop + delta, 0, max);
+        calState.lastScrollTop = grid.scrollTop;
       }
       calState.scrollToTodayPending = false;
+    } else if (typeof calState.lastScrollTop === 'number') {
+      // Preserve scroll position across re-renders that don't re-anchor
+      // the window. Without this, switching to the calendar view resets
+      // scrollTop to 0 and the user loses their place.
+      calState.suppressNextExtendUntilScrollTop = true;
+      grid.scrollTop = calState.lastScrollTop;
     }
     refreshSub();
   }
