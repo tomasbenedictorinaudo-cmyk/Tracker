@@ -11244,6 +11244,128 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // around the anchor month.
     return Math.max(84, Math.ceil(3000 / Math.max(0.1, pxPerDay)));
   }
+  // Table format: sortable list of every dated item across a generous
+  // window. Same data as the Calendar / Timeline views (going through
+  // buildCalendarItems), same kind filters via the legend pills, same
+  // click-through opening the relevant editor — just as a flat table
+  // ordered by date so users can scan upcoming work at a glance.
+  const tableState = {
+    sortBy: 'date',     // 'date' | 'kind' | 'title' | 'sub'
+    sortDir: 'asc',     // 'asc' | 'desc'
+  };
+  function renderCalendarTable() {
+    const proj = curProject();
+    const todayD = new Date();
+    const todayISO_ = todayISO();
+    // 12-month window centred on the anchor month (~6 before, ~6 after).
+    const anchor = new Date(todayD.getFullYear(), todayD.getMonth() + calState.monthOffset, 1);
+    const startDate = new Date(anchor.getFullYear(), anchor.getMonth() - 6, 1);
+    const endDate   = new Date(anchor.getFullYear(), anchor.getMonth() + 7, 0);
+    const startISO  = fmtISO(startDate);
+    const endISO    = fmtISO(endDate);
+
+    const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
+    const filtered = allItems.filter((it) => calState.visible[it.kind] !== false);
+    // Drop range middle/end (we'll show the start row with the range
+    // length appended in the date column).
+    const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
+
+    // Per-kind label + icon for the Kind column
+    const kindLabels = { milestone: 'Milestone', deliverable: 'Deliverable', action: 'Action', meeting: 'Meeting', cr: 'Change request' };
+
+    // For range milestones, find the matching 'end' position so we can
+    // surface 'May 1 → May 4' in the Date column.
+    function endIsoFor(it) {
+      if (it.kind === 'milestone' && it.rangePos === 'start') {
+        const same = filtered.filter((x) => x.kind === 'milestone' && x.label === it.label && x.date >= it.date);
+        return same.reduce((mx, x) => x.date > mx ? x.date : mx, it.date);
+      }
+      return null;
+    }
+    function dateLabelOf(it) {
+      const end = endIsoFor(it);
+      const base = parseDate(it.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      if (end && end !== it.date) {
+        const e = parseDate(end).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        return `${base} → ${e}`;
+      }
+      return base;
+    }
+
+    // Component label (for the Kind column subtitle when present)
+    function componentName(it) {
+      // The chip's tint is derived from item.component → lookup name.
+      // We don't have a direct id reference on `it`, but `it.sub` already
+      // includes the component name when set (set in buildCalendarItems).
+      return null;
+    }
+
+    // Sorting
+    const dir = tableState.sortDir === 'asc' ? 1 : -1;
+    const cmp = (a, b) => {
+      const get = (it) => {
+        switch (tableState.sortBy) {
+          case 'date':  return it.date;
+          case 'kind':  return it.kind;
+          case 'title': return (it.label || '').toLowerCase();
+          case 'sub':   return (it.sub || '').toLowerCase();
+          default:      return it.date;
+        }
+      };
+      const av = get(a), bv = get(b);
+      if (av < bv) return -1 * dir;
+      if (av > bv) return  1 * dir;
+      return 0;
+    };
+    items.sort(cmp);
+
+    // Run-callback resolution map (mirrors timeline)
+    calState._tlRunMap = new Map();
+    let _ctr = 0;
+    function runKey(it) { const k = 'tbl-' + (++_ctr); calState._tlRunMap.set(k, it.run); return k; }
+
+    const sortIcon = (col) => tableState.sortBy === col
+      ? (tableState.sortDir === 'asc' ? ' ▲' : ' ▼')
+      : '';
+
+    const rowsHTML = items.map((it) => {
+      const past   = it.date < todayISO_;
+      const today  = it.date === todayISO_;
+      const tintStyle = it.tint ? `--cal-chip-tint:${it.tint};` : '';
+      const tintCls   = it.tint ? ' has-tint' : '';
+      const dateCls   = today ? 'is-today' : (past ? 'is-past' : '');
+      return `
+        <tr class="cal-tbl-row kind-${it.kind}${tintCls}" data-tl-run-key="${runKey(it)}" style="${tintStyle}">
+          <td class="cal-tbl-date ${dateCls}">${escapeHTML(dateLabelOf(it))}</td>
+          <td class="cal-tbl-kind">
+            <span class="cal-chip-icon kind-${it.kind}">${escapeHTML(it.icon || '·')}</span>
+            <span class="cal-tbl-kind-name">${escapeHTML(kindLabels[it.kind] || it.kind)}</span>
+          </td>
+          <td class="cal-tbl-title">${escapeHTML(it.label || '')}</td>
+          <td class="cal-tbl-sub">${escapeHTML(it.sub || '')}</td>
+        </tr>`;
+    }).join('');
+
+    const empty = items.length ? '' : `<div class="empty">No events in the visible window — toggle a filter or scroll to a different month.</div>`;
+
+    return `
+      <div class="cal-table-wrap">
+        ${empty}
+        ${items.length ? `
+          <table class="cal-table">
+            <thead>
+              <tr>
+                <th class="cal-tbl-date sortable" data-tbl-sort="date">Date${sortIcon('date')}</th>
+                <th class="cal-tbl-kind sortable" data-tbl-sort="kind">Kind${sortIcon('kind')}</th>
+                <th class="cal-tbl-title sortable" data-tbl-sort="title">Title${sortIcon('title')}</th>
+                <th class="cal-tbl-sub sortable" data-tbl-sort="sub">Detail${sortIcon('sub')}</th>
+              </tr>
+            </thead>
+            <tbody>${rowsHTML}</tbody>
+          </table>` : ''}
+      </div>`;
+  }
+
   function renderCalendarTimelineV2() {
     const proj = curProject();
     const todayISO_ = todayISO();
@@ -11728,6 +11850,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           <div class="seg" role="tablist" aria-label="Calendar format">
             <button type="button" class="seg-btn ${calState.format === 'month'    ? 'active' : ''}" data-cal-format="month"    title="Calendar view (vertical week grid)">Calendar</button>
             <button type="button" class="seg-btn ${calState.format === 'timeline' ? 'active' : ''}" data-cal-format="timeline" title="Horizontal timeline view">Timeline</button>
+            <button type="button" class="seg-btn ${calState.format === 'table'    ? 'active' : ''}" data-cal-format="table"    title="Sortable table of dated items">Table</button>
           </div>
           ${isMerged ? '' : `
             <button class="ghost" id="calAddMile" title="Add a milestone">+ Milestone</button>
@@ -11764,7 +11887,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           </div>
           <div class="cal-grid" id="calGrid">${cellHTML}</div>
         </div>
-      ` : renderCalendarTimelineV2()}`;
+      ` : calState.format === 'table'
+          ? renderCalendarTable()
+          : renderCalendarTimelineV2()}`;
     root.appendChild(view);
 
     $('#calPrev').addEventListener('click', () => { calState.monthOffset -= 1; render(); });
@@ -11833,14 +11958,29 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       });
     });
 
-    // Timeline-mode chip wiring — resolve via calState._tlRunMap which
-    // V2 populates while rendering. Independent of any outer byDate.
-    if (calState.format === 'timeline') {
+    // Timeline-mode chip / Table-mode row wiring — both populate
+    // calState._tlRunMap, so a single resolver works for both.
+    if (calState.format === 'timeline' || calState.format === 'table') {
       view.querySelectorAll('[data-tl-run-key]').forEach((el) => {
         el.addEventListener('click', (e) => {
           e.stopPropagation();
           const run = calState._tlRunMap?.get(el.dataset.tlRunKey);
           if (typeof run === 'function') run();
+        });
+      });
+    }
+    // Table-mode column sorting
+    if (calState.format === 'table') {
+      view.querySelectorAll('[data-tbl-sort]').forEach((th) => {
+        th.addEventListener('click', () => {
+          const col = th.dataset.tblSort;
+          if (tableState.sortBy === col) {
+            tableState.sortDir = tableState.sortDir === 'asc' ? 'desc' : 'asc';
+          } else {
+            tableState.sortBy = col;
+            tableState.sortDir = 'asc';
+          }
+          render();
         });
       });
     }
