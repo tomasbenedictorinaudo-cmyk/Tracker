@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-02T20:51:14.620Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-02T21:01:23.410Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -5842,7 +5842,7 @@ body.is-row-dragging *        { user-select: none !important; }
   /* ----------------------------- helpers ----------------------------- */
 
   const $ = (sel, root = document) => root.querySelector(sel);
-  const $ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
+  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
   const uid = (prefix = 'id') => prefix + '_' + Math.random().toString(36).slice(2, 9);
   const dayMs = 86400000;
   // Local-date YYYY-MM-DD (toISOString uses UTC and can shift the day in non-UTC zones)
@@ -6683,7 +6683,7 @@ body.is-row-dragging *        { user-select: none !important; }
   }
 
   function renderSidebar() {
-    $('.nav-item').forEach((b) => {
+    $$('.nav-item').forEach((b) => {
       b.classList.toggle('active', b.dataset.view === state.currentView);
     });
   }
@@ -7951,7 +7951,7 @@ body.is-row-dragging *        { user-select: none !important; }
           </div>
         </div>`;
       }).join('');
-      $('.op-item', list).forEach((el) => {
+      $$('.op-item', list).forEach((el) => {
         const id = el.dataset.id;
         // Title — plain text, save on blur
         const titleEl = el.querySelector('.op-title');
@@ -8542,7 +8542,7 @@ body.is-row-dragging *        { user-select: none !important; }
       } else {
         body.innerHTML = acts.map(rowHTML).join('');
       }
-      $('.reg-col', view).forEach((b) => b.classList.remove('asc', 'desc'));
+      $$('.reg-col', view).forEach((b) => b.classList.remove('asc', 'desc'));
       const active = view.querySelector(`.reg-col[data-col="${regState.sortBy}"]`);
       if (active) active.classList.add(regState.sortDir);
       // Wire drag-to-reorder on the rendered rows
@@ -8645,7 +8645,7 @@ body.is-row-dragging *        { user-select: none !important; }
       }
     }
 
-    $('.reg-col', view).forEach((btn) => {
+    $$('.reg-col', view).forEach((btn) => {
       btn.addEventListener('click', () => {
         const col = btn.dataset.col;
         if (regState.sortBy === col) regState.sortDir = regState.sortDir === 'asc' ? 'desc' : 'asc';
@@ -8779,14 +8779,14 @@ body.is-row-dragging *        { user-select: none !important; }
     if (!state.settings) state.settings = { holidayCountries: [] };
 
     // Mark active granularity
-    $('.seg-btn', view).forEach((b) => {
+    $$('.seg-btn', view).forEach((b) => {
       b.classList.toggle('active', b.dataset.gran === tlState.granularity);
       b.addEventListener('click', () => {
         if (tlState.granularity === b.dataset.gran) return;
         tlState.granularity = b.dataset.gran;
         tlState.dayWidth = GRANULARITIES[tlState.granularity].defaultDw;
         // re-mark
-        $('.seg-btn', view).forEach((x) => x.classList.toggle('active', x.dataset.gran === tlState.granularity));
+        $$('.seg-btn', view).forEach((x) => x.classList.toggle('active', x.dataset.gran === tlState.granularity));
         drawTimeline(acts);
         scrollToToday();
       });
@@ -8862,7 +8862,7 @@ body.is-row-dragging *        { user-select: none !important; }
       </div>`;
     pop.hidden = false;
 
-    $('input[type=checkbox]', pop).forEach((cb) => {
+    $$('input[type=checkbox]', pop).forEach((cb) => {
       cb.addEventListener('change', () => {
         const code = cb.dataset.code;
         let codes = activeHolidayCodes().slice();
@@ -8880,7 +8880,7 @@ body.is-row-dragging *        { user-select: none !important; }
       saveState();
       updateHolidayBadge();
       drawTimeline(acts);
-      $('input[type=checkbox]', pop).forEach((cb) => cb.checked = false);
+      $$('input[type=checkbox]', pop).forEach((cb) => cb.checked = false);
     });
     $('#holClose').addEventListener('click', () => { pop.hidden = true; });
   }
@@ -9784,13 +9784,13 @@ body.is-row-dragging *        { user-select: none !important; }
     wireCumWlLegend();
 
     // Stale-action rows in the decision-KPI panel → open the drawer for that action
-    $('.dkpi-list-row[data-action-id]', view).forEach((el) => {
+    $$('.dkpi-list-row[data-action-id]', view).forEach((el) => {
       el.addEventListener('click', () => openDrawer(el.dataset.actionId));
     });
 
     // Dashboard KPI clicks → navigate to Register pre-filtered.
     // Double-click clears all filters and still navigates to Register.
-    $('.kpi.clickable[data-dash-filter]', view).forEach((el) => {
+    $$('.kpi.clickable[data-dash-filter]', view).forEach((el) => {
       el.addEventListener('click', () => {
         const f = el.dataset.dashFilter;
         if (f === 'late' || f === 'week') applyTopbarFilter({ due: f, status: '', view: 'register' });
@@ -9818,7 +9818,7 @@ body.is-row-dragging *        { user-select: none !important; }
           <span>${escapeHTML(a.title)}</span>
           <span class="meta">${escapeHTML(personName(a.owner))} • ${a.due ? fmtDate(a.due) : 'no date'} • ${a.status}</span>
         </div>`).join('');
-      $('.crit-item', list).forEach((el) => el.addEventListener('click', () => openDrawer(el.dataset.id)));
+      $$('.crit-item', list).forEach((el) => el.addEventListener('click', () => openDrawer(el.dataset.id)));
     }
 
     // Workload bars
@@ -10335,7 +10335,7 @@ body.is-row-dragging *        { user-select: none !important; }
     });
 
     // --- Mode toggle ---
-    $('.seg-btn[data-review-mode]', view).forEach((b) => {
+    $$('.seg-btn[data-review-mode]', view).forEach((b) => {
       b.addEventListener('click', () => {
         if (reviewModeState.mode === b.dataset.reviewMode) return;
         reviewModeState.mode = b.dataset.reviewMode;
@@ -11188,10 +11188,10 @@ body.is-row-dragging *        { user-select: none !important; }
         });
       }
       // Click linked action → drawer
-      $('.ro-link[data-open-action]', body).forEach((el) =>
+      $$('.ro-link[data-open-action]', body).forEach((el) =>
         el.addEventListener('click', () => openDrawer(el.dataset.openAction)));
       // Right-click on a risk/opportunity row → context menu (Edit / Delete)
-      $('.ro-row[data-risk-id]', body).forEach((row) => {
+      $$('.ro-row[data-risk-id]', body).forEach((row) => {
         row.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           const id = row.dataset.riskId;
@@ -11214,17 +11214,17 @@ body.is-row-dragging *        { user-select: none !important; }
       });
     }
 
-    $('.seg-btn[data-kind]', view).forEach((b) => {
+    $$('.seg-btn[data-kind]', view).forEach((b) => {
       b.addEventListener('click', () => {
         roState.kind = b.dataset.kind;
-        $('.seg-btn[data-kind]', view).forEach((x) => x.classList.toggle('active', x.dataset.kind === roState.kind));
+        $$('.seg-btn[data-kind]', view).forEach((x) => x.classList.toggle('active', x.dataset.kind === roState.kind));
         draw();
       });
     });
-    $('.seg-btn[data-ro-view]', view).forEach((b) => {
+    $$('.seg-btn[data-ro-view]', view).forEach((b) => {
       b.addEventListener('click', () => {
         roState.view = b.dataset.roView;
-        $('.seg-btn[data-ro-view]', view).forEach((x) => x.classList.toggle('active', x.dataset.roView === roState.view));
+        $$('.seg-btn[data-ro-view]', view).forEach((x) => x.classList.toggle('active', x.dataset.roView === roState.view));
         draw();
       });
     });
@@ -11260,7 +11260,7 @@ body.is-row-dragging *        { user-select: none !important; }
         setOrder: (ids) => { proj.decisions = ids.map((id) => proj.decisions.find((x) => x.id === id)).filter(Boolean); },
         commitName: 'decisions-reorder',
       });
-      $('.row[data-decision-id]', list).forEach((row) => {
+      $$('.row[data-decision-id]', list).forEach((row) => {
         row.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           const id = row.dataset.decisionId;
@@ -11526,7 +11526,7 @@ body.is-row-dragging *        { user-select: none !important; }
         const next = (crFilterState.status === st) ? 'all' : st;
         crFilterState.status = next;
         // Sync the segmented filter buttons in the page-head
-        $('.seg-btn[data-cr-filter]', view).forEach((x) =>
+        $$('.seg-btn[data-cr-filter]', view).forEach((x) =>
           x.classList.toggle('active', x.dataset.crFilter === next));
         draw();
       };
@@ -11589,7 +11589,7 @@ body.is-row-dragging *        { user-select: none !important; }
             </div>
           </div>`;
       }).join('');
-      $('.cr-card[data-cr-id]', list).forEach((card) => {
+      $$('.cr-card[data-cr-id]', list).forEach((card) => {
         card.addEventListener('contextmenu', (e) => {
           e.preventDefault();
           const id = card.dataset.crId;
@@ -11638,10 +11638,10 @@ body.is-row-dragging *        { user-select: none !important; }
       });
     }
 
-    $('.seg-btn[data-cr-filter]', view).forEach((b) => {
+    $$('.seg-btn[data-cr-filter]', view).forEach((b) => {
       b.addEventListener('click', () => {
         crFilterState.status = b.dataset.crFilter;
-        $('.seg-btn[data-cr-filter]', view).forEach((x) =>
+        $$('.seg-btn[data-cr-filter]', view).forEach((x) =>
           x.classList.toggle('active', x.dataset.crFilter === crFilterState.status));
         draw();
       });
@@ -11901,7 +11901,7 @@ body.is-row-dragging *        { user-select: none !important; }
 
     function wireTree() {
       // Folder header interactions
-      $('.link-folder', tree).forEach((folderEl) => {
+      $$('.link-folder', tree).forEach((folderEl) => {
         const fid = folderEl.dataset.folderId;
         if (fid) {
           // Caret toggle (works in merged mode too — local UI state)
@@ -11947,7 +11947,7 @@ body.is-row-dragging *        { user-select: none !important; }
         }
       });
       // Link cards
-      $('.link-card[data-link-id]', tree).forEach((card) => {
+      $$('.link-card[data-link-id]', tree).forEach((card) => {
         const lid = card.dataset.linkId;
         // Context menu
         card.addEventListener('contextmenu', (e) => {
@@ -12256,21 +12256,21 @@ body.is-row-dragging *        { user-select: none !important; }
         setOrder: (ids) => { proj.components = ids.map((id) => proj.components.find((x) => x.id === id)).filter(Boolean); },
         commitName: 'components-reorder',
       });
-      $('.component-name', list).forEach((inp) => {
+      $$('.component-name', list).forEach((inp) => {
         inp.addEventListener('change', () => {
           const id = inp.closest('[data-component-id]').dataset.componentId;
           const pt = proj.components.find((p) => p.id === id);
           if (pt) { pt.name = inp.value.trim() || pt.name; commit('component-rename'); }
         });
       });
-      $('.component-color', list).forEach((sel) => {
+      $$('.component-color', list).forEach((sel) => {
         sel.addEventListener('change', () => {
           const id = sel.closest('[data-component-id]').dataset.componentId;
           const pt = proj.components.find((p) => p.id === id);
           if (pt) { pt.color = sel.value; commit('component-recolor'); }
         });
       });
-      $('.component-cc', list).forEach((sel) => {
+      $$('.component-cc', list).forEach((sel) => {
         sel.addEventListener('change', () => {
           const id = sel.closest('[data-component-id]').dataset.componentId;
           const pt = proj.components.find((p) => p.id === id);
@@ -12292,7 +12292,7 @@ body.is-row-dragging *        { user-select: none !important; }
           }
         });
       });
-      $('.component-del', list).forEach((btn) => {
+      $$('.component-del', list).forEach((btn) => {
         btn.addEventListener('click', () => {
           const id = btn.closest('[data-component-id]').dataset.componentId;
           const pt = proj.components.find((p) => p.id === id);
@@ -12587,19 +12587,19 @@ body.is-row-dragging *        { user-select: none !important; }
       <div id="budgetsList"></div>`;
     root.appendChild(view);
 
-    $('.seg-btn[data-budget-view]', view).forEach((b) => {
+    $$('.seg-btn[data-budget-view]', view).forEach((b) => {
       b.addEventListener('click', () => {
         state.settings.budgetView = b.dataset.budgetView;
         saveState();
-        $('.seg-btn[data-budget-view]', view).forEach((x) => x.classList.toggle('active', x.dataset.budgetView === state.settings.budgetView));
+        $$('.seg-btn[data-budget-view]', view).forEach((x) => x.classList.toggle('active', x.dataset.budgetView === state.settings.budgetView));
         drawList();
       });
     });
-    $('.seg-btn[data-budget-group]', view).forEach((b) => {
+    $$('.seg-btn[data-budget-group]', view).forEach((b) => {
       b.addEventListener('click', () => {
         state.settings.budgetGroupBy = b.dataset.budgetGroup;
         saveState();
-        $('.seg-btn[data-budget-group]', view).forEach((x) => x.classList.toggle('active', x.dataset.budgetGroup === state.settings.budgetGroupBy));
+        $$('.seg-btn[data-budget-group]', view).forEach((x) => x.classList.toggle('active', x.dataset.budgetGroup === state.settings.budgetGroupBy));
         drawList();
       });
     });
@@ -12969,7 +12969,7 @@ body.is-row-dragging *        { user-select: none !important; }
       setOrder: (ids) => { state.projects = ids.map((id) => state.projects.find((x) => x.id === id)).filter(Boolean); },
       commitName: 'portfolio-reorder',
     });
-    $('.kpi.clickable', view).forEach((el) => {
+    $$('.kpi.clickable', view).forEach((el) => {
       el.addEventListener('click', () => {
         state.currentProjectId = el.dataset.pid;
         state.currentView = 'board';
@@ -13253,7 +13253,7 @@ body.is-row-dragging *        { user-select: none !important; }
       setOrder: (ids) => { state.people = ids.map((id) => state.people.find((x) => x.id === id)).filter(Boolean); },
       commitName: 'people-reorder',
     });
-    $('.person-row.clickable', view).forEach((row) => {
+    $$('.person-row.clickable', view).forEach((row) => {
       row.addEventListener('click', () => {
         openPersonDashboard(row.dataset.ownerId);
       });
@@ -13773,7 +13773,7 @@ body.is-row-dragging *        { user-select: none !important; }
     qaType = type;
     qaInit = init || {};
     qaSaveCallback = onSave || null;
-    $('.qa-tab').forEach((t) => t.classList.toggle('active', t.dataset.qa === type));
+    $$('.qa-tab').forEach((t) => t.classList.toggle('active', t.dataset.qa === type));
     drawQA();
     $('#quickAdd').hidden = false;
     setTimeout(() => $('#qaBody input, #qaBody select, #qaBody textarea')?.focus(), 30);
@@ -13899,10 +13899,10 @@ body.is-row-dragging *        { user-select: none !important; }
             ${actionsList.map((a) => `<option value="${a.id}">${escapeHTML(a.title)} — ${escapeHTML(personName(a.owner))}</option>`).join('')}
           </select>
         </div>`;
-      $('.seg-btn[data-qa-kind]', body).forEach((b) => {
+      $$('.seg-btn[data-qa-kind]', body).forEach((b) => {
         b.addEventListener('click', () => {
           qaInit.kind = b.dataset.qaKind;
-          $('.seg-btn[data-qa-kind]', body).forEach((x) => x.classList.toggle('active', x.dataset.qaKind === qaInit.kind));
+          $$('.seg-btn[data-qa-kind]', body).forEach((x) => x.classList.toggle('active', x.dataset.qaKind === qaInit.kind));
           $('#qMitLbl').textContent = qaInit.kind === 'opportunity' ? 'Capture plan' : 'Mitigation';
           $('#qTitle').placeholder = qaInit.kind === 'opportunity' ? 'Upside event to chase' : 'Downside event to mitigate';
         });
@@ -18261,7 +18261,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     $('#btnSidebarToggle').addEventListener('click', () => {
       $('#app').classList.toggle('sidebar-collapsed');
     });
-    $('.nav-item').forEach((b) => {
+    $$('.nav-item').forEach((b) => {
       b.addEventListener('click', () => {
         state.currentView = b.dataset.view;
         saveState(); render();
@@ -18334,7 +18334,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     });
 
     // Quick add controls
-    $('.qa-tab').forEach((t) => t.addEventListener('click', () => openQuickAdd(t.dataset.qa)));
+    $$('.qa-tab').forEach((t) => t.addEventListener('click', () => openQuickAdd(t.dataset.qa)));
     $('#qaCancel').addEventListener('click', closeQuickAdd);
     // Quick Add closes only via Cancel / Save / × — backdrop clicks ignored.
     $('#qaSave').addEventListener('click', saveQA);
