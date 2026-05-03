@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-03T11:42:54.607Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-03T11:49:22.345Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -15500,13 +15500,27 @@ body.is-row-dragging *        { user-select: none !important; }
     } catch (e) { return null; }
   }
 
-  async function requestBackupDir() {
+  // Open the OS folder picker. MUST be invoked synchronously from a click
+  // handler — any await before the showDirectoryPicker() call can drop the
+  // user-gesture flag and Chromium will throw SecurityError ("Must be
+  // handling a user gesture to show a file picker"). We therefore call the
+  // picker directly and return the Promise; the caller chains .then for the
+  // post-pick work, which can safely contain awaits.
+  function requestBackupDir() {
     if (!supportsDirPicker) {
       toast('Folder backup requires Chrome / Edge — use Export instead.');
-      return null;
+      return Promise.resolve(null);
     }
+    let pickerPromise;
     try {
-      const h = await window.showDirectoryPicker({ mode: 'readwrite', id: 'cockpit-backup' });
+      pickerPromise = window.showDirectoryPicker({ mode: 'readwrite', id: 'cockpit-backup' });
+    } catch (e) {
+      // Synchronous throw (very rare) — surface the real reason.
+      toast('Could not open folder picker: ' + (e?.message || e));
+      console.warn('showDirectoryPicker sync error:', e);
+      return Promise.resolve(null);
+    }
+    return pickerPromise.then(async (h) => {
       const perm = await h.requestPermission({ mode: 'readwrite' });
       if (perm !== 'granted') { toast('Permission denied'); return null; }
       _backupDirHandle = h;
@@ -15514,10 +15528,14 @@ body.is-row-dragging *        { user-select: none !important; }
       state.settings.autoBackup.dirName = h.name || 'Selected folder';
       saveState();
       return h;
-    } catch (e) {
-      // User cancelled the picker
+    }).catch((e) => {
+      // AbortError = user dismissed the picker (no toast — that's normal UX).
+      // Anything else is worth surfacing so the user knows why nothing happened.
+      if (e?.name === 'AbortError') return null;
+      toast('Folder picker error: ' + (e?.message || e));
+      console.warn('showDirectoryPicker failed:', e);
       return null;
-    }
+    });
   }
 
   // Keep only the two most recent backups in the chosen folder:
@@ -15661,11 +15679,14 @@ body.is-row-dragging *        { user-select: none !important; }
 
     // Wire
     panel.querySelector('#abClose')?.addEventListener('click', closeAutoBackupPanel);
-    panel.querySelector('#abPick')?.addEventListener('click', async () => {
-      await requestBackupDir();
-      // After picking, refresh UI; auto-backup stays as the user set it
-      renderAutoBackupPanel();
-      scheduleAutoBackup();
+    panel.querySelector('#abPick')?.addEventListener('click', () => {
+      // Call requestBackupDir() synchronously — no `async () =>` wrapper —
+      // so window.showDirectoryPicker() runs inside the user-gesture window.
+      // Post-pick UI work happens in the .then continuation.
+      requestBackupDir().then(() => {
+        renderAutoBackupPanel();
+        scheduleAutoBackup();
+      });
     });
     panel.querySelector('#abInterval')?.addEventListener('change', (e) => {
       const v = parseInt(e.target.value, 10);
