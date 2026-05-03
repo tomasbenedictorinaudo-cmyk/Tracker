@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-02T21:01:23.410Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-03T11:33:06.591Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -5641,9 +5641,8 @@ body.is-row-dragging *        { user-select: none !important; }
       </nav>
 
       <div class="sidebar-foot">
-        <button class="icon-btn" id="btnImport" title="Import JSON — load a saved file">↓</button>
+        <button class="icon-btn" id="btnImport" title="Import JSON — replace or merge with current data">↓</button>
         <button class="icon-btn" id="btnExport" title="Export JSON — save current state to a file">↑</button>
-        <button class="icon-btn" id="btnMerge" title="Merge — combine a teammate's JSON with yours">⇄</button>
         <button class="icon-btn" id="btnAutoBackup" title="Auto-backup — pick a folder + frequency">⟳</button>
         <button class="icon-btn danger" id="btnEmpty" title="Start from zero — wipe everything">⊘</button>
         <button class="icon-btn" id="btnReset" title="Reset to sample data">↺</button>
@@ -6069,17 +6068,132 @@ body.is-row-dragging *        { user-select: none !important; }
   let undoStack = [];
   let redoStack = [];
 
+  // Returns one of three shapes so the caller can decide how to recover.
+  // We MUST NOT silently fall back to seedState() on parse failure — that
+  // would overwrite the user's real data with sample data on the next save.
   function loadState() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw == null) return { kind: 'empty' };
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) return JSON.parse(raw);
-    } catch (e) { /* ignore */ }
-    return seedState();
+      return { kind: 'parsed', value: JSON.parse(raw), raw };
+    } catch (e) {
+      return { kind: 'corrupted', error: String(e?.message || e), raw };
+    }
   }
+  // Recovery mode flag. While set, saveState() is a no-op so we never
+  // overwrite the original (broken-but-recoverable) localStorage with the
+  // in-memory placeholder state.
+  let _recoveryMode = false;
   function saveState() {
+    if (_recoveryMode) return;
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
     catch (e) { /* quota */ }
   }
+
+  // Shows a non-dismissable overlay when localStorage data exists but
+  // can't be loaded, so the user can rescue their bytes before deciding
+  // how to proceed. saveState() is suppressed (via _recoveryMode) until
+  // an option is chosen — the original localStorage is never touched.
+  function enterRecoveryMode(kind, errMsg, rawBytes) {
+    _recoveryMode = true;
+    try { state = seedState(); normalizeState(state); }
+    catch (e) { /* if even the seed throws, render with a barely-valid stub */
+      state = { people: [], projects: [], settings: {}, currentView: 'board', currentProjectId: null };
+      try { normalizeState(state); } catch (_) {}
+    }
+    // Defer the overlay until after init() finishes wiring the shell, so
+    // the overlay sits on top of a fully rendered (placeholder) UI.
+    setTimeout(() => showRecoveryOverlay(kind, errMsg, rawBytes), 0);
+  }
+
+  function showRecoveryOverlay(kind, errMsg, rawBytes) {
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.style.zIndex = '9999';
+    const headline = kind === 'parse'
+      ? "Your saved data couldn't be parsed (the JSON is corrupted)."
+      : "Your saved data was found, but it failed a schema check during load.";
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width: 560px; max-width: 92vw;">
+        <div class="desc-head">
+          <div class="desc-title">⚠ Could not load your saved data</div>
+        </div>
+        <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 12px;">
+          <div>${headline}</div>
+          <div><strong>Nothing has been overwritten yet.</strong> Your original bytes are still in the browser's localStorage; the app is currently running on sample data with saving paused so the original isn't replaced. Choose an option below.</div>
+          <pre style="background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px; font-size: 11px; color: var(--text-faint); white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow: auto; margin: 0;">${escapeHTML(errMsg)}</pre>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <button class="primary" id="recDownload">↓ Download broken JSON (recommended first)</button>
+            <button class="ghost"   id="recImport">  Import a backup file…</button>
+            <button class="ghost"   id="recRetry">   Retry — reload the page</button>
+            <button class="danger"  id="recForget">  Discard original — start with sample data</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#recDownload').addEventListener('click', () => {
+      const blob = new Blob([rawBytes ?? ''], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `cockpit-recovery-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('Downloaded raw bytes — keep this safe.');
+    });
+
+    overlay.querySelector('#recImport').addEventListener('click', () => {
+      const input = document.createElement('input');
+      input.type = 'file'; input.accept = 'application/json';
+      input.addEventListener('change', () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            const obj = JSON.parse(reader.result);
+            if (!obj || typeof obj !== 'object') throw new Error('Invalid JSON');
+            if (!obj.projects || !obj.people) throw new Error('Missing projects/people — does not look like a Cockpit backup');
+            delete obj.__schemaVersion;
+            delete obj.__exportedAt;
+            delete obj.__app;
+            const next = normalizeState(obj);
+            state = next;
+            _recoveryMode = false;
+            saveState();
+            overlay.remove();
+            render();
+            toast('Backup restored');
+          } catch (e) {
+            alert('Could not load that file:\n\n' + (e?.message || e));
+          }
+        };
+        reader.readAsText(file);
+      });
+      input.click();
+    });
+
+    overlay.querySelector('#recRetry').addEventListener('click', () => {
+      location.reload();
+    });
+
+    overlay.querySelector('#recForget').addEventListener('click', () => {
+      const typed = prompt(
+        'This will overwrite your saved data with the sample dataset. ' +
+        'Make sure you downloaded the broken JSON above before proceeding.\n\n' +
+        'Type DISCARD (in caps) to confirm:',
+      );
+      if ((typed || '').trim() !== 'DISCARD') { toast('Cancelled — original data is still intact'); return; }
+      state = seedState();
+      normalizeState(state);
+      _recoveryMode = false;
+      saveState();
+      overlay.remove();
+      render();
+      toast('Started fresh with sample data');
+    });
+  }
+
   function commit(action = 'change') {
     undoStack.push(JSON.stringify(state));
     if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
@@ -15353,6 +15467,14 @@ body.is-row-dragging *        { user-select: none !important; }
     }
   }
 
+  // Keep only the two most recent backups in the chosen folder:
+  //   cockpit-latest.json    — the save just written
+  //   cockpit-previous.json  — the save that was 'latest' before this one
+  // Older timestamped files from earlier versions of this app are removed
+  // so the folder doesn't accumulate.
+  const BACKUP_LATEST = 'cockpit-latest.json';
+  const BACKUP_PREVIOUS = 'cockpit-previous.json';
+
   async function writeBackupNow() {
     if (!_backupDirHandle) {
       toast('Pick a backup folder first');
@@ -15366,18 +15488,47 @@ body.is-row-dragging *        { user-select: none !important; }
         if (next !== 'granted') { toast('Folder permission expired — pick again'); return false; }
       }
       flushPendingSaves();
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      const fname = `cockpit-${stamp}.json`;
       const payload = {
         __schemaVersion: EXPORT_SCHEMA_VERSION,
         __exportedAt: new Date().toISOString(),
         __app: 'cockpit',
         ...state,
       };
-      const fh = await _backupDirHandle.getFileHandle(fname, { create: true });
-      const w  = await fh.createWritable();
-      await w.write(JSON.stringify(payload, null, 2));
+      const json = JSON.stringify(payload, null, 2);
+
+      // Step 1: rotate latest → previous (read existing latest, write to
+      // previous, then we can safely overwrite latest below). If there is
+      // no existing latest yet (first backup), skip this step.
+      try {
+        const oldLatest = await _backupDirHandle.getFileHandle(BACKUP_LATEST).catch(() => null);
+        if (oldLatest) {
+          const oldFile = await oldLatest.getFile();
+          const oldText = await oldFile.text();
+          const prevHandle = await _backupDirHandle.getFileHandle(BACKUP_PREVIOUS, { create: true });
+          const pw = await prevHandle.createWritable();
+          await pw.write(oldText);
+          await pw.close();
+        }
+      } catch (e) { /* non-fatal — keep going so we still write the new latest */ }
+
+      // Step 2: write the new latest.
+      const latestHandle = await _backupDirHandle.getFileHandle(BACKUP_LATEST, { create: true });
+      const w  = await latestHandle.createWritable();
+      await w.write(json);
       await w.close();
+
+      // Step 3: prune any stragglers from old timestamped naming
+      // (cockpit-2025-04-23T10-15-22.json and similar).
+      try {
+        for await (const entry of _backupDirHandle.values()) {
+          if (entry.kind !== 'file') continue;
+          if (entry.name === BACKUP_LATEST || entry.name === BACKUP_PREVIOUS) continue;
+          if (/^cockpit-\d{4}-\d{2}-\d{2}T/.test(entry.name)) {
+            await _backupDirHandle.removeEntry(entry.name).catch(() => {});
+          }
+        }
+      } catch (e) { /* iterating fails on some browsers; skip silently */ }
+
       state.settings.autoBackup.lastBackupAt = new Date().toISOString();
       saveState();
       refreshAutoBackupUI();
@@ -15416,7 +15567,12 @@ body.is-row-dragging *        { user-select: none !important; }
         <button class="icon-btn" id="abClose" title="Close" aria-label="Close">×</button>
       </div>
       <div class="ab-body">
-        ${supported ? '' : '<div class="ab-warn">Folder backup requires Chrome / Edge. The "Download now" button below works in any browser.</div>'}
+        ${supported ? '' : `<div class="ab-warn">
+          Folder auto-backup needs the File System Access API, which is only
+          available in Chromium browsers (Chrome, Edge, Brave, Arc). In this
+          browser, use <strong>Download now</strong> below to save a backup
+          manually whenever you'd like.
+        </div>`}
         <div class="ab-row">
           <span class="ab-lbl">Folder</span>
           <span class="ab-val">${ab.dirName ? escapeHTML(ab.dirName) + (hasHandle ? '' : ' <span class="ab-muted">(reconnect needed)</span>') : '<span class="ab-muted">— none —</span>'}</span>
@@ -15442,6 +15598,12 @@ body.is-row-dragging *        { user-select: none !important; }
         <div class="ab-row ab-status">
           <span class="ab-lbl">Last backup</span>
           <span class="ab-val">${lastTxt}</span>
+        </div>
+        <div class="ab-note ab-muted" style="font-size: 11px; line-height: 1.45; padding-top: 4px;">
+          The folder keeps just two files at any time:
+          <code>cockpit-latest.json</code> (this save) and
+          <code>cockpit-previous.json</code> (the one before).
+          Older backups are removed on each rotation.
         </div>
         <div class="ab-actions">
           <button class="ghost" id="abDownload" title="Download a backup JSON to your default Downloads folder">Download now</button>
@@ -15524,6 +15686,27 @@ body.is-row-dragging *        { user-select: none !important; }
           delete obj.__schemaVersion;
           delete obj.__exportedAt;
           delete obj.__app;
+          // Confirmation guard — replacing the entire workspace is destructive,
+          // so make sure the user really wants this. Show a quick summary of
+          // what's about to be wiped + what's coming in.
+          const cur = {
+            projects: state.projects?.length || 0,
+            people:   state.people?.length || 0,
+            actions:  (state.projects || []).reduce((n, p) => n + (p.actions?.length || 0), 0),
+          };
+          const next = {
+            projects: obj.projects?.length || 0,
+            people:   obj.people?.length || 0,
+            actions:  (obj.projects || []).reduce((n, p) => n + (p.actions?.length || 0), 0),
+          };
+          const ok = confirm(
+            `Replace ALL current data with the contents of "${file.name}"?\n\n` +
+            `Current  →  ${cur.projects} projects · ${cur.people} people · ${cur.actions} actions\n` +
+            `Imported →  ${next.projects} projects · ${next.people} people · ${next.actions} actions\n\n` +
+            `You can Undo (⌘Z) once after this.\n` +
+            `Tip: Cancel and choose "Merge" if you want to combine instead of replace.`,
+          );
+          if (!ok) { toast('Import cancelled — nothing changed'); return; }
           undoStack.push(JSON.stringify(state));
           state = normalizeState(obj);
           saveState();
@@ -15534,6 +15717,36 @@ body.is-row-dragging *        { user-select: none !important; }
       reader.readAsText(file);
     });
     input.click();
+  }
+
+  // Unified Import / Merge entry point — replaces the two separate
+  // bottom-bar buttons with one that asks the user which mode they want.
+  function openImportPicker() {
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width: 480px; max-width: 92vw;">
+        <div class="desc-head">
+          <div class="desc-title">Import data</div>
+          <button class="icon-btn" id="impClose" title="Close">×</button>
+        </div>
+        <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="color: var(--text-dim); font-size: 13px;">How should the file be loaded?</div>
+          <button class="ghost" id="impReplace" style="text-align: left; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+            <strong style="font-size: 14px;">Replace existing data</strong>
+            <span style="color: var(--text-dim); font-size: 12px;">Wipes the current workspace and loads the file. You'll be asked to confirm before anything is overwritten. (Undo works.)</span>
+          </button>
+          <button class="ghost" id="impMerge" style="text-align: left; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; align-items: flex-start;">
+            <strong style="font-size: 14px;">Merge into existing data</strong>
+            <span style="color: var(--text-dim); font-size: 12px;">Combines the file's records with what you have. New records are added; conflicts get a per-row "keep mine / take theirs" resolution UI.</span>
+          </button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('#impClose').addEventListener('click', close);
+    overlay.querySelector('#impReplace').addEventListener('click', () => { close(); importJSON(); });
+    overlay.querySelector('#impMerge').addEventListener('click', () => { close(); openMergeOverlay(); });
   }
 
   /* ----------------------- Phase K: light merge ------------------------ */
@@ -18250,12 +18463,25 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   }
 
   function init() {
-    state = loadState();
-    // Run a single comprehensive backfill so every renderer gets the fields it
-    // expects, regardless of whether the saved state predates the latest schema
-    // additions (criticality, costCenters, links, changes/analysis, etc).
-    try { normalizeState(state); } catch (e) { state = seedState(); }
-    saveState();
+    // Load: must distinguish between empty storage (first run — fine to seed)
+    // and corrupted storage (must NOT overwrite, surface a recovery overlay).
+    const result = loadState();
+    if (result.kind === 'empty') {
+      state = seedState();
+      try { normalizeState(state); }
+      catch (e) { state = { people: [], projects: [], settings: {}, currentView: 'board', currentProjectId: null }; normalizeState(state); }
+      saveState();
+    } else if (result.kind === 'corrupted') {
+      enterRecoveryMode('parse', result.error, result.raw);
+    } else {
+      state = result.value;
+      try {
+        normalizeState(state);
+        saveState();
+      } catch (e) {
+        enterRecoveryMode('normalize', String(e?.message || e), result.raw);
+      }
+    }
     applyTheme(state.settings.theme || 'dark');
 
     $('#btnSidebarToggle').addEventListener('click', () => {
@@ -18304,8 +18530,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     wirePalette();
 
     $('#btnExport').addEventListener('click', exportJSON);
-    $('#btnImport').addEventListener('click', importJSON);
-    $('#btnMerge').addEventListener('click', openMergeOverlay);
+    // Single Import button now hosts both replace + merge — picker chooses.
+    $('#btnImport').addEventListener('click', openImportPicker);
     $('#btnReset').addEventListener('click', () => {
       if (!confirm('Replace the current data with the sample dataset?\n\nYou can Export first if you want to keep what\'s here.')) return;
       undoStack.push(JSON.stringify(state));
