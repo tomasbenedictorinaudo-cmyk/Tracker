@@ -1749,6 +1749,31 @@ input, select, textarea { font: inherit; color: inherit; }
 .icon-btn:hover { background: var(--bg-3); color: var(--text); border-color: var(--line-2); }
 .icon-btn.danger { color: var(--bad); opacity: .55; }
 .icon-btn.danger:hover { background: rgba(248,113,113,.12); color: var(--bad); border-color: var(--bad); opacity: 1; }
+/* Active-state indicator — used by Auto-backup so the toolbar shows at a
+   glance whether saves are running. The button keeps its size and shape
+   so the layout doesn't shift; tint + glyph turn accent-green and a
+   small green dot appears in the upper-right corner. */
+.icon-btn.is-active {
+  position: relative;
+  color: var(--ok);
+  border-color: rgba(74,222,128,.4);
+  background: rgba(74,222,128,.08);
+}
+.icon-btn.is-active:hover { background: rgba(74,222,128,.14); border-color: rgba(74,222,128,.55); }
+.icon-btn.is-active::after {
+  content: '';
+  position: absolute;
+  top: 4px; right: 4px;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 1.5px var(--bg-2), 0 0 6px rgba(74,222,128,.6);
+  animation: ab-pulse 1.8s ease-in-out infinite;
+}
+@keyframes ab-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .55; }
+}
 
 /* Small inline count pill — used on page-head buttons like 'Archive 12' */
 .badge-count {

@@ -9828,16 +9828,44 @@
     }
   }
 
+  // Returns true iff auto-backup is currently armed — i.e. enabled AND
+  // the chosen mode has the prerequisites it needs (a folder handle for
+  // folder mode; nothing extra for download mode).
+  function isAutoBackupArmed() {
+    const ab = state.settings.autoBackup;
+    if (!ab.enabled) return false;
+    const mode = ab.mode || (pickerAvailable ? 'folder' : 'download');
+    if (mode === 'folder' && !_backupDirHandle) return false;
+    return true;
+  }
+
+  // Reflect the armed/idle state on the toolbar icon so the user can
+  // tell at a glance whether auto-backup is running.
+  function updateAutoBackupBadge() {
+    const btn = $('#btnAutoBackup');
+    if (!btn) return;
+    const armed = isAutoBackupArmed();
+    btn.classList.toggle('is-active', armed);
+    const ab = state.settings.autoBackup;
+    if (armed) {
+      const mode = ab.mode || (pickerAvailable ? 'folder' : 'download');
+      const where = mode === 'folder'
+        ? (ab.dirName ? `folder "${ab.dirName}"` : 'chosen folder')
+        : 'Downloads folder';
+      btn.title = `Auto-backup: every ${ab.intervalMinutes}m → ${where}`;
+    } else {
+      btn.title = 'Auto-backup — pick a folder + frequency';
+    }
+  }
+
   function scheduleAutoBackup() {
     // Always start clean
     if (_autoBackupTimer) { clearInterval(_autoBackupTimer); _autoBackupTimer = null; }
+    if (!isAutoBackupArmed()) { updateAutoBackupBadge(); return; }
     const ab = state.settings.autoBackup;
-    if (!ab.enabled) return;
-    // Folder mode requires a real handle; download mode runs anywhere.
-    const mode = ab.mode || (pickerAvailable ? 'folder' : 'download');
-    if (mode === 'folder' && !_backupDirHandle) return;
     const ms = ab.intervalMinutes * 60 * 1000;
     _autoBackupTimer = setInterval(() => { writeBackupNow(); }, ms);
+    updateAutoBackupBadge();
   }
 
   function refreshAutoBackupUI() {
@@ -9880,6 +9908,40 @@
     const effectiveMode = folderModeUsable ? mode : 'download';
     const folderEnabledForToggle = effectiveMode === 'folder' ? hasHandle : true;
 
+    // Mode-specific explanation + input markup. The two modes have very
+    // different semantics for the text input, so we render them separately
+    // to avoid the user thinking they can type a destination path.
+    let modeBlock;
+    if (effectiveMode === 'folder') {
+      modeBlock = `
+        <div class="ab-row">
+          <span class="ab-lbl">Folder</span>
+          <span class="ab-val" style="font-family: var(--mono, monospace); font-size: 12px;">${ab.dirName ? escapeHTML(ab.dirName) + (hasHandle ? '' : ' <span class="ab-muted">(reconnect needed)</span>') : '<span class="ab-muted">— none picked —</span>'}</span>
+          <button class="ghost" id="abPick">${hasHandle ? 'Re-pick…' : 'Choose folder…'}</button>
+        </div>
+        ${!hasHandle ? '<div class="ab-muted" style="font-size: 11px; padding-left: 4px;">Click <strong>Choose folder…</strong> and pick the directory you want backups written to. Your OS folder picker will open.</div>' : ''}`;
+    } else {
+      // Download mode — the text input is purely a filename label, NOT a
+      // destination path (browsers cannot write to arbitrary filesystem
+      // locations from JS). Make this very explicit so the user doesn't
+      // type a path expecting it to redirect the file.
+      const labelLooksLikePath = (ab.dirName || '').match(/[\/\\~]/);
+      modeBlock = `
+        <div class="ab-warn" style="background: rgba(110,168,255,.10); border-color: rgba(110,168,255,.3); color: var(--text);">
+          <strong>Browsers cannot save to a custom folder via download.</strong>
+          Auto-download mode always writes to your browser's default
+          Downloads folder. The field below is just a filename label.
+        </div>
+        <div class="ab-row">
+          <span class="ab-lbl">Filename label</span>
+          <input type="text" id="abDirName" value="${escapeHTML(ab.dirName || '')}" placeholder="e.g. cockpit-orbit7" style="flex: 1; min-width: 0; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 8px; color: var(--text); font: inherit;" />
+        </div>
+        <div class="ab-muted" style="font-size: 11px; padding-left: 4px;">
+          Files will be named <code>cockpit-${escapeHTML((ab.dirName || 'backup').replace(/[^a-zA-Z0-9_\-]/g, '-').slice(0, 48) || 'backup')}-latest.json</code>.
+          ${labelLooksLikePath ? '<br><span style="color: var(--bad);">⚠ Slashes / tildes will be stripped — paths cannot redirect downloads.</span>' : ''}
+        </div>`;
+    }
+
     panel.innerHTML = `
       <div class="ab-head">
         <span class="ab-title">Auto-backup</span>
@@ -9890,16 +9952,11 @@
         <div class="ab-row">
           <span class="ab-lbl">Mode</span>
           <select id="abMode">
-            <option value="folder"   ${effectiveMode === 'folder'   ? 'selected' : ''} ${folderModeUsable ? '' : 'disabled'}>Save to folder${folderModeUsable ? '' : ' (unavailable)'}</option>
+            <option value="folder"   ${effectiveMode === 'folder'   ? 'selected' : ''} ${folderModeUsable ? '' : 'disabled'}>Save to chosen folder${folderModeUsable ? '' : ' (unavailable)'}</option>
             <option value="download" ${effectiveMode === 'download' ? 'selected' : ''}>Auto-download to Downloads folder</option>
           </select>
         </div>
-        <div class="ab-row">
-          <span class="ab-lbl">${effectiveMode === 'folder' ? 'Folder' : 'Folder name'}</span>
-          <input type="text" id="abDirName" value="${escapeHTML(ab.dirName || '')}" placeholder="${effectiveMode === 'folder' ? 'Pick a folder…' : 'Optional label (e.g. cockpit-backups)'}" style="flex: 1; min-width: 0; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 8px; color: var(--text); font: inherit;" />
-          ${effectiveMode === 'folder' ? `<button class="ghost" id="abPick">${hasHandle ? 'Re-pick…' : 'Choose folder…'}</button>` : ''}
-        </div>
-        ${effectiveMode === 'folder' && !hasHandle ? '<div class="ab-muted" style="font-size: 11px; padding-left: 4px;">Pick a folder to enable auto-backup. The folder name above is the display label.</div>' : ''}
+        ${modeBlock}
         <div class="ab-row">
           <span class="ab-lbl">Frequency</span>
           <select id="abInterval">
@@ -9923,12 +9980,12 @@
         </div>
         <div class="ab-note ab-muted" style="font-size: 11px; line-height: 1.45; padding-top: 4px;">
           ${effectiveMode === 'folder'
-            ? `Folder mode keeps just two files: <code>cockpit-latest.json</code> (this save) and <code>cockpit-previous.json</code> (the one before). Older backups are pruned on each rotation.`
-            : `Download mode saves <code>cockpit-${escapeHTML(ab.dirName || 'backup')}-latest.json</code> to your browser's default Downloads folder. Browsers usually append <code>(1)</code>, <code>(2)</code> to avoid overwriting — set your browser's "Ask where to save each file" off, and "Always overwrite" on, if available.`}
+            ? `Folder mode keeps just two files in the chosen folder: <code>cockpit-latest.json</code> (this save) and <code>cockpit-previous.json</code> (the one before). Older backups are pruned on each rotation.`
+            : `Browsers may append <code>(1)</code>, <code>(2)</code>… to avoid overwriting. To rotate cleanly, turn off "Ask where to save each file" in your browser's download settings.`}
         </div>
         <div class="ab-actions">
           <button class="ghost" id="abDownload" title="Trigger one backup right now (downloads to your default Downloads folder)">Download now</button>
-          ${effectiveMode === 'folder' ? `<button class="primary" id="abBackupNow" ${hasHandle ? '' : 'disabled'}>Back up now</button>` : `<button class="primary" id="abBackupNow">Back up now</button>`}
+          ${effectiveMode === 'folder' ? `<button class="primary" id="abBackupNow" ${hasHandle ? '' : 'disabled'}>Back up to folder</button>` : `<button class="primary" id="abBackupNow">Download backup</button>`}
         </div>
       </div>`;
 
@@ -10013,8 +10070,11 @@
     });
   }
   async function initAutoBackup() {
-    if (!supportsDirPicker) return;
-    await loadBackupDirHandle();
+    // Always run — download mode works on browsers without showDirectoryPicker
+    // and scheduleAutoBackup() also drives the toolbar-icon badge.
+    if (supportsDirPicker) {
+      try { await loadBackupDirHandle(); } catch (_) {}
+    }
     scheduleAutoBackup();
   }
   function importJSON() {
