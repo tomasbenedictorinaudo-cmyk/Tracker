@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-03T11:33:06.591Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-03T11:42:54.607Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -6596,6 +6596,9 @@ body.is-row-dragging *        { user-select: none !important; }
   }
 
   function emptyState() {
+    // Single-source-of-truth project shape — every per-project array the
+    // rest of the app reads is initialised here so a fresh workspace and a
+    // restored backup behave identically (no first-render-time defaults).
     const proj = {
       id: uid('p'),
       name: 'Untitled project',
@@ -6610,8 +6613,10 @@ body.is-row-dragging *        { user-select: none !important; }
       meetings: [],
       openPoints: [],
       links: [],
+      linkFolders: [],
       costCenters: [],
       archive: [],
+      tags: [],
       notes: '',
     };
     return {
@@ -6621,6 +6626,11 @@ body.is-row-dragging *        { user-select: none !important; }
       currentView: 'board',
       settings: { theme: state?.settings?.theme || 'dark', holidayCountries: [] },
       budgets: {},
+      notes: {},
+      notesOpen: false,
+      todos: [],
+      inbox: { dismissed: [] },
+      templates: [],
     };
   }
 
@@ -15353,24 +15363,67 @@ body.is-row-dragging *        { user-select: none !important; }
     return s;
   }
 
-  function exportJSON() {
-    flushPendingSaves();
-    // Wrap in a metadata envelope so consumers can detect the version. The
-    // actual state is preserved at the top level too for backward compat —
-    // older importers that just `JSON.parse(file).projects` still work.
-    const payload = {
+  // Roll up every collection in state into a count breakdown. Stamped
+  // into the export envelope (and shown after manual exports) so the
+  // user can confirm at a glance that no data has gone missing.
+  function summarizeState(s) {
+    const summary = {
+      projects: s.projects?.length || 0,
+      people:   s.people?.length || 0,
+      todos:    s.todos?.length || 0,
+      templates: s.templates?.length || 0,
+      // Cross-project record totals — every per-project array surfaces here.
+      actions: 0, deliverables: 0, milestones: 0, risks: 0, decisions: 0,
+      changes: 0, components: 0, meetings: 0, openPoints: 0,
+      links: 0, linkFolders: 0, costCenters: 0, tags: 0, archived: 0,
+      projectNotes: 0,
+    };
+    (s.projects || []).forEach((p) => {
+      summary.actions      += p.actions?.length      || 0;
+      summary.deliverables += p.deliverables?.length || 0;
+      summary.milestones   += p.milestones?.length   || 0;
+      summary.risks        += p.risks?.length        || 0;
+      summary.decisions    += p.decisions?.length    || 0;
+      summary.changes      += p.changes?.length      || 0;
+      summary.components   += p.components?.length   || 0;
+      summary.meetings     += p.meetings?.length     || 0;
+      summary.openPoints   += p.openPoints?.length   || 0;
+      summary.links        += p.links?.length        || 0;
+      summary.linkFolders  += p.linkFolders?.length  || 0;
+      summary.costCenters  += p.costCenters?.length  || 0;
+      summary.tags         += p.tags?.length         || 0;
+      summary.archived     += p.archive?.length      || 0;
+    });
+    summary.projectNotes = Object.keys(s.notes || {}).length;
+    return summary;
+  }
+
+  // Build the export payload — used by both manual Export and auto-backup
+  // so the on-disk shape is always identical.
+  function buildExportPayload() {
+    return {
       __schemaVersion: EXPORT_SCHEMA_VERSION,
       __exportedAt: new Date().toISOString(),
       __app: 'cockpit',
+      __summary: summarizeState(state),
       ...state,
     };
+  }
+
+  function exportJSON() {
+    flushPendingSaves();
+    // The envelope wraps the state but the state is also spread at the
+    // top level for backward compat — older importers that just
+    // `JSON.parse(file).projects` still work.
+    const payload = buildExportPayload();
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url; a.download = `cockpit-${todayISO()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-    toast('Exported');
+    const s = payload.__summary;
+    toast(`Exported · ${s.projects} projects · ${s.people} people · ${s.actions} actions`);
   }
 
   // Flush any debounced notes timer + force a saveState immediately. Called by
@@ -15488,12 +15541,7 @@ body.is-row-dragging *        { user-select: none !important; }
         if (next !== 'granted') { toast('Folder permission expired — pick again'); return false; }
       }
       flushPendingSaves();
-      const payload = {
-        __schemaVersion: EXPORT_SCHEMA_VERSION,
-        __exportedAt: new Date().toISOString(),
-        __app: 'cockpit',
-        ...state,
-      };
+      const payload = buildExportPayload();
       const json = JSON.stringify(payload, null, 2);
 
       // Step 1: rotate latest → previous (read existing latest, write to
@@ -18480,6 +18528,25 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         saveState();
       } catch (e) {
         enterRecoveryMode('normalize', String(e?.message || e), result.raw);
+      }
+    }
+
+    // Self-check: confirm exporting and re-importing the current state
+    // preserves every record. If a future field is added but missed in
+    // normalizeState, the summary diff makes it visible early. Console
+    // only — never disrupts the user.
+    if (!_recoveryMode) {
+      try {
+        const before = summarizeState(state);
+        const reimported = normalizeState(JSON.parse(JSON.stringify(buildExportPayload())));
+        const after = summarizeState(reimported);
+        const drift = Object.keys(before).filter((k) => before[k] !== after[k]);
+        if (drift.length) {
+          console.warn('[cockpit] export round-trip drift detected:',
+            Object.fromEntries(drift.map((k) => [k, { before: before[k], after: after[k] }])));
+        }
+      } catch (e) {
+        console.warn('[cockpit] export round-trip self-check failed:', e);
       }
     }
     applyTheme(state.settings.theme || 'dark');
