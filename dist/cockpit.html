@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-03T12:18:12.363Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-03T12:23:25.714Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -5670,7 +5670,6 @@ body.is-row-dragging *        { user-select: none !important; }
         <button class="icon-btn" id="btnExport" title="Export JSON — save current state to a file">↑</button>
         <button class="icon-btn" id="btnAutoBackup" title="Auto-backup — pick a folder + frequency">⟳</button>
         <button class="icon-btn danger" id="btnEmpty" title="Start from zero — wipe everything">⊘</button>
-        <button class="icon-btn" id="btnReset" title="Reset to sample data">↺</button>
         <button class="icon-btn" id="btnTheme" title="Toggle light / dark">◐</button>
       </div>
       <div id="autoBackupPanel" class="ab-panel" hidden></div>
@@ -18815,15 +18814,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     $('#btnExport').addEventListener('click', exportJSON);
     // Single Import button now hosts both replace + merge — picker chooses.
     $('#btnImport').addEventListener('click', openImportPicker);
-    $('#btnReset').addEventListener('click', () => {
-      if (!confirm('Replace the current data with the sample dataset?\n\nYou can Export first if you want to keep what\'s here.')) return;
-      undoStack.push(JSON.stringify(state));
-      state = seedState();
-      saveState();
-      render();
-      toast('Sample data restored');
-    });
-
     $('#btnEmpty').addEventListener('click', () => {
       if (!confirm('Wipe everything and start from zero?\n\nThis removes every project, person, action, deliverable, milestone, and note. You can Export first if you want to keep what\'s here.\n\nThis cannot be undone (except via Undo).')) return;
       const typed = prompt('Type EMPTY (in caps) to confirm wiping all data:');

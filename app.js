@@ -12958,15 +12958,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     $('#btnExport').addEventListener('click', exportJSON);
     // Single Import button now hosts both replace + merge — picker chooses.
     $('#btnImport').addEventListener('click', openImportPicker);
-    $('#btnReset').addEventListener('click', () => {
-      if (!confirm('Replace the current data with the sample dataset?\n\nYou can Export first if you want to keep what\'s here.')) return;
-      undoStack.push(JSON.stringify(state));
-      state = seedState();
-      saveState();
-      render();
-      toast('Sample data restored');
-    });
-
     $('#btnEmpty').addEventListener('click', () => {
       if (!confirm('Wipe everything and start from zero?\n\nThis removes every project, person, action, deliverable, milestone, and note. You can Export first if you want to keep what\'s here.\n\nThis cannot be undone (except via Undo).')) return;
       const typed = prompt('Type EMPTY (in caps) to confirm wiping all data:');
