@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-03T11:49:22.345Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-03T11:59:24.450Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -5992,12 +5992,12 @@ body.is-row-dragging *        { user-select: none !important; }
     if (btn) btn.textContent = theme === 'light' ? '☀' : '☾';
   }
 
-  function toast(msg) {
+  function toast(msg, ms = 1800) {
     const el = $('#toast');
     el.textContent = msg;
     el.hidden = false;
     clearTimeout(el._t);
-    el._t = setTimeout(() => (el.hidden = true), 1800);
+    el._t = setTimeout(() => (el.hidden = true), Math.max(800, ms | 0));
   }
 
   /* ------------------------ state & persistence ---------------------- */
@@ -15079,6 +15079,10 @@ body.is-row-dragging *        { user-select: none !important; }
     if (!allowedMins.includes(ab.intervalMinutes)) ab.intervalMinutes = 60;
     if (typeof ab.dirName !== 'string') ab.dirName = '';
     if (typeof ab.lastBackupAt !== 'string') ab.lastBackupAt = null;
+    // Mode: 'folder' (showDirectoryPicker + rotation) or 'download'
+    // (browser download fallback). Default unset so renderer can pick the
+    // best available mode at runtime.
+    if (ab.mode !== 'folder' && ab.mode !== 'download') ab.mode = undefined;
     // Phase A — added flags / structures used by later phases. All retrocompat.
     if (typeof s.settings.tourSeen     !== 'boolean') s.settings.tourSeen = false;
     if (typeof s.settings.notifyEnabled !== 'boolean') s.settings.notifyEnabled = false;
@@ -15483,6 +15487,16 @@ body.is-row-dragging *        { user-select: none !important; }
   let _backupDirHandle = null;       // FileSystemDirectoryHandle once granted
   let _autoBackupTimer = null;       // setInterval id
   const supportsDirPicker = typeof window.showDirectoryPicker === 'function';
+  // showDirectoryPicker requires a Secure Context — `file://` URLs do not
+  // qualify in Chromium. Detect this so we can explain it to the user
+  // instead of throwing a generic SecurityError on click.
+  const isSecureContextHttp =
+    typeof window.isSecureContext === 'boolean'
+      ? window.isSecureContext && location.protocol !== 'file:'
+      : (location.protocol === 'https:' ||
+         location.hostname === 'localhost' ||
+         location.hostname === '127.0.0.1');
+  const pickerAvailable = supportsDirPicker && isSecureContextHttp;
 
   async function loadBackupDirHandle() {
     if (!supportsDirPicker) return null;
@@ -15508,7 +15522,14 @@ body.is-row-dragging *        { user-select: none !important; }
   // post-pick work, which can safely contain awaits.
   function requestBackupDir() {
     if (!supportsDirPicker) {
-      toast('Folder backup requires Chrome / Edge — use Export instead.');
+      toast('This browser doesn\'t support folder picking — use Auto-download mode instead.');
+      return Promise.resolve(null);
+    }
+    if (!isSecureContextHttp) {
+      // file:// URLs are not Secure Contexts in Chromium. The picker will
+      // throw SecurityError immediately. Tell the user the actual reason.
+      toast('Folder picking is blocked when opening the file via file://. Serve over http(s) (e.g. python -m http.server) or use Auto-download mode.', 6000);
+      console.warn('showDirectoryPicker unavailable: location.protocol =', location.protocol, '— Secure Context required.');
       return Promise.resolve(null);
     }
     let pickerPromise;
@@ -15516,7 +15537,7 @@ body.is-row-dragging *        { user-select: none !important; }
       pickerPromise = window.showDirectoryPicker({ mode: 'readwrite', id: 'cockpit-backup' });
     } catch (e) {
       // Synchronous throw (very rare) — surface the real reason.
-      toast('Could not open folder picker: ' + (e?.message || e));
+      toast('Could not open folder picker: ' + (e?.message || e), 6000);
       console.warn('showDirectoryPicker sync error:', e);
       return Promise.resolve(null);
     }
@@ -15532,7 +15553,11 @@ body.is-row-dragging *        { user-select: none !important; }
       // AbortError = user dismissed the picker (no toast — that's normal UX).
       // Anything else is worth surfacing so the user knows why nothing happened.
       if (e?.name === 'AbortError') return null;
-      toast('Folder picker error: ' + (e?.message || e));
+      const msg = e?.message || String(e);
+      const hint = e?.name === 'SecurityError' && location.protocol === 'file:'
+        ? ' (this happens when opening the file via file:// — serve over http(s) instead)'
+        : '';
+      toast('Folder picker error: ' + msg + hint, 6000);
       console.warn('showDirectoryPicker failed:', e);
       return null;
     });
@@ -15546,9 +15571,39 @@ body.is-row-dragging *        { user-select: none !important; }
   const BACKUP_LATEST = 'cockpit-latest.json';
   const BACKUP_PREVIOUS = 'cockpit-previous.json';
 
+  // One-shot download flow used by both "Download now" and the
+  // download-mode tick. Filename includes the user-set folder label so the
+  // user can identify multiple workspaces in their Downloads folder.
+  function downloadBackupNow() {
+    flushPendingSaves();
+    const payload = buildExportPayload();
+    const ab = state.settings.autoBackup;
+    const label = (ab.dirName || 'backup').replace(/[^a-zA-Z0-9_\-]/g, '-').slice(0, 48) || 'backup';
+    const fname = `cockpit-${label}-latest.json`;
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = fname;
+    a.click();
+    URL.revokeObjectURL(url);
+    state.settings.autoBackup.lastBackupAt = new Date().toISOString();
+    saveState();
+    refreshAutoBackupUI();
+    const s = payload.__summary;
+    toast(`Downloaded · ${s.projects} projects · ${s.actions} actions`);
+    return true;
+  }
+
   async function writeBackupNow() {
+    const ab = state.settings.autoBackup;
+    const mode = ab.mode || (pickerAvailable ? 'folder' : 'download');
+    // Download mode: trigger a download and we're done. Works in any
+    // browser, including non-secure contexts (e.g. opened via file://).
+    if (mode === 'download') {
+      return downloadBackupNow();
+    }
     if (!_backupDirHandle) {
-      toast('Pick a backup folder first');
+      toast('Pick a backup folder first', 3000);
       return false;
     }
     try {
@@ -15556,7 +15611,7 @@ body.is-row-dragging *        { user-select: none !important; }
       const perm = await _backupDirHandle.queryPermission?.({ mode: 'readwrite' });
       if (perm !== 'granted') {
         const next = await _backupDirHandle.requestPermission?.({ mode: 'readwrite' });
-        if (next !== 'granted') { toast('Folder permission expired — pick again'); return false; }
+        if (next !== 'granted') { toast('Folder permission expired — pick again', 3000); return false; }
       }
       flushPendingSaves();
       const payload = buildExportPayload();
@@ -15609,7 +15664,10 @@ body.is-row-dragging *        { user-select: none !important; }
     // Always start clean
     if (_autoBackupTimer) { clearInterval(_autoBackupTimer); _autoBackupTimer = null; }
     const ab = state.settings.autoBackup;
-    if (!ab.enabled || !_backupDirHandle) return;
+    if (!ab.enabled) return;
+    // Folder mode requires a real handle; download mode runs anywhere.
+    const mode = ab.mode || (pickerAvailable ? 'folder' : 'download');
+    if (mode === 'folder' && !_backupDirHandle) return;
     const ms = ab.intervalMinutes * 60 * 1000;
     _autoBackupTimer = setInterval(() => { writeBackupNow(); }, ms);
   }
@@ -15624,26 +15682,56 @@ body.is-row-dragging *        { user-select: none !important; }
     const panel = $('#autoBackupPanel');
     if (!panel) return;
     const ab = state.settings.autoBackup;
-    const supported = supportsDirPicker;
     const hasHandle = !!_backupDirHandle;
+    const mode = ab.mode || (pickerAvailable ? 'folder' : 'download');
     const lastTxt = ab.lastBackupAt ? new Date(ab.lastBackupAt).toLocaleString() : 'never';
+
+    // Capabilities banner — explain WHY folder mode is unavailable, if so.
+    let banner = '';
+    if (!supportsDirPicker) {
+      banner = `<div class="ab-warn">
+        Folder auto-backup needs the File System Access API, available
+        only in Chromium browsers (Chrome, Edge, Brave, Arc). On this
+        browser, use <strong>Auto-download</strong> mode below — backups
+        are saved to your browser's Downloads folder.
+      </div>`;
+    } else if (!isSecureContextHttp) {
+      banner = `<div class="ab-warn">
+        The OS folder picker is blocked when this page is opened directly
+        via <code>file://</code>. To enable folder auto-backup, serve the
+        file over <code>http(s)</code> (e.g. <code>python -m http.server</code>
+        in the file's directory, then open
+        <code>http://localhost:8000/cockpit.html</code>). Otherwise, use
+        <strong>Auto-download</strong> mode below.
+      </div>`;
+    }
+
+    // Mode tile state. Only enable the 'folder' tile when the picker is
+    // actually usable — otherwise force 'download'.
+    const folderModeUsable = pickerAvailable;
+    const effectiveMode = folderModeUsable ? mode : 'download';
+    const folderEnabledForToggle = effectiveMode === 'folder' ? hasHandle : true;
+
     panel.innerHTML = `
       <div class="ab-head">
         <span class="ab-title">Auto-backup</span>
         <button class="icon-btn" id="abClose" title="Close" aria-label="Close">×</button>
       </div>
       <div class="ab-body">
-        ${supported ? '' : `<div class="ab-warn">
-          Folder auto-backup needs the File System Access API, which is only
-          available in Chromium browsers (Chrome, Edge, Brave, Arc). In this
-          browser, use <strong>Download now</strong> below to save a backup
-          manually whenever you'd like.
-        </div>`}
+        ${banner}
         <div class="ab-row">
-          <span class="ab-lbl">Folder</span>
-          <span class="ab-val">${ab.dirName ? escapeHTML(ab.dirName) + (hasHandle ? '' : ' <span class="ab-muted">(reconnect needed)</span>') : '<span class="ab-muted">— none —</span>'}</span>
-          ${supported ? '<button class="ghost" id="abPick">Choose folder…</button>' : ''}
+          <span class="ab-lbl">Mode</span>
+          <select id="abMode">
+            <option value="folder"   ${effectiveMode === 'folder'   ? 'selected' : ''} ${folderModeUsable ? '' : 'disabled'}>Save to folder${folderModeUsable ? '' : ' (unavailable)'}</option>
+            <option value="download" ${effectiveMode === 'download' ? 'selected' : ''}>Auto-download to Downloads folder</option>
+          </select>
         </div>
+        <div class="ab-row">
+          <span class="ab-lbl">${effectiveMode === 'folder' ? 'Folder' : 'Folder name'}</span>
+          <input type="text" id="abDirName" value="${escapeHTML(ab.dirName || '')}" placeholder="${effectiveMode === 'folder' ? 'Pick a folder…' : 'Optional label (e.g. cockpit-backups)'}" style="flex: 1; min-width: 0; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 8px; color: var(--text); font: inherit;" />
+          ${effectiveMode === 'folder' ? `<button class="ghost" id="abPick">${hasHandle ? 'Re-pick…' : 'Choose folder…'}</button>` : ''}
+        </div>
+        ${effectiveMode === 'folder' && !hasHandle ? '<div class="ab-muted" style="font-size: 11px; padding-left: 4px;">Pick a folder to enable auto-backup. The folder name above is the display label.</div>' : ''}
         <div class="ab-row">
           <span class="ab-lbl">Frequency</span>
           <select id="abInterval">
@@ -15657,7 +15745,7 @@ body.is-row-dragging *        { user-select: none !important; }
         </div>
         <div class="ab-row">
           <label class="ab-toggle">
-            <input type="checkbox" id="abEnabled" ${ab.enabled && hasHandle ? 'checked' : ''} ${(!supported || !hasHandle) ? 'disabled' : ''} />
+            <input type="checkbox" id="abEnabled" ${ab.enabled && folderEnabledForToggle ? 'checked' : ''} ${folderEnabledForToggle ? '' : 'disabled'} />
             <span>Enable auto-backup</span>
           </label>
         </div>
@@ -15666,19 +15754,24 @@ body.is-row-dragging *        { user-select: none !important; }
           <span class="ab-val">${lastTxt}</span>
         </div>
         <div class="ab-note ab-muted" style="font-size: 11px; line-height: 1.45; padding-top: 4px;">
-          The folder keeps just two files at any time:
-          <code>cockpit-latest.json</code> (this save) and
-          <code>cockpit-previous.json</code> (the one before).
-          Older backups are removed on each rotation.
+          ${effectiveMode === 'folder'
+            ? `Folder mode keeps just two files: <code>cockpit-latest.json</code> (this save) and <code>cockpit-previous.json</code> (the one before). Older backups are pruned on each rotation.`
+            : `Download mode saves <code>cockpit-${escapeHTML(ab.dirName || 'backup')}-latest.json</code> to your browser's default Downloads folder. Browsers usually append <code>(1)</code>, <code>(2)</code> to avoid overwriting — set your browser's "Ask where to save each file" off, and "Always overwrite" on, if available.`}
         </div>
         <div class="ab-actions">
-          <button class="ghost" id="abDownload" title="Download a backup JSON to your default Downloads folder">Download now</button>
-          ${supported ? `<button class="primary" id="abBackupNow" ${hasHandle ? '' : 'disabled'}>Back up to folder now</button>` : ''}
+          <button class="ghost" id="abDownload" title="Trigger one backup right now (downloads to your default Downloads folder)">Download now</button>
+          ${effectiveMode === 'folder' ? `<button class="primary" id="abBackupNow" ${hasHandle ? '' : 'disabled'}>Back up now</button>` : `<button class="primary" id="abBackupNow">Back up now</button>`}
         </div>
       </div>`;
 
     // Wire
     panel.querySelector('#abClose')?.addEventListener('click', closeAutoBackupPanel);
+    panel.querySelector('#abMode')?.addEventListener('change', (e) => {
+      state.settings.autoBackup.mode = e.target.value;
+      saveState();
+      renderAutoBackupPanel();
+      scheduleAutoBackup();
+    });
     panel.querySelector('#abPick')?.addEventListener('click', () => {
       // Call requestBackupDir() synchronously — no `async () =>` wrapper —
       // so window.showDirectoryPicker() runs inside the user-gesture window.
@@ -15688,6 +15781,23 @@ body.is-row-dragging *        { user-select: none !important; }
         scheduleAutoBackup();
       });
     });
+    // Editable folder-name field — used as the display label and as the
+    // filename suffix in download mode. User can rename freely; the change
+    // is committed when the field loses focus or Enter is pressed.
+    const dirNameEl = panel.querySelector('#abDirName');
+    if (dirNameEl) {
+      const commitName = () => {
+        const v = dirNameEl.value.trim();
+        if (state.settings.autoBackup.dirName !== v) {
+          state.settings.autoBackup.dirName = v;
+          saveState();
+        }
+      };
+      dirNameEl.addEventListener('blur', commitName);
+      dirNameEl.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); dirNameEl.blur(); }
+      });
+    }
     panel.querySelector('#abInterval')?.addEventListener('change', (e) => {
       const v = parseInt(e.target.value, 10);
       state.settings.autoBackup.intervalMinutes = v;
@@ -15706,7 +15816,7 @@ body.is-row-dragging *        { user-select: none !important; }
       if (ok) toast('Backed up');
     });
     panel.querySelector('#abDownload')?.addEventListener('click', () => {
-      exportJSON();
+      downloadBackupNow();
     });
   }
 
