@@ -5560,6 +5560,74 @@ body.is-row-dragging *        { user-select: none !important; }
   z-index: 200;
 }
 
+/* Saved-views row — sits between the topbar and main, surfaces named
+   filter combinations as one-click chips. Right-click any chip to
+   rename / update-from-current / delete. */
+.saved-views-row {
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  padding: 6px 12px;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+}
+.saved-views-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+.saved-views-label {
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  font-weight: 600;
+  font-size: 10px;
+  margin-right: 2px;
+}
+.saved-views-hint { color: var(--text-faint); font-style: italic; }
+.saved-view-chip {
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  color: var(--text-dim);
+  padding: 3px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.3;
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+}
+.saved-view-chip:hover { background: var(--bg-1); color: var(--text); border-color: var(--line-2); }
+.saved-view-chip.is-active {
+  background: rgba(110,168,255,.15);
+  color: var(--accent);
+  border-color: rgba(110,168,255,.45);
+  font-weight: 600;
+}
+.saved-view-add {
+  background: transparent;
+  border: 1px dashed var(--line-2);
+  color: var(--text-faint);
+  padding: 3px 9px;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.saved-view-add:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); }
+.saved-view-add:disabled { opacity: .35; cursor: not-allowed; }
+.saved-view-clear {
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 3px 6px;
+}
+.saved-view-clear:hover { color: var(--bad); }
+.app.sidebar-collapsed .saved-views-row { padding-left: 12px; }
+
 /* Persistent storage-status pill — bottom-right, always-on. Click opens
    the Storage panel. Quiet by default, brightens when saves are in
    flight, glows red when something failed. */

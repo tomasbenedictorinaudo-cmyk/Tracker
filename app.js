@@ -405,10 +405,21 @@
   // Phase A helper — stamp signed-edit metadata on a record (action, CR,
   // open point, …) before committing. Optional `editor` lets future team-mode
   // identify the author; defaults to the local user marker.
-  function stampEdit(record, editor) {
+  // Also appends an entry to record.__history (capped) so the editor can
+  // surface a per-record changelog. `summary` is a short human-readable
+  // description of what changed; falls back to a generic label.
+  const HISTORY_LIMIT_PER_RECORD = 60;
+  function stampEdit(record, editor, summary) {
     if (!record || typeof record !== 'object') return;
-    record.__lastEditor = editor || (state.settings.localUser || 'me');
-    record.__lastEditAt = new Date().toISOString();
+    const at = new Date().toISOString();
+    const by = editor || (state.settings.localUser || 'me');
+    record.__lastEditor = by;
+    record.__lastEditAt = at;
+    if (!Array.isArray(record.__history)) record.__history = [];
+    record.__history.push({ at, by, summary: summary || 'edit' });
+    if (record.__history.length > HISTORY_LIMIT_PER_RECORD) {
+      record.__history.splice(0, record.__history.length - HISTORY_LIMIT_PER_RECORD);
+    }
   }
   // Wraps a mutator: runs it, stamps any returned record(s), then commits.
   // Use as `mutate(() => { … return action; }, 'commit-name')`.
@@ -853,12 +864,21 @@
   // engineering views (budgets, charts) — every project in __all__ mode, or just
   // the selected project otherwise.
   function projectsInScope() {
-    if (state.currentProjectId === '__all__') return state.projects;
+    if (state.currentProjectId === '__all__') {
+      // Cross-project views drop archived projects by default — they're
+      // archived because they're done. Show-archived setting overrides.
+      return state.settings.showArchivedProjects
+        ? state.projects
+        : state.projects.filter((p) => !p.archived);
+    }
     const cur = state.projects.find((p) => p.id === state.currentProjectId);
     return cur ? [cur] : state.projects;
   }
   function mergedProject() {
-    const flat = (key) => state.projects.flatMap((p) => p[key] || []);
+    const liveProjects = state.settings.showArchivedProjects
+      ? state.projects
+      : state.projects.filter((p) => !p.archived);
+    const flat = (key) => liveProjects.flatMap((p) => p[key] || []);
     return {
       id: '__all__',
       name: 'All projects',
@@ -940,8 +960,49 @@
     return false;
   }
 
+  // Helper — push an ISO date forward by N units for recurrence cadence.
+  function shiftIsoForward(iso, unit, interval) {
+    const d = parseDate(iso) || new Date();
+    if (unit === 'day')   d.setDate(d.getDate()  + interval);
+    if (unit === 'week')  d.setDate(d.getDate()  + interval * 7);
+    if (unit === 'month') d.setMonth(d.getMonth() + interval);
+    return fmtISO(d);
+  }
+  function isSnoozed(a) {
+    return a.snoozedUntil && a.snoozedUntil > todayISO();
+  }
+  // When a recurring action is marked done, drop a fresh sibling with
+  // its due date pushed forward by recurrence cadence. Returns the new
+  // action so callers can stamp / commit it.
+  function spawnRecurrenceFromDone(action, project) {
+    if (!action || !action.recurrence) return null;
+    const r = action.recurrence;
+    const baseDue = action.due || todayISO();
+    const next = {
+      ...action,
+      id: uid('a'),
+      status: 'todo',
+      due: shiftIsoForward(baseDue, r.unit, r.interval || 1),
+      createdAt: todayISO(),
+      updatedAt: todayISO(),
+      originatorDate: todayISO(),
+      history: [{ at: todayISO(), what: `Spawned from recurring "${action.title}"` }],
+      __history: [],
+      __lastEditor: null,
+      __lastEditAt: null,
+      deletedAt: null,
+      snoozedUntil: null,
+      // Keep the recurrence on the new instance so the chain continues
+      recurrence: { ...r },
+    };
+    project.actions = project.actions || [];
+    project.actions.push(next);
+    return next;
+  }
+
   function actionMatchesFilters(a) {
     if (a.deletedAt) return false; // archived items are hidden by default
+    if (isSnoozed(a)) return false; // snoozed actions hidden until their date
     const fOwner = $('#filterOwner').value;
     const fComp = $('#filterComponent').value;
     const fStatus = $('#filterStatus').value;
@@ -1006,14 +1067,129 @@
     refreshBell();
   }
 
+  // Capture the currently-applied topbar filter set as a small object —
+  // used both for "save current view" and for comparing against existing
+  // saved views (so the matching chip is highlighted).
+  function captureFilterState() {
+    return {
+      search:    $('#search')?.value || '',
+      owner:     $('#filterOwner')?.value || '',
+      component: $('#filterComponent')?.value || '',
+      status:    $('#filterStatus')?.value || '',
+      due:       $('#filterDue')?.value || '',
+      view:      state.currentView,
+    };
+  }
+  function applyFilterState(f) {
+    if (!f) return;
+    if ($('#search'))          $('#search').value          = f.search    || '';
+    if ($('#filterOwner'))     $('#filterOwner').value     = f.owner     || '';
+    if ($('#filterComponent')) $('#filterComponent').value = f.component || '';
+    if ($('#filterStatus'))    $('#filterStatus').value    = f.status    || '';
+    if ($('#filterDue'))       $('#filterDue').value       = f.due       || '';
+    if (f.view) state.currentView = f.view;
+    saveState();
+    render();
+  }
+  function filterStateMatches(a, b) {
+    return ['search','owner','component','status','due','view'].every((k) => (a[k] || '') === (b[k] || ''));
+  }
+
+  // Build the saved-views chip row above the main content. Lazy-creates
+  // the container element on first call and updates it in place.
+  function renderSavedViewsRow() {
+    let row = $('#savedViewsRow');
+    if (!row) {
+      const topbar = $('header.topbar');
+      if (!topbar) return;
+      row = document.createElement('div');
+      row.id = 'savedViewsRow';
+      row.className = 'saved-views-row';
+      topbar.insertAdjacentElement('afterend', row);
+    }
+    const cur = captureFilterState();
+    const views = state.savedViews || [];
+    const empty = views.length === 0;
+    const hasActiveFilters =
+      cur.search || cur.owner || cur.component || cur.status || cur.due;
+    row.innerHTML = `
+      <div class="saved-views-inner">
+        <span class="saved-views-label">Views:</span>
+        ${empty
+          ? '<span class="saved-views-hint">— none yet —</span>'
+          : views.map((v) => {
+              const match = v.filters && filterStateMatches(v.filters, cur);
+              return `<button class="saved-view-chip ${match ? 'is-active' : ''}" data-sv-id="${escapeHTML(v.id)}" title="Apply this view (right-click for options)">${escapeHTML(v.name)}</button>`;
+            }).join('')}
+        <button class="saved-view-add" id="svSave" title="Save the current filters + view as a named preset"${hasActiveFilters ? '' : ' disabled'}>+ Save view</button>
+        ${hasActiveFilters ? '<button class="saved-view-clear" id="svClear" title="Clear all filters">Clear</button>' : ''}
+      </div>`;
+    row.querySelector('#svSave')?.addEventListener('click', () => {
+      const name = prompt('Name this view:');
+      if (!name) return;
+      const trimmed = name.trim().slice(0, 60);
+      if (!trimmed) return;
+      state.savedViews = state.savedViews || [];
+      state.savedViews.push({ id: uid('sv'), name: trimmed, filters: cur });
+      commit('view-save');
+      toast(`Saved view "${trimmed}"`);
+    });
+    row.querySelector('#svClear')?.addEventListener('click', () => {
+      applyFilterState({ search: '', owner: '', component: '', status: '', due: '', view: state.currentView });
+    });
+    row.querySelectorAll('.saved-view-chip').forEach((b) => {
+      b.addEventListener('click', () => {
+        const v = state.savedViews.find((x) => x.id === b.dataset.svId);
+        if (v) applyFilterState(v.filters);
+      });
+      b.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const v = state.savedViews.find((x) => x.id === b.dataset.svId);
+        if (!v) return;
+        showContextMenu(e.clientX, e.clientY, [
+          { icon: '✎', label: 'Rename…', onClick: () => {
+            const next = prompt('New name:', v.name);
+            if (next == null) return;
+            v.name = next.trim() || v.name;
+            commit('view-rename');
+          }},
+          { icon: '⟳', label: 'Update to current filters', onClick: () => {
+            v.filters = captureFilterState();
+            commit('view-update');
+            toast(`Updated "${v.name}"`);
+          }},
+          { divider: true },
+          { icon: '×', label: 'Delete view', danger: true, onClick: () => {
+            state.savedViews = state.savedViews.filter((x) => x.id !== v.id);
+            commit('view-delete');
+          }},
+        ]);
+      });
+    });
+  }
+
   function renderTopbar() {
+    renderSavedViewsRow();
     const sel = $('#projectSelect');
+    const showArchived = !!state.settings.showArchivedProjects;
+    const live    = state.projects.filter((p) => !p.archived);
+    const arch    = state.projects.filter((p) =>  p.archived);
+    // Always include the currently-selected project in the picker even if
+    // it's archived — otherwise the dropdown can desync from state.
+    const visible = showArchived ? state.projects
+                                 : [...live, ...arch.filter((p) => p.id === state.currentProjectId)];
+    const archCount = arch.length;
     sel.innerHTML =
       `<option value="__all__" ${state.currentProjectId === '__all__' ? 'selected' : ''}>📚 All projects</option>` +
       `<option disabled>──────────</option>` +
-      state.projects
-        .map((p) => `<option value="${p.id}" ${p.id === state.currentProjectId ? 'selected' : ''}>${escapeHTML(p.name)}</option>`)
-        .join('');
+      visible
+        .map((p) => `<option value="${p.id}" ${p.id === state.currentProjectId ? 'selected' : ''}>${p.archived ? '📦 ' : ''}${escapeHTML(p.name)}</option>`)
+        .join('') +
+      (archCount && !showArchived
+        ? `<option disabled>──────────</option><option value="__show_archived__">📦 Show ${archCount} archived…</option>`
+        : (archCount && showArchived
+            ? `<option disabled>──────────</option><option value="__hide_archived__">📦 Hide archived</option>`
+            : ''));
 
     const fOwner = $('#filterOwner');
     const cur = fOwner.value;
@@ -1441,9 +1617,31 @@
     const setStatus = (st) => () => {
       if (a.status === st) return;
       a.history.push({ at: todayISO(), what: `Status: ${a.status} → ${st}` });
+      const wasNotDone = a.status !== 'done';
       a.status = st;
       a.updatedAt = todayISO();
+      stampEdit(a, null, `status → ${st}`);
+      // Recurring → spawn next instance
+      let recurNote = '';
+      if (st === 'done' && wasNotDone && a.recurrence) {
+        const sourceProj = projectOfAction(a.id) || curProject();
+        const nextA = spawnRecurrenceFromDone(a, sourceProj);
+        if (nextA) {
+          stampEdit(nextA, null, 'spawned by recurrence');
+          recurNote = ` · next due ${nextA.due}`;
+        }
+      }
       commit('status');
+      if (recurNote) toast('Done' + recurNote);
+    };
+    const snoozeBy = (days, label) => () => {
+      const d = new Date(); d.setHours(0, 0, 0, 0);
+      d.setDate(d.getDate() + days);
+      a.snoozedUntil = fmtISO(d);
+      a.updatedAt = todayISO();
+      stampEdit(a, null, `snoozed ${label}`);
+      commit('snooze');
+      toast(`Snoozed ${label} → reappears ${a.snoozedUntil}`);
     };
     return [
       { icon: '✎', label: 'Edit details…', onClick: () => openDrawer(a.id) },
@@ -1456,6 +1654,19 @@
       { icon: '◐', label: 'Mark in progress', onClick: setStatus('doing') },
       { icon: '⨯', label: 'Mark blocked',     onClick: setStatus('blocked') },
       { icon: '✓', label: 'Mark done',        onClick: setStatus('done') },
+      { divider: true },
+      a.snoozedUntil
+        ? { icon: '⏰', label: `Wake (snoozed until ${a.snoozedUntil})`, onClick: () => {
+            a.snoozedUntil = null;
+            stampEdit(a, null, 'unsnooze');
+            commit('unsnooze');
+            toast('Unsnoozed');
+          }}
+        : { icon: '⏰', label: 'Snooze 1 day',  onClick: snoozeBy(1, '1 day') },
+      ...(a.snoozedUntil ? [] : [
+        { icon: '⏰', label: 'Snooze 1 week',  onClick: snoozeBy(7, '1 week') },
+        { icon: '⏰', label: 'Snooze 1 month', onClick: snoozeBy(30, '1 month') },
+      ]),
       { divider: true },
       { icon: '×', label: 'Move to Archive', danger: true, onClick: () => {
         if (!confirm(`Move "${a.title}" to Archive?`)) return;
@@ -7309,18 +7520,21 @@
         <div class="page-actions"><button class="ghost" id="btnNewProj2">+ Project</button></div>
       </div>
       <div class="dashboard" id="portfolioGrid">
-        ${state.projects.filter((p) => matchesSearch(p.name, p.description)).map((p) => {
+        ${state.projects
+          .filter((p) => state.settings.showArchivedProjects ? true : !p.archived)
+          .filter((p) => matchesSearch(p.name, p.description))
+          .map((p) => {
           const acts = p.actions || [];
           const total = acts.length;
           const done = acts.filter((a) => a.status === 'done').length;
           const late = acts.filter((a) => a.status !== 'done' && a.due && dayDiff(a.due, todayISO()) < 0).length;
           const pct = total ? Math.round((done / total) * 100) : 0;
           return `
-            <div class="kpi clickable" data-pid="${p.id}" style="grid-column: span 2; cursor:pointer;">
+            <div class="kpi clickable ${p.archived ? 'is-archived' : ''}" data-pid="${p.id}" style="grid-column: span 2; cursor:pointer;${p.archived ? ' opacity:.55;' : ''}">
               ${ROW_GRIP_HTML}
-              <div class="kpi-label">${escapeHTML(p.name)}</div>
+              <div class="kpi-label">${p.archived ? '📦 ' : ''}${escapeHTML(p.name)}</div>
               <div class="kpi-value">${pct}%</div>
-              <div class="kpi-sub">${total} actions • ${late} late • ${done} done</div>
+              <div class="kpi-sub">${total} actions • ${late} late • ${done} done${p.archived ? ' • <em>archived</em>' : ''}</div>
             </div>`;
         }).join('')}
       </div>`;
@@ -7351,6 +7565,25 @@
             saveState(); render();
           }},
           { icon: '⊕', label: 'Save as template…', onClick: () => saveProjectAsTemplate(pid) },
+          { divider: true },
+          p.archived
+            ? { icon: '📤', label: 'Unarchive project', onClick: () => {
+                p.archived = false;
+                commit('project-unarchive');
+                toast(`Unarchived "${p.name}"`);
+              }}
+            : { icon: '📦', label: 'Archive project', onClick: () => {
+                if (state.projects.filter((x) => !x.archived).length <= 1) {
+                  toast('Cannot archive the only active project');
+                  return;
+                }
+                p.archived = true;
+                if (state.currentProjectId === pid) {
+                  state.currentProjectId = state.projects.find((x) => !x.archived)?.id || null;
+                }
+                commit('project-archive');
+                toast(`Archived "${p.name}" — restore from the project picker`);
+              }},
           { divider: true },
           { icon: '×', label: 'Delete project', danger: true, onClick: () => {
             if (state.projects.length <= 1) { toast('Cannot delete the only project'); return; }
@@ -7809,6 +8042,25 @@
       <div class="field"><label>Depends on <span class="muted">— actions that must finish before this one</span></label>
         <div class="depends-input" id="dDependsWrap"></div>
       </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+        <div class="field">
+          <label>Recurring <span class="muted">— spawn next instance when marked done</span></label>
+          <div style="display: flex; gap: 6px; align-items: center;">
+            <select id="dRecurUnit">
+              <option value=""      ${!a.recurrence                    ? 'selected' : ''}>— no recurrence —</option>
+              <option value="day"   ${a.recurrence?.unit === 'day'      ? 'selected' : ''}>Daily</option>
+              <option value="week"  ${a.recurrence?.unit === 'week'     ? 'selected' : ''}>Weekly</option>
+              <option value="month" ${a.recurrence?.unit === 'month'    ? 'selected' : ''}>Monthly</option>
+            </select>
+            <span class="muted" id="dRecurEvery"${!a.recurrence ? ' style="display:none;"' : ''}>every</span>
+            <input id="dRecurInterval" type="number" min="1" max="52" value="${a.recurrence?.interval || 1}" style="width:56px;${!a.recurrence ? ' display:none;' : ''}" />
+          </div>
+        </div>
+        <div class="field">
+          <label>Snooze until <span class="muted">— hide from views until this date</span></label>
+          <input id="dSnoozeUntil" type="date" value="${escapeHTML(a.snoozedUntil || '')}" />
+        </div>
+      </div>
       <div class="field"><label>Tags</label>
         <div class="tags-input" id="dTagsWrap"></div>
       </div>
@@ -7817,7 +8069,17 @@
         <div class="comments" id="dComments"></div>
       </div>
       <div class="field"><label>History</label>
-        <div class="history">${(a.history || []).slice(-10).reverse().map((h) => `<div class="history-item"><b>${h.at}</b> — ${escapeHTML(h.what)}</div>`).join('')}</div>
+        <div class="history">${(() => {
+          // Merge state-transitions (a.history) with audit edits (a.__history)
+          // into a single chronological list, newest first.
+          const transitions = (a.history || []).map((h) => ({ at: h.at, by: null, summary: h.what }));
+          const audits      = (a.__history || []).map((h) => ({ at: h.at, by: h.by, summary: h.summary }));
+          const merged = [...transitions, ...audits].sort((x, y) => (y.at || '').localeCompare(x.at || ''));
+          if (!merged.length) return '<div class="history-item muted">No history yet — saving an edit will record an entry here.</div>';
+          return merged.slice(0, 24).map((h) =>
+            `<div class="history-item"><b>${escapeHTML(h.at || '')}</b>${h.by ? ` <span class="muted">· ${escapeHTML(h.by)}</span>` : ''} — ${escapeHTML(h.summary || '')}</div>`
+          ).join('');
+        })()}</div>
       </div>
       <div style="display:flex; gap:8px; margin-top:6px;">
         <button class="primary" id="dSave">Save</button>
@@ -7825,6 +8087,13 @@
       </div>`;
     $('#drawer').hidden = false;
     $('#dCmt').addEventListener('input', (e) => { $('#dCmtVal').textContent = e.target.value + '%'; });
+    // Recurrence — show / hide the interval input based on the selected unit.
+    $('#dRecurUnit')?.addEventListener('change', (e) => {
+      const on = !!e.target.value;
+      const every = $('#dRecurEvery'), input = $('#dRecurInterval');
+      if (every) every.style.display = on ? '' : 'none';
+      if (input) input.style.display = on ? '' : 'none';
+    });
 
     // Depends-on multi-select. Local working list mirrored back to a.dependsOn
     // on save. Self-references and would-be cycles are filtered from the
@@ -8087,6 +8356,16 @@
       }
       a.commitment = clamp(parseInt($('#dCmt').value, 10) || 100, 5, 100);
       if (oldCmt !== a.commitment) a.history.push({ at: todayISO(), what: `Commitment: ${oldCmt}% → ${a.commitment}%` });
+      // Recurrence + snooze
+      const recurUnit = $('#dRecurUnit')?.value || '';
+      if (recurUnit && (recurUnit === 'day' || recurUnit === 'week' || recurUnit === 'month')) {
+        const interval = clamp(parseInt($('#dRecurInterval')?.value, 10) || 1, 1, 52);
+        a.recurrence = { unit: recurUnit, interval };
+      } else {
+        a.recurrence = null;
+      }
+      const snoozeRaw = $('#dSnoozeUntil')?.value || '';
+      a.snoozedUntil = snoozeRaw || null;
       const oldDeps = Array.isArray(a.dependsOn) ? a.dependsOn.slice() : [];
       a.dependsOn = drawerDeps.slice();
       const depsChanged = oldDeps.length !== a.dependsOn.length || oldDeps.some((d, i) => d !== a.dependsOn[i]);
@@ -8100,9 +8379,27 @@
       if (oldStatus !== a.status) a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${a.status}` });
       if (oldOwner !== a.owner) a.history.push({ at: todayISO(), what: `Owner: ${personName(oldOwner)} → ${personName(a.owner)}` });
       if (oldDue !== a.due) a.history.push({ at: todayISO(), what: `Due: ${oldDue || '—'} → ${a.due || '—'}` });
+      // Audit stamp — short, human summary of what changed in this save.
+      const auditBits = [];
+      if (oldStatus !== a.status) auditBits.push(`status ${oldStatus}→${a.status}`);
+      if (oldOwner !== a.owner) auditBits.push('owner');
+      if (oldDue !== a.due) auditBits.push('due date');
+      if (oldCmt !== a.commitment) auditBits.push('commitment');
+      stampEdit(a, null, auditBits.length ? `edit · ${auditBits.join(', ')}` : 'edit');
+      // Recurring actions spawn the next occurrence the moment they're
+      // completed. The user sees a toast confirming the new instance.
+      let recurNote = '';
+      if (oldStatus !== 'done' && a.status === 'done' && a.recurrence) {
+        const sourceProj = projectOfAction(a.id) || proj;
+        const nextA = spawnRecurrenceFromDone(a, sourceProj);
+        if (nextA) {
+          stampEdit(nextA, null, 'spawned by recurrence');
+          recurNote = ` · next due ${nextA.due}`;
+        }
+      }
       commit('edit');
       closeDrawer();
-      toast('Saved');
+      toast('Saved' + recurNote);
     });
     $('#dDelete').addEventListener('click', () => {
       if (!confirm('Move this action to Archive? You can restore it later.')) return;
@@ -9358,6 +9655,15 @@
       t.createdAt = t.createdAt || todayISO();
       t.shape = t.shape || {};
     });
+    // Saved views — named filter / search combinations the user can
+    // apply with one click. Each: { id, name, filters: {search, owner,
+    // component, status, due, view? } }. Defaults to []  for retrocompat.
+    s.savedViews = Array.isArray(s.savedViews) ? s.savedViews : [];
+    s.savedViews.forEach((v) => {
+      v.id = v.id || uid('sv');
+      v.name = v.name || 'View';
+      v.filters = v.filters || {};
+    });
     s.currentView = s.currentView || 'board';
     if (s.currentView === 'teams') s.currentView = 'people';
     // Panels merged into others over time — migrate stale state so saved
@@ -9382,6 +9688,9 @@
       p.id = p.id || uid('pr');
       p.name = p.name || 'Untitled project';
       p.description = p.description || '';
+      // Archived projects are hidden from the picker by default but kept
+      // in state so their data isn't lost. Boolean (defaults to false).
+      p.archived = !!p.archived;
       // Per-collection arrays (presence is enough for renderers to short-circuit)
       p.actions      = Array.isArray(p.actions) ? p.actions : [];
       p.deliverables = Array.isArray(p.deliverables) ? p.deliverables : [];
@@ -9443,6 +9752,21 @@
         });
         if (a.__lastEditor === undefined) a.__lastEditor = null;
         if (a.__lastEditAt === undefined) a.__lastEditAt = null;
+        if (!Array.isArray(a.__history)) a.__history = [];
+        // Recurrence — when set, marking the action 'done' spawns the
+        // next instance with due date pushed forward by interval × unit.
+        // { unit: 'day'|'week'|'month', interval: 1..N } or null.
+        if (a.recurrence !== undefined && a.recurrence) {
+          const u = a.recurrence.unit;
+          a.recurrence.unit = (u === 'day' || u === 'week' || u === 'month') ? u : 'week';
+          a.recurrence.interval = (typeof a.recurrence.interval === 'number' && a.recurrence.interval >= 1)
+            ? Math.floor(a.recurrence.interval) : 1;
+        } else if (a.recurrence === undefined) {
+          a.recurrence = null;
+        }
+        // Snooze — ISO date; while today < snoozedUntil, the action is
+        // hidden from default views.
+        if (a.snoozedUntil === undefined) a.snoozedUntil = null;
         // a.deletedAt is null for live, ISO string for archived — preserve as-is
       });
 
@@ -9520,6 +9844,7 @@
         });
         if (c.__lastEditor === undefined) c.__lastEditor = null;
         if (c.__lastEditAt === undefined) c.__lastEditAt = null;
+        if (!Array.isArray(c.__history)) c.__history = [];
       });
 
       p.components.forEach((cmp) => {
@@ -9585,6 +9910,7 @@
         });
         if (op.__lastEditor === undefined) op.__lastEditor = null;
         if (op.__lastEditAt === undefined) op.__lastEditAt = null;
+        if (!Array.isArray(op.__history)) op.__history = [];
       });
 
       p.links.forEach((l) => {
@@ -13743,15 +14069,26 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       });
     });
     $('#projectSelect').addEventListener('change', (e) => {
-      state.currentProjectId = e.target.value;
+      const v = e.target.value;
+      // Special pseudo-values toggle archived-project visibility without
+      // changing the active project.
+      if (v === '__show_archived__') {
+        state.settings.showArchivedProjects = true;
+        saveState(); renderTopbar(); return;
+      }
+      if (v === '__hide_archived__') {
+        state.settings.showArchivedProjects = false;
+        saveState(); renderTopbar(); return;
+      }
+      state.currentProjectId = v;
       saveState(); render();
       if (state.notesOpen) loadNotesForCurrentProject();
     });
     $('#btnNewProject').addEventListener('click', () => openQuickAdd('project'));
 
     ['#search', '#filterOwner', '#filterComponent', '#filterStatus', '#filterDue'].forEach((sel) => {
-      $(sel).addEventListener('input', () => render());
-      $(sel).addEventListener('change', () => render());
+      $(sel).addEventListener('input', () => { render(); renderSavedViewsRow(); });
+      $(sel).addEventListener('change', () => { render(); renderSavedViewsRow(); });
     });
 
     $('#btnUndo').addEventListener('click', undo);
