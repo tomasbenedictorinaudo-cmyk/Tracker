@@ -5558,6 +5558,127 @@ body.is-row-dragging *        { user-select: none !important; }
   z-index: 200;
 }
 
+/* Persistent storage-status pill — bottom-right, always-on. Click opens
+   the Storage panel. Quiet by default, brightens when saves are in
+   flight, glows red when something failed. */
+.storage-status {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--text-faint);
+  border-radius: 999px;
+  padding: 5px 11px 5px 9px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,.18);
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+  z-index: 150;
+  max-width: min(360px, 60vw);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.storage-status:hover {
+  background: var(--bg-3);
+  color: var(--text);
+  border-color: var(--line-2);
+}
+.storage-status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px var(--bg-2);
+}
+.storage-status.is-saving .storage-status-dot {
+  background: var(--accent);
+  animation: storage-pulse 1.2s ease-in-out infinite;
+}
+.storage-status.is-warn  .storage-status-dot { background: #f5c150; }
+.storage-status.is-error .storage-status-dot { background: var(--bad); animation: storage-pulse 1.2s ease-in-out infinite; }
+.storage-status.is-error { color: var(--bad); border-color: rgba(248,113,133,.45); background: rgba(248,113,133,.08); }
+@keyframes storage-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+.storage-status-text { display: inline-block; max-width: 100%; }
+
+/* Storage panel — full overlay listing every place data is kept. Reuses
+   the .desc-modal width but with a slightly more spacious body for the
+   restore lists. */
+.storage-modal { width: 640px; max-width: 92vw; }
+.storage-modal .desc-head { padding-right: 8px; }
+.storage-section {
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex; flex-direction: column;
+  gap: 6px;
+}
+.storage-section + .storage-section { margin-top: 10px; }
+.storage-section-head {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.storage-section-head .storage-state-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.storage-section-head .storage-state-dot.warn { background: #f5c150; }
+.storage-section-head .storage-state-dot.bad  { background: var(--bad); }
+.storage-section-row {
+  display: flex; gap: 10px; justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.storage-section-row code {
+  background: var(--bg-1);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.storage-history {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+}
+.storage-history-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.storage-history-row:last-child { border-bottom: none; }
+.storage-history-row .storage-history-name {
+  font-family: var(--mono, monospace);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.storage-history-row .storage-history-meta {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.storage-history-row button { padding: 2px 8px; font-size: 11px; }
+.storage-actions {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }

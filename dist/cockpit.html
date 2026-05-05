@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-05T21:10:10.937Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-05T21:26:47.361Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -5567,6 +5567,127 @@ body.is-row-dragging *        { user-select: none !important; }
   z-index: 200;
 }
 
+/* Persistent storage-status pill — bottom-right, always-on. Click opens
+   the Storage panel. Quiet by default, brightens when saves are in
+   flight, glows red when something failed. */
+.storage-status {
+  position: fixed;
+  bottom: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--text-faint);
+  border-radius: 999px;
+  padding: 5px 11px 5px 9px;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,.18);
+  transition: background var(--transition), color var(--transition), border-color var(--transition);
+  z-index: 150;
+  max-width: min(360px, 60vw);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.storage-status:hover {
+  background: var(--bg-3);
+  color: var(--text);
+  border-color: var(--line-2);
+}
+.storage-status-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px var(--bg-2);
+}
+.storage-status.is-saving .storage-status-dot {
+  background: var(--accent);
+  animation: storage-pulse 1.2s ease-in-out infinite;
+}
+.storage-status.is-warn  .storage-status-dot { background: #f5c150; }
+.storage-status.is-error .storage-status-dot { background: var(--bad); animation: storage-pulse 1.2s ease-in-out infinite; }
+.storage-status.is-error { color: var(--bad); border-color: rgba(248,113,133,.45); background: rgba(248,113,133,.08); }
+@keyframes storage-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .45; }
+}
+.storage-status-text { display: inline-block; max-width: 100%; }
+
+/* Storage panel — full overlay listing every place data is kept. Reuses
+   the .desc-modal width but with a slightly more spacious body for the
+   restore lists. */
+.storage-modal { width: 640px; max-width: 92vw; }
+.storage-modal .desc-head { padding-right: 8px; }
+.storage-section {
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex; flex-direction: column;
+  gap: 6px;
+}
+.storage-section + .storage-section { margin-top: 10px; }
+.storage-section-head {
+  display: flex; align-items: center; gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+.storage-section-head .storage-state-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.storage-section-head .storage-state-dot.warn { background: #f5c150; }
+.storage-section-head .storage-state-dot.bad  { background: var(--bad); }
+.storage-section-row {
+  display: flex; gap: 10px; justify-content: space-between;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.storage-section-row code {
+  background: var(--bg-1);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.storage-history {
+  max-height: 180px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+}
+.storage-history-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--line);
+}
+.storage-history-row:last-child { border-bottom: none; }
+.storage-history-row .storage-history-name {
+  font-family: var(--mono, monospace);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.storage-history-row .storage-history-meta {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.storage-history-row button { padding: 2px 8px; font-size: 11px; }
+.storage-actions {
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+
 /* Scrollbars */
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -5763,6 +5884,13 @@ body.is-row-dragging *        { user-select: none !important; }
     </aside>
 
     <div class="toast" id="toast" hidden></div>
+
+    <!-- Persistent storage status line — shows save status, origin, and
+         backup state. Click to open the Storage panel. -->
+    <button class="storage-status" id="storageStatus" type="button" title="Storage details">
+      <span class="storage-status-dot" id="storageStatusDot" aria-hidden="true"></span>
+      <span class="storage-status-text" id="storageStatusText">Saving…</span>
+    </button>
   </div>
 
   <!-- Quick add overlay -->
@@ -6108,10 +6236,18 @@ body.is-row-dragging *        { user-select: none !important; }
   // overwrite the original (broken-but-recoverable) localStorage with the
   // in-memory placeholder state.
   let _recoveryMode = false;
+  let _lastSaveAt = null;
   function saveState() {
     if (_recoveryMode) return;
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); }
-    catch (e) { /* quota */ }
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      _lastSaveAt = new Date().toISOString();
+    } catch (e) { /* quota */ }
+    // Secondary, durable backup to the Origin Private File System —
+    // debounced so rapid edits coalesce into a single write.
+    try { scheduleOpfsBackup(); } catch (_) { /* opfs may be undefined during early init */ }
+    // Refresh the bottom-right status line whenever a save completes.
+    try { refreshStorageUI(); } catch (_) {}
   }
 
   // Shows a non-dismissable overlay when localStorage data exists but
@@ -15147,6 +15283,7 @@ body.is-row-dragging *        { user-select: none !important; }
     if (ab.mode !== 'folder' && ab.mode !== 'download') ab.mode = undefined;
     // Phase A — added flags / structures used by later phases. All retrocompat.
     if (typeof s.settings.tourSeen     !== 'boolean') s.settings.tourSeen = false;
+    if (typeof s.settings.safetySeen   !== 'boolean') s.settings.safetySeen = false;
     if (typeof s.settings.notifyEnabled !== 'boolean') s.settings.notifyEnabled = false;
     if (typeof s.settings.sidebarGroups !== 'object' || !s.settings.sidebarGroups) {
       s.settings.sidebarGroups = { workspace: true, work: true, insight: true };
@@ -15501,6 +15638,482 @@ body.is-row-dragging *        { user-select: none !important; }
       try { saveNotesNow(); } catch (e) { /* notes panel may not be open */ }
     }
     try { saveState(); } catch (e) { /* quota */ }
+    // Force OPFS flush so on-unload paths don't lose the most recent change.
+    try { opfsFlushNow(); } catch (e) { /* opfs may be unavailable */ }
+  }
+
+  /* ------------------------ OPFS secondary backup --------------------- */
+  // Origin Private File System — a sandboxed filesystem available in every
+  // modern browser (Chrome, Edge, Safari, Firefox), no user permission
+  // prompt, no Secure Context constraint. Survives localStorage clearing
+  // (in most cases) and gives us a true safety net at zero user setup.
+  //
+  // Layout under the OPFS root:
+  //   /cockpit/
+  //     latest.json                    — most recent save (single file)
+  //     saves/<isoStamp>.json          — ring buffer, last OPFS_RING_LIMIT
+  //     snapshots/<YYYY-MM-DD>.json    — first save of each day, last
+  //                                      OPFS_SNAPSHOT_LIMIT days
+  //
+  // All files share the export envelope shape (buildExportPayload()), so a
+  // raw OPFS file can be imported through the same path as a manual export.
+  const OPFS_ROOT_DIR = 'cockpit';
+  const OPFS_RING_LIMIT = 20;
+  const OPFS_SNAPSHOT_LIMIT = 7;
+  let _opfsAvailable = null;     // lazy-detected on first use
+  let _opfsLastSaveAt = null;    // ISO string — when we last persisted
+  let _opfsLastError  = null;    // last write/read error message, for status UI
+  let _opfsDebounceTimer = null;
+
+  function opfsSupported() {
+    if (_opfsAvailable !== null) return _opfsAvailable;
+    _opfsAvailable = !!(navigator.storage && typeof navigator.storage.getDirectory === 'function');
+    return _opfsAvailable;
+  }
+
+  // Resolve our app directory inside the OPFS root, creating sub-paths
+  // lazily so a brand-new origin needs no setup beyond the first save.
+  async function opfsAppDir() {
+    if (!opfsSupported()) throw new Error('OPFS unavailable in this browser');
+    const root = await navigator.storage.getDirectory();
+    return root.getDirectoryHandle(OPFS_ROOT_DIR, { create: true });
+  }
+  async function opfsSubDir(name) {
+    const app = await opfsAppDir();
+    return app.getDirectoryHandle(name, { create: true });
+  }
+
+  async function opfsWriteFile(dir, name, text) {
+    const fh = await dir.getFileHandle(name, { create: true });
+    const w  = await fh.createWritable();
+    await w.write(text);
+    await w.close();
+  }
+  async function opfsReadFile(dir, name) {
+    const fh = await dir.getFileHandle(name);
+    const f  = await fh.getFile();
+    return f.text();
+  }
+  // List children of a directory handle — entries(...) where supported,
+  // .keys() as a fallback. Returns an array of FileSystemHandle.
+  async function opfsListEntries(dir) {
+    const out = [];
+    if (typeof dir.values === 'function') {
+      for await (const entry of dir.values()) out.push(entry);
+    } else if (typeof dir.entries === 'function') {
+      for await (const [, entry] of dir.entries()) out.push(entry);
+    }
+    return out;
+  }
+
+  // Persist the current state to OPFS — `latest.json`, plus a ring-buffer
+  // entry, plus a daily snapshot if today's hasn't been written yet. All
+  // failures are swallowed (logged to _opfsLastError) — the secondary
+  // backup must never be allowed to crash the primary save path.
+  async function opfsBackupNow() {
+    if (!opfsSupported()) return false;
+    if (_recoveryMode) return false; // never write the placeholder seed
+    try {
+      const payload = buildExportPayload();
+      const json = JSON.stringify(payload, null, 2);
+      const stamp = new Date().toISOString();
+      const dayKey = stamp.slice(0, 10); // YYYY-MM-DD (UTC — fine as a bucket)
+      const fileStamp = stamp.replace(/[:.]/g, '-');
+
+      const app   = await opfsAppDir();
+      const saves = await app.getDirectoryHandle('saves',     { create: true });
+      const snaps = await app.getDirectoryHandle('snapshots', { create: true });
+
+      // 1. latest.json (always overwritten — quick to read on recovery)
+      await opfsWriteFile(app, 'latest.json', json);
+
+      // 2. Ring buffer
+      await opfsWriteFile(saves, fileStamp + '.json', json);
+      const ringEntries = (await opfsListEntries(saves))
+        .filter((e) => e.kind === 'file' && e.name.endsWith('.json'))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      while (ringEntries.length > OPFS_RING_LIMIT) {
+        const old = ringEntries.shift();
+        try { await saves.removeEntry(old.name); } catch (_) {}
+      }
+
+      // 3. Daily snapshot — write only if today's file is missing OR older
+      //    than 6 hours, so a long single-day session captures more than
+      //    just the morning. Keep last 7 days.
+      let writeToday = true;
+      try {
+        const todayHandle = await snaps.getFileHandle(dayKey + '.json');
+        const todayFile = await todayHandle.getFile();
+        const ageMs = Date.now() - todayFile.lastModified;
+        if (ageMs < 6 * 60 * 60 * 1000) writeToday = false;
+      } catch (_) { /* missing → write */ }
+      if (writeToday) {
+        await opfsWriteFile(snaps, dayKey + '.json', json);
+      }
+      const snapEntries = (await opfsListEntries(snaps))
+        .filter((e) => e.kind === 'file' && /^\d{4}-\d{2}-\d{2}\.json$/.test(e.name))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      while (snapEntries.length > OPFS_SNAPSHOT_LIMIT) {
+        const old = snapEntries.shift();
+        try { await snaps.removeEntry(old.name); } catch (_) {}
+      }
+
+      _opfsLastSaveAt = stamp;
+      _opfsLastError  = null;
+      // Quietly nudge any open Storage panel / status line to refresh.
+      refreshStorageUI();
+      return true;
+    } catch (e) {
+      _opfsLastError = String(e?.message || e);
+      console.warn('[cockpit] OPFS backup failed:', e);
+      return false;
+    }
+  }
+
+  // Debounced trigger called from commit() / saveState(). Keystroke-rate
+  // changes coalesce into one write per ~3 s; idle states still flush via
+  // visibilitychange / beforeunload.
+  function scheduleOpfsBackup() {
+    if (!opfsSupported()) return;
+    if (_opfsDebounceTimer) return;
+    _opfsDebounceTimer = setTimeout(() => {
+      _opfsDebounceTimer = null;
+      opfsBackupNow();
+    }, 3000);
+  }
+  function opfsFlushNow() {
+    if (_opfsDebounceTimer) {
+      clearTimeout(_opfsDebounceTimer);
+      _opfsDebounceTimer = null;
+    }
+    if (opfsSupported() && !_recoveryMode) opfsBackupNow();
+  }
+
+  // Listing + restore APIs used by the Storage panel.
+  async function opfsListSaves() {
+    if (!opfsSupported()) return [];
+    try {
+      const app   = await opfsAppDir();
+      const saves = await app.getDirectoryHandle('saves', { create: true });
+      const items = [];
+      for (const e of await opfsListEntries(saves)) {
+        if (e.kind !== 'file' || !e.name.endsWith('.json')) continue;
+        try {
+          const f = await e.getFile();
+          items.push({ name: e.name, size: f.size, modified: new Date(f.lastModified).toISOString() });
+        } catch (_) {}
+      }
+      return items.sort((a, b) => b.name.localeCompare(a.name));
+    } catch (_) { return []; }
+  }
+  async function opfsListSnapshots() {
+    if (!opfsSupported()) return [];
+    try {
+      const app   = await opfsAppDir();
+      const snaps = await app.getDirectoryHandle('snapshots', { create: true });
+      const items = [];
+      for (const e of await opfsListEntries(snaps)) {
+        if (e.kind !== 'file' || !/^\d{4}-\d{2}-\d{2}\.json$/.test(e.name)) continue;
+        try {
+          const f = await e.getFile();
+          items.push({ name: e.name, date: e.name.replace(/\.json$/, ''), size: f.size, modified: new Date(f.lastModified).toISOString() });
+        } catch (_) {}
+      }
+      return items.sort((a, b) => b.name.localeCompare(a.name));
+    } catch (_) { return []; }
+  }
+  // Read a single OPFS file (saves or snapshots) and return its parsed
+  // payload, or null if missing / unreadable.
+  async function opfsReadSave(subdir, fileName) {
+    if (!opfsSupported()) return null;
+    try {
+      const app = await opfsAppDir();
+      const dir = await app.getDirectoryHandle(subdir, { create: false });
+      const text = await opfsReadFile(dir, fileName);
+      return JSON.parse(text);
+    } catch (_) { return null; }
+  }
+
+  /* ----------------------- Storage status + panel -------------------- */
+  // Bottom-right status pill + the Storage modal that opens from it.
+  // The pill is always visible and gives the user three things at a
+  // glance: confirmation that saving works, the storage location, and a
+  // single-click route to a complete inventory of where their data is.
+  function fmtRelTime(iso) {
+    if (!iso) return 'never';
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 0) return 'just now';
+    if (ms < 5 * 1000)        return 'just now';
+    if (ms < 60 * 1000)       return Math.round(ms / 1000) + ' s ago';
+    if (ms < 60 * 60 * 1000)  return Math.round(ms / 60000) + ' min ago';
+    if (ms < 24 * 3600 * 1000) return Math.round(ms / 3600000) + ' h ago';
+    return Math.round(ms / 86400000) + ' d ago';
+  }
+  function localStorageBytes() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      return raw ? new Blob([raw]).size : 0;
+    } catch (_) { return 0; }
+  }
+
+  // Repaint the bottom-right pill. Cheap; called on every saveState() and
+  // on a 30-s tick so the "X min ago" stays fresh even when nothing else
+  // changes.
+  function refreshStorageStatusLine() {
+    const el = $('#storageStatus');
+    if (!el) return;
+    const dot = $('#storageStatusDot');
+    const txt = $('#storageStatusText');
+    el.classList.remove('is-saving', 'is-warn', 'is-error');
+    if (_recoveryMode) {
+      el.classList.add('is-error');
+      txt.textContent = 'Saving paused — recovery mode';
+      return;
+    }
+    if (_opfsLastError) {
+      el.classList.add('is-warn');
+      txt.textContent = `Saved · OPFS error (${_opfsLastError.slice(0, 40)})`;
+      return;
+    }
+    const rel = fmtRelTime(_lastSaveAt);
+    txt.textContent = `Saved ${rel}`;
+  }
+  let _statusLineInterval = null;
+  function wireStorageStatus() {
+    const btn = $('#storageStatus');
+    if (!btn) return;
+    btn.addEventListener('click', openStorageOverlay);
+    refreshStorageStatusLine();
+    if (_statusLineInterval) clearInterval(_statusLineInterval);
+    // Refresh every 30 s so relative times decay into "X min ago".
+    _statusLineInterval = setInterval(refreshStorageStatusLine, 30 * 1000);
+  }
+
+  // Combined refresh — called by saveState() / opfsBackupNow() / panel
+  // wiring so any UI surface that depends on storage state stays in sync.
+  function refreshStorageUI() {
+    refreshStorageStatusLine();
+    if ($('#storageOverlay')) renderStorageOverlay();
+  }
+
+  // Storage panel — modal listing every place the data lives, with
+  // one-click restore from any OPFS save / snapshot, plus links to the
+  // existing manual export, auto-backup folder, and import paths.
+  function openStorageOverlay() {
+    closeStorageOverlay();
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.id = 'storageOverlay';
+    document.body.appendChild(overlay);
+    renderStorageOverlay();
+  }
+  function closeStorageOverlay() {
+    const ov = $('#storageOverlay');
+    if (ov) ov.remove();
+  }
+
+  function renderStorageOverlay() {
+    const overlay = $('#storageOverlay');
+    if (!overlay) return;
+
+    const ab = state.settings.autoBackup || {};
+    const mode = ab.mode || (pickerAvailable ? 'folder' : 'download');
+    const lsBytes = localStorageBytes();
+    const lsKb = (lsBytes / 1024).toFixed(1);
+    const opfsAvail = opfsSupported();
+
+    // Render placeholder synchronously, fill OPFS lists asynchronously
+    // so the modal opens instantly.
+    overlay.innerHTML = `
+      <div class="desc-modal storage-modal">
+        <div class="desc-head">
+          <div class="desc-title">Where your data lives</div>
+          <button class="icon-btn" id="storageClose" title="Close">×</button>
+        </div>
+        <div style="padding: 14px 16px; display: flex; flex-direction: column;">
+
+          <div class="storage-section">
+            <div class="storage-section-head">
+              <span class="storage-state-dot${_recoveryMode ? ' bad' : ''}"></span>
+              <span>Primary store · localStorage</span>
+            </div>
+            <div class="storage-section-row"><span>Origin</span><code>${escapeHTML(location.origin || location.protocol + '//' + location.hostname)}</code></div>
+            <div class="storage-section-row"><span>Key</span><code>${escapeHTML(STORAGE_KEY)}</code></div>
+            <div class="storage-section-row"><span>Size</span><span>${lsKb} KB</span></div>
+            <div class="storage-section-row"><span>Last save</span><span>${fmtRelTime(_lastSaveAt)}</span></div>
+            ${_recoveryMode ? '<div class="ab-warn" style="margin-top: 6px;">Recovery mode is active — saving is paused so the original (broken-but-recoverable) bytes aren\'t overwritten.</div>' : ''}
+          </div>
+
+          <div class="storage-section">
+            <div class="storage-section-head">
+              <span class="storage-state-dot${opfsAvail ? '' : ' warn'}"></span>
+              <span>Secondary backup · OPFS (in-browser)</span>
+            </div>
+            ${opfsAvail
+              ? `<div class="storage-section-row"><span>Path</span><code>OPFS:/${escapeHTML(OPFS_ROOT_DIR)}/</code></div>
+                 <div class="storage-section-row"><span>Last write</span><span>${fmtRelTime(_opfsLastSaveAt)}</span></div>
+                 ${_opfsLastError ? `<div class="storage-section-row" style="color: var(--bad);"><span>Error</span><span>${escapeHTML(_opfsLastError)}</span></div>` : ''}
+                 <div class="ab-muted" style="font-size: 11px; padding-top: 2px;">
+                   Always-on safety net inside this browser. Survives most
+                   localStorage clearing. Browseable below — restore any
+                   save with one click.
+                 </div>`
+              : '<div class="ab-muted" style="font-size: 11px;">This browser doesn\'t expose the Origin Private File System — secondary backup unavailable. The folder backup and manual Export below are still active.</div>'}
+            ${opfsAvail ? `
+              <div style="margin-top: 8px;">
+                <div class="storage-section-row" style="margin-bottom: 4px;"><strong>Recent saves (rolling)</strong><span id="opfsSavesCount">…</span></div>
+                <div class="storage-history" id="opfsSavesList"><div style="padding: 8px; color: var(--text-faint); font-size: 11px;">Loading…</div></div>
+              </div>
+              <div style="margin-top: 8px;">
+                <div class="storage-section-row" style="margin-bottom: 4px;"><strong>Daily snapshots</strong><span id="opfsSnapsCount">…</span></div>
+                <div class="storage-history" id="opfsSnapsList"><div style="padding: 8px; color: var(--text-faint); font-size: 11px;">Loading…</div></div>
+              </div>
+              <div class="storage-actions" style="margin-top: 8px;">
+                <button class="ghost" id="storageOpfsBackupNow">Snapshot now</button>
+              </div>` : ''}
+          </div>
+
+          <div class="storage-section">
+            <div class="storage-section-head">
+              <span class="storage-state-dot${ab.enabled ? '' : ' warn'}"></span>
+              <span>Folder / file auto-backup</span>
+            </div>
+            <div class="storage-section-row"><span>Mode</span><span>${mode === 'folder' ? 'Save to chosen folder' : 'Auto-download to Downloads'}</span></div>
+            <div class="storage-section-row"><span>Frequency</span><span>${ab.enabled ? `every ${ab.intervalMinutes} min` : '<em>disabled</em>'}</span></div>
+            <div class="storage-section-row"><span>Folder / label</span><span>${ab.dirName ? escapeHTML(ab.dirName) : '<em>not set</em>'}</span></div>
+            <div class="storage-section-row"><span>Last successful run</span><span>${fmtRelTime(ab.lastBackupAt)}</span></div>
+            <div class="storage-actions">
+              <button class="ghost" id="storageOpenAB">Open auto-backup settings…</button>
+            </div>
+          </div>
+
+          <div class="storage-section">
+            <div class="storage-section-head">
+              <span class="storage-state-dot"></span>
+              <span>Manual export · import</span>
+            </div>
+            <div class="ab-muted" style="font-size: 11px;">
+              Save a snapshot to a file you choose, or restore from one. Always available, in any browser.
+            </div>
+            <div class="storage-actions">
+              <button class="primary" id="storageExportNow">↑ Export JSON now</button>
+              <button class="ghost"   id="storageImportNow">↓ Import a backup file…</button>
+            </div>
+          </div>
+
+        </div>
+      </div>`;
+
+    overlay.querySelector('#storageClose').addEventListener('click', closeStorageOverlay);
+    overlay.querySelector('#storageExportNow')?.addEventListener('click', () => exportJSON());
+    overlay.querySelector('#storageImportNow')?.addEventListener('click', () => { closeStorageOverlay(); openImportPicker(); });
+    overlay.querySelector('#storageOpenAB')?.addEventListener('click', () => { closeStorageOverlay(); openAutoBackupPanel(); });
+    overlay.querySelector('#storageOpfsBackupNow')?.addEventListener('click', async () => {
+      const ok = await opfsBackupNow();
+      toast(ok ? 'OPFS snapshot saved' : 'OPFS snapshot failed — see console', 2200);
+      renderStorageOverlay();
+    });
+
+    if (opfsAvail) populateOpfsLists(overlay);
+  }
+
+  // Async OPFS list population — placed in its own function so the modal
+  // shell can render synchronously, with each list filling in shortly
+  // after.
+  async function populateOpfsLists(overlay) {
+    const saves     = await opfsListSaves();
+    const snapshots = await opfsListSnapshots();
+
+    const savesEl = overlay.querySelector('#opfsSavesList');
+    const savesCt = overlay.querySelector('#opfsSavesCount');
+    if (savesEl) {
+      savesEl.innerHTML = saves.length
+        ? saves.map((s) => `
+            <div class="storage-history-row" data-save-name="${escapeHTML(s.name)}">
+              <span class="storage-history-name">${escapeHTML(s.name)}</span>
+              <span class="storage-history-meta">${fmtRelTime(s.modified)}</span>
+              <button class="ghost" data-restore-save="${escapeHTML(s.name)}">Restore</button>
+              <button class="ghost" data-download-save="${escapeHTML(s.name)}">↓</button>
+            </div>`).join('')
+        : '<div style="padding: 8px; color: var(--text-faint); font-size: 11px;">No saves yet — make any change and one will appear here within 3 s.</div>';
+    }
+    if (savesCt) savesCt.textContent = saves.length ? `${saves.length} kept (last ${OPFS_RING_LIMIT})` : '';
+
+    const snapsEl = overlay.querySelector('#opfsSnapsList');
+    const snapsCt = overlay.querySelector('#opfsSnapsCount');
+    if (snapsEl) {
+      snapsEl.innerHTML = snapshots.length
+        ? snapshots.map((s) => `
+            <div class="storage-history-row" data-snap-name="${escapeHTML(s.name)}">
+              <span class="storage-history-name">${escapeHTML(s.date)}</span>
+              <span class="storage-history-meta">${fmtRelTime(s.modified)}</span>
+              <button class="ghost" data-restore-snap="${escapeHTML(s.name)}">Restore</button>
+              <button class="ghost" data-download-snap="${escapeHTML(s.name)}">↓</button>
+            </div>`).join('')
+        : '<div style="padding: 8px; color: var(--text-faint); font-size: 11px;">No daily snapshots yet — one is written automatically the first time you save each day.</div>';
+    }
+    if (snapsCt) snapsCt.textContent = snapshots.length ? `${snapshots.length} kept (last ${OPFS_SNAPSHOT_LIMIT} days)` : '';
+
+    // Wire each row's Restore / Download — done after innerHTML so the
+    // closures see the current button.
+    overlay.querySelectorAll('[data-restore-save]').forEach((b) => {
+      b.addEventListener('click', () => restoreFromOpfs('saves', b.dataset.restoreSave));
+    });
+    overlay.querySelectorAll('[data-restore-snap]').forEach((b) => {
+      b.addEventListener('click', () => restoreFromOpfs('snapshots', b.dataset.restoreSnap));
+    });
+    overlay.querySelectorAll('[data-download-save]').forEach((b) => {
+      b.addEventListener('click', () => downloadOpfsFile('saves', b.dataset.downloadSave));
+    });
+    overlay.querySelectorAll('[data-download-snap]').forEach((b) => {
+      b.addEventListener('click', () => downloadOpfsFile('snapshots', b.dataset.downloadSnap));
+    });
+  }
+
+  async function restoreFromOpfs(subdir, name) {
+    const obj = await opfsReadSave(subdir, name);
+    if (!obj) { toast('Could not read backup'); return; }
+    const cur = {
+      projects: state.projects?.length || 0,
+      actions:  (state.projects || []).reduce((n, p) => n + (p.actions?.length || 0), 0),
+    };
+    const next = {
+      projects: obj.projects?.length || 0,
+      actions:  (obj.projects || []).reduce((n, p) => n + (p.actions?.length || 0), 0),
+    };
+    const ok = confirm(
+      `Restore from OPFS ${subdir}/${name}?\n\n` +
+      `Current  →  ${cur.projects} projects · ${cur.actions} actions\n` +
+      `Restored →  ${next.projects} projects · ${next.actions} actions\n\n` +
+      `This will replace your current data. Undo (⌘Z) reverts.`,
+    );
+    if (!ok) return;
+    try {
+      delete obj.__schemaVersion;
+      delete obj.__exportedAt;
+      delete obj.__app;
+      delete obj.__summary;
+      undoStack.push(JSON.stringify(state));
+      state = normalizeState(obj);
+      saveState();
+      render();
+      closeStorageOverlay();
+      toast('Restored from backup');
+    } catch (e) {
+      toast('Restore failed: ' + (e?.message || e));
+    }
+  }
+
+  async function downloadOpfsFile(subdir, name) {
+    const obj = await opfsReadSave(subdir, name);
+    if (!obj) { toast('Could not read backup'); return; }
+    const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name.endsWith('.json') ? name : (name + '.json');
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Downloaded');
   }
 
   /* --------------------------- Auto-backup ---------------------------- */
@@ -18705,6 +19318,99 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     if (state.settings?.tourSeen) return;
     setTimeout(() => runTour(0), 600); // wait for first render
   }
+
+  // First-run data-safety prompt — shown once, before the feature tour,
+  // so the user has consciously chosen a backup posture before investing
+  // hours of work. Marks settings.safetySeen on any of its outcomes so
+  // it never reappears.
+  function maybeRunFirstRunSafety() {
+    if (state.settings?.safetySeen) return;
+    setTimeout(() => runFirstRunSafety(), 200);
+  }
+  function runFirstRunSafety() {
+    if ($('#firstRunSafety')) return; // already up
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.id = 'firstRunSafety';
+    overlay.style.zIndex = '9000';
+    const httpsHint = !isSecureContextHttp
+      ? `<div class="ab-warn" style="margin-top: 6px;">
+          You're opening this page via <code>${escapeHTML(location.protocol)}</code>.
+          The "Pick a folder" option below needs Chromium + http(s).
+          See <strong>Auto-download</strong> below as a fallback.
+        </div>`
+      : '';
+    overlay.innerHTML = `
+      <div class="desc-modal storage-modal" style="width: 560px;">
+        <div class="desc-head">
+          <div class="desc-title">Welcome — let's keep your work safe</div>
+        </div>
+        <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 12px;">
+          <div>
+            Cockpit stores your data in this browser. That's fast and private — but
+            <strong>browsers occasionally clear site data</strong> (manual cookie
+            clearing, low-disk eviction, idle timeouts on Safari). A few hours of
+            careful work shouldn't depend on a single browser store.
+          </div>
+          <div class="ab-muted" style="font-size: 12px;">
+            A hidden in-browser safety net (OPFS) is already running for you.
+            Picking <em>one</em> of the off-browser options below makes a real
+            file copy you can also see and back up yourself.
+          </div>
+          ${httpsHint}
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <button class="primary" id="frsPickFolder"${pickerAvailable ? '' : ' disabled'}>📁 Pick a folder for backups (Chrome / Edge)${pickerAvailable ? '' : ' — needs http(s)'}</button>
+            <button class="ghost"   id="frsDownload">↓ Auto-download to my Downloads folder (works everywhere)</button>
+            <button class="ghost"   id="frsLater">I'll set this up later</button>
+          </div>
+          <div class="ab-muted" style="font-size: 11px;">
+            You can change this anytime — click the bottom-right <em>Saved</em>
+            pill to open the Storage panel.
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const seen = () => {
+      state.settings.safetySeen = true;
+      saveState();
+      overlay.remove();
+    };
+    overlay.querySelector('#frsPickFolder')?.addEventListener('click', () => {
+      // Mark seen FIRST so canceling the picker doesn't re-trigger this.
+      state.settings.safetySeen = true;
+      // Force folder mode so the post-pick continuation persists it.
+      state.settings.autoBackup.mode = 'folder';
+      state.settings.autoBackup.enabled = true;
+      saveState();
+      requestBackupDir().then((handle) => {
+        if (!handle) {
+          // User dismissed — leave their choice as folder mode but
+          // disabled until they actually pick.
+          state.settings.autoBackup.enabled = false;
+          saveState();
+        } else {
+          scheduleAutoBackup();
+          toast('Folder backup ready · ' + (handle.name || ''), 2400);
+        }
+        overlay.remove();
+      });
+    });
+    overlay.querySelector('#frsDownload')?.addEventListener('click', () => {
+      state.settings.autoBackup.mode = 'download';
+      state.settings.autoBackup.enabled = true;
+      // 1-hour default — frequent enough to matter, infrequent enough
+      // not to spam the Downloads folder.
+      if (!state.settings.autoBackup.intervalMinutes) {
+        state.settings.autoBackup.intervalMinutes = 60;
+      }
+      saveState();
+      scheduleAutoBackup();
+      seen();
+      toast('Auto-download backups enabled', 2400);
+    });
+    overlay.querySelector('#frsLater')?.addEventListener('click', seen);
+  }
   function runTour(stepIdx) {
     closeTour();
     if (stepIdx < 0 || stepIdx >= TOUR_STEPS.length) {
@@ -18851,6 +19557,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     wireTodoWidget();
     wireAutoBackup();
     initAutoBackup();
+    wireStorageStatus();
     wireSidebarGroups();
     wireHelpModal();
     wirePalette();
@@ -18967,6 +19674,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     setTimeout(maybeNotifyInbox, 1500);
 
     render();
+    // Safety prompt first (most important on a fresh install), tour
+    // second. Both no-op if their respective `*Seen` flag is already set.
+    maybeRunFirstRunSafety();
     maybeRunFirstRunTour();
   }
 

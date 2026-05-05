@@ -180,6 +180,13 @@
     </aside>
 
     <div class="toast" id="toast" hidden></div>
+
+    <!-- Persistent storage status line — shows save status, origin, and
+         backup state. Click to open the Storage panel. -->
+    <button class="storage-status" id="storageStatus" type="button" title="Storage details">
+      <span class="storage-status-dot" id="storageStatusDot" aria-hidden="true"></span>
+      <span class="storage-status-text" id="storageStatusText">Saving…</span>
+    </button>
   </div>
 
   <!-- Quick add overlay -->
