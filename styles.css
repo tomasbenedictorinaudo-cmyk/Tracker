@@ -5563,8 +5563,10 @@ body.is-row-dragging *        { user-select: none !important; }
    flight, glows red when something failed. */
 .storage-status {
   position: fixed;
-  bottom: 12px;
-  right: 12px;
+  /* Stack above the todo FAB (46 px circle at bottom:18, right:18). The
+     pill aligns to the FAB's right edge so the two share a clean column. */
+  bottom: 76px;
+  right: 18px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
