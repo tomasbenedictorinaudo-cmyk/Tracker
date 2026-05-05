@@ -886,6 +886,27 @@
     }
   }
 
+  // Single source of truth for the topbar search query. Trimmed +
+  // lowercased so callers can pass mixed-case values without ceremony.
+  function searchQuery() {
+    return ($('#search')?.value || '').trim().toLowerCase();
+  }
+
+  // Does any of the provided field values contain the topbar's search
+  // query? Returns true when the search is empty so the helper can be
+  // dropped into a .filter() chain unconditionally. Pass arrays / nullish
+  // values freely — they're stringified and skipped.
+  function matchesSearch(...fields) {
+    const q = searchQuery();
+    if (!q) return true;
+    for (const f of fields) {
+      if (f == null) continue;
+      const s = Array.isArray(f) ? f.join(' ') : String(f);
+      if (s && s.toLowerCase().includes(q)) return true;
+    }
+    return false;
+  }
+
   function actionMatchesFilters(a) {
     if (a.deletedAt) return false; // archived items are hidden by default
     const fOwner = $('#filterOwner').value;
@@ -1846,6 +1867,7 @@
     // Always cross-project — show every soft-deleted action
     const items = state.projects.flatMap((p) => (p.actions || [])
       .filter((a) => a.deletedAt)
+      .filter((a) => matchesSearch(a.title, personName(a.owner), a.notes, p.name))
       .map((a) => ({ a, proj: p })));
     items.sort((x, y) => (y.a.deletedAt || '').localeCompare(x.a.deletedAt || ''));
     view.innerHTML = `
@@ -2093,6 +2115,8 @@
     // Helpers — sortable rank (Critical → Low) and matcher
     const CRIT_RANK = { critical: 0, high: 1, med: 2, low: 3 };
     function matchesFilters(op) {
+      // Topbar global search — applied alongside the panel's own filters.
+      if (!matchesSearch(op.title, op.notes, (op.steps || []).map((s) => s.text))) return false;
       if (opFilterState.q) {
         const q = opFilterState.q.toLowerCase();
         const hay = (op.title + ' ' + (op.notes || '') + ' ' + (op.steps || []).map((s) => s.text).join(' ')).toLowerCase();
@@ -5427,7 +5451,9 @@
 
     function draw() {
       const body = $('#roBody');
-      const items = proj.risks.filter((r) => roState.kind === 'all' || (r.kind || 'risk') === roState.kind);
+      const items = proj.risks
+        .filter((r) => roState.kind === 'all' || (r.kind || 'risk') === roState.kind)
+        .filter((r) => matchesSearch(r.title, r.mitigation, personName(r.owner)));
       if (!items.length) {
         body.innerHTML = `<div class="empty">${
           roState.kind === 'opportunity' ? 'No opportunities logged yet.' :
@@ -5537,9 +5563,11 @@
       <div class="row-list" id="decList"></div>`;
     root.appendChild(view);
     const list = $('#decList');
-    if (!proj.decisions?.length) list.innerHTML = '<div class="empty">No decisions logged.</div>';
+    const filteredDecisions = (proj.decisions || []).filter((d) =>
+      matchesSearch(d.title, d.rationale, personName(d.owner)));
+    if (!filteredDecisions.length) list.innerHTML = `<div class="empty">${searchQuery() ? 'No decisions match the current search.' : 'No decisions logged.'}</div>`;
     else {
-      list.innerHTML = proj.decisions.map((d) => `
+      list.innerHTML = filteredDecisions.map((d) => `
         <div class="row" data-decision-id="${d.id}">
           ${ROW_GRIP_HTML}
           <span>⬡ ${escapeHTML(d.title)}</span>
@@ -5833,13 +5861,16 @@
     function draw() {
       drawKpis();
       const list = $('#crList');
-      const items = (proj.changes || []).filter((c) =>
-        crFilterState.status === 'all' || c.status === crFilterState.status);
+      const items = (proj.changes || [])
+        .filter((c) => crFilterState.status === 'all' || c.status === crFilterState.status)
+        .filter((c) => matchesSearch(c.title, c.rationale, c.description, c.analysis, personName(c.originator), personName(c.decisionBy)));
       if (!items.length) {
         list.innerHTML = `<div class="empty">${
-          crFilterState.status === 'all'
-            ? 'No change requests yet — capture one with + Change request.'
-            : 'No change requests in this status.'}</div>`;
+          searchQuery()
+            ? 'No change requests match the current search.'
+            : (crFilterState.status === 'all'
+                ? 'No change requests yet — capture one with + Change request.'
+                : 'No change requests in this status.')}</div>`;
         return;
       }
       // Sort by originated date desc (most recent first)
@@ -6129,7 +6160,9 @@
     const tree = $('#linkTree');
 
     function linksFor(folderId) {
-      return proj.links.filter((l) => (l.folderId || null) === folderId);
+      return proj.links
+        .filter((l) => (l.folderId || null) === folderId)
+        .filter((l) => matchesSearch(l.title, l.url, l.description));
     }
 
     function linkCardHTML(l) {
@@ -6516,11 +6549,16 @@
       <div class="row-list" id="componentList"></div>`;
     root.appendChild(view);
     const list = $('#componentList');
-    if (!proj.components.length) {
-      list.innerHTML = '<div class="empty">No components yet — add one to start colour-coding actions.</div>';
+    const filteredComponents = (proj.components || []).filter((pt) =>
+      matchesSearch(pt.name, pt.costCenter));
+    if (!filteredComponents.length) {
+      list.innerHTML = `<div class="empty">${
+        searchQuery()
+          ? 'No components match the current search.'
+          : 'No components yet — add one to start colour-coding actions.'}</div>`;
     } else {
       const knownCCs = getCostCentres();
-      list.innerHTML = proj.components.map((pt) => {
+      list.innerHTML = filteredComponents.map((pt) => {
         const c = componentColor(pt.color);
         const count = (proj.actions || []).filter((a) => a.component === pt.id).length;
         const ccOptions = [...new Set([...knownCCs, ...(pt.costCenter ? [pt.costCenter] : [])])];
@@ -7238,7 +7276,7 @@
         <div class="page-actions"><button class="ghost" id="btnNewProj2">+ Project</button></div>
       </div>
       <div class="dashboard" id="portfolioGrid">
-        ${state.projects.map((p) => {
+        ${state.projects.filter((p) => matchesSearch(p.name, p.description)).map((p) => {
           const acts = p.actions || [];
           const total = acts.length;
           const done = acts.filter((a) => a.status === 'done').length;
@@ -7505,7 +7543,7 @@
           </span>
         </div>
         <div id="peopleWl">
-          ${wl.map(({ p, open, series, peakWeek }) => {
+          ${wl.filter(({ p }) => matchesSearch(p.name, p.role)).map(({ p, open, series, peakWeek }) => {
             const cap = p.capacity || 100;
             // open is action count (headcount); compute current commitment % across active actions
             const openCmt = state.projects.flatMap((pr) => pr.actions || [])
@@ -11231,7 +11269,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const endISO    = fmtISO(endDate);
 
     const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
-    const filtered = allItems.filter((it) => calState.visible[it.kind] !== false);
+    const filtered = allItems
+      .filter((it) => calState.visible[it.kind] !== false)
+      .filter((it) => matchesSearch(it.label, it.sub));
     // Drop range middle/end (we'll show the start row with the range
     // length appended in the date column).
     const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
@@ -11390,7 +11430,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
 
     // Build items for the visible window
     const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
-    const filtered = allItems.filter((it) => calState.visible[it.kind] !== false);
+    const filtered = allItems
+      .filter((it) => calState.visible[it.kind] !== false)
+      .filter((it) => matchesSearch(it.label, it.sub));
     // Drop milestone middle/end positions — the start chip's width covers
     // the range as one continuous bar.
     const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
@@ -11782,7 +11824,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // Apply per-kind visibility filters (driven by the interactive legend
     // below). buildCalendarItems still returns everything so the toggle
     // state can flip without rebuilding the source data.
-    const items = allItems.filter((it) => calState.visible[it.kind] !== false);
+    const items = allItems
+      .filter((it) => calState.visible[it.kind] !== false)
+      .filter((it) => matchesSearch(it.label, it.sub));
     const byDate = new Map();
     items.forEach((it) => {
       if (!byDate.has(it.date)) byDate.set(it.date, []);
