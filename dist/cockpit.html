@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-05T21:35:32.759Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-05T21:42:22.383Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -6250,13 +6250,33 @@ body.is-row-dragging *        { user-select: none !important; }
   // overwrite the original (broken-but-recoverable) localStorage with the
   // in-memory placeholder state.
   let _recoveryMode = false;
+  // _lastEditAt is bumped whenever the in-memory state has a change
+  // that isn't yet reflected in localStorage / OPFS. Compared against
+  // _lastSaveAt and _opfsLastSaveAt to drive the status pill so the user
+  // can see when something is mid-flight.
+  let _lastEditAt = null;
   let _lastSaveAt = null;
+  let _lastSaveError = null;
+
+  // Mark the in-memory state as dirty — any code path that mutates state
+  // before a debounced/async write should call this so the status pill
+  // can degrade until the write lands.
+  function markDirty() {
+    _lastEditAt = new Date().toISOString();
+    try { refreshStorageStatusLine(); } catch (_) {}
+  }
+
   function saveState() {
     if (_recoveryMode) return;
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
       _lastSaveAt = new Date().toISOString();
-    } catch (e) { /* quota */ }
+      _lastSaveError = null;
+    } catch (e) {
+      // Quota or other storage error — surface, don't bury.
+      _lastSaveError = String(e?.message || e);
+      console.warn('[cockpit] localStorage write failed:', e);
+    }
     // Secondary, durable backup to the Origin Private File System —
     // debounced so rapid edits coalesce into a single write.
     try { scheduleOpfsBackup(); } catch (_) { /* opfs may be undefined during early init */ }
@@ -6372,6 +6392,11 @@ body.is-row-dragging *        { user-select: none !important; }
     undoStack.push(JSON.stringify(state));
     if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
     redoStack = [];
+    // Mark dirty BEFORE saveState so the status pill can flash "Saving…"
+    // even though localStorage is synchronous; OPFS still rides the
+    // 3-second debounce so the pill reads "Saved · backup pending"
+    // until that lands.
+    _lastEditAt = new Date().toISOString();
     saveState();
     render();
   }
@@ -14880,6 +14905,10 @@ body.is-row-dragging *        { user-select: none !important; }
     clearTimeout(notesSaveTimer);
     const s = $('#notesSaved');
     if (s) { s.textContent = 'Saving…'; s.classList.add('saving'); }
+    // Reflect the unsaved state in the global storage pill too, not just
+    // the notes-panel status. The pill clears once saveNotesNow → saveState
+    // runs at the end of the debounce window.
+    markDirty();
     notesSaveTimer = setTimeout(saveNotesNow, 350);
   }
 
@@ -15678,6 +15707,10 @@ body.is-row-dragging *        { user-select: none !important; }
   let _opfsLastSaveAt = null;    // ISO string — when we last persisted
   let _opfsLastError  = null;    // last write/read error message, for status UI
   let _opfsDebounceTimer = null;
+  // Set during the brief window between a fresh-install seed and the
+  // OPFS-recovery decision so the seeded sample doesn't overwrite real
+  // backups before the user has a chance to restore them.
+  let _opfsLocked = false;
 
   function opfsSupported() {
     if (_opfsAvailable !== null) return _opfsAvailable;
@@ -15727,6 +15760,7 @@ body.is-row-dragging *        { user-select: none !important; }
   async function opfsBackupNow() {
     if (!opfsSupported()) return false;
     if (_recoveryMode) return false; // never write the placeholder seed
+    if (_opfsLocked) return false;   // pause while the recovery dialog is open
     try {
       const payload = buildExportPayload();
       const json = JSON.stringify(payload, null, 2);
@@ -15848,6 +15882,136 @@ body.is-row-dragging *        { user-select: none !important; }
     } catch (_) { return null; }
   }
 
+  // Recovery from OPFS — the path that runs when the primary store
+  // (localStorage) is empty BUT the secondary backup (OPFS) has saved
+  // data. This is the "memory was wiped, but my work is still here"
+  // scenario the user explicitly wanted protected against.
+  let _emptyStateBoot = false; // set by init when localStorage was empty
+  async function maybeOfferOpfsRecovery() {
+    if (!_emptyStateBoot) return;
+    if (!opfsSupported()) return;
+    _opfsLocked = true; // freeze OPFS writes while the user decides
+    let saves = [], snaps = [];
+    try {
+      [saves, snaps] = await Promise.all([opfsListSaves(), opfsListSnapshots()]);
+    } catch (e) {
+      _opfsLocked = false;
+      return;
+    }
+    if (saves.length === 0 && snaps.length === 0) {
+      _opfsLocked = false;
+      return; // nothing to recover — proceed with seeded sample data
+    }
+    showOpfsRecoveryOverlay(saves, snaps);
+  }
+  function showOpfsRecoveryOverlay(saves, snaps) {
+    if ($('#opfsRecoveryOverlay')) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.id = 'opfsRecoveryOverlay';
+    overlay.style.zIndex = '9100';
+
+    // Render snapshot of the lists at the moment of decision so a
+    // background OPFS write (which we've locked anyway) couldn't change
+    // what the user sees.
+    const recentSaves = saves.slice(0, 8);
+    const recentSnaps = snaps.slice(0, 8);
+    overlay.innerHTML = `
+      <div class="desc-modal storage-modal" style="width: 600px;">
+        <div class="desc-head">
+          <div class="desc-title">⟳ Backups found — restore your data?</div>
+        </div>
+        <div class="storage-body">
+          <div>
+            Your primary store (<code>localStorage</code>) is empty, but
+            this browser's secondary backup (<code>OPFS</code>) has earlier
+            saves. <strong>Your work is recoverable</strong> — pick which
+            point to restore from.
+          </div>
+          <div class="ab-muted" style="font-size: 11px; margin-top: 6px;">
+            This usually happens when site data was cleared (cookies wipe,
+            browser eviction, switching origin between <code>http://</code>
+            and <code>file://</code>). Until you choose, secondary backups
+            are paused so the sample data won't overwrite your saves.
+          </div>
+
+          ${recentSaves.length ? `
+            <div class="storage-section" style="margin-top: 12px;">
+              <div class="storage-section-head">Recent saves</div>
+              <div class="storage-history">
+                ${recentSaves.map((s) => `
+                  <div class="storage-history-row">
+                    <span class="storage-history-name">${escapeHTML(s.name)}</span>
+                    <span class="storage-history-meta">${fmtRelTime(s.modified)}</span>
+                    <button class="primary" data-recover-save="${escapeHTML(s.name)}">Restore</button>
+                  </div>`).join('')}
+              </div>
+            </div>` : ''}
+
+          ${recentSnaps.length ? `
+            <div class="storage-section">
+              <div class="storage-section-head">Daily snapshots</div>
+              <div class="storage-history">
+                ${recentSnaps.map((s) => `
+                  <div class="storage-history-row">
+                    <span class="storage-history-name">${escapeHTML(s.date)}</span>
+                    <span class="storage-history-meta">${fmtRelTime(s.modified)}</span>
+                    <button class="primary" data-recover-snap="${escapeHTML(s.name)}">Restore</button>
+                  </div>`).join('')}
+              </div>
+            </div>` : ''}
+
+          <div class="storage-actions" style="margin-top: 12px; justify-content: flex-end;">
+            <button class="ghost" id="opfsRecKeepSample">Keep sample data instead</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    overlay.querySelectorAll('[data-recover-save]').forEach((b) => {
+      b.addEventListener('click', () => doRecoveryFromOpfs('saves', b.dataset.recoverSave));
+    });
+    overlay.querySelectorAll('[data-recover-snap]').forEach((b) => {
+      b.addEventListener('click', () => doRecoveryFromOpfs('snapshots', b.dataset.recoverSnap));
+    });
+    overlay.querySelector('#opfsRecKeepSample').addEventListener('click', () => {
+      _opfsLocked = false;
+      overlay.remove();
+      // Commit the in-memory seed to localStorage + OPFS, then run the
+      // first-run prompts the user would have seen on a clean install.
+      saveState();
+      maybeRunFirstRunSafety();
+      maybeRunFirstRunTour();
+    });
+  }
+  async function doRecoveryFromOpfs(subdir, name) {
+    const obj = await opfsReadSave(subdir, name);
+    if (!obj) {
+      toast('Could not read that backup — try another', 3000);
+      return;
+    }
+    try {
+      delete obj.__schemaVersion;
+      delete obj.__exportedAt;
+      delete obj.__app;
+      delete obj.__summary;
+      state = normalizeState(obj);
+      _opfsLocked = false;
+      saveState();              // pushes the recovered state into localStorage + OPFS
+      const ov = $('#opfsRecoveryOverlay');
+      if (ov) ov.remove();
+      render();
+      const s = summarizeState(state);
+      toast(`Restored · ${s.projects} projects · ${s.actions} actions`, 3000);
+      // If the recovered state has the safety flag already set, these are
+      // both no-ops. If not (older backup that pre-dates the safety flag),
+      // the user gets a chance to set up backups now.
+      maybeRunFirstRunSafety();
+    } catch (e) {
+      toast('Restore failed: ' + (e?.message || e), 4000);
+    }
+  }
+
   /* ----------------------- Storage status + panel -------------------- */
   // Bottom-right status pill + the Storage modal that opens from it.
   // The pill is always visible and gives the user three things at a
@@ -15870,13 +16034,18 @@ body.is-row-dragging *        { user-select: none !important; }
     } catch (_) { return 0; }
   }
 
-  // Repaint the bottom-right pill. Cheap; called on every saveState() and
-  // on a 30-s tick so the "X min ago" stays fresh even when nothing else
-  // changes.
+  // Repaint the bottom-right pill. Cheap; called on every saveState(),
+  // every markDirty(), and on a 30-s tick so the "X min ago" stays fresh
+  // even when nothing else changes. Reflects four states:
+  //   - Recovery (red, pulsing)        — saving is paused, original safe
+  //   - localStorage write error (red) — saveState threw (quota etc.)
+  //   - Unsaved edit (orange, pulsing) — change in flight, not yet saved
+  //   - OPFS pending (yellow)          — localStorage saved, OPFS scheduled
+  //   - OPFS error (yellow)            — last OPFS write failed
+  //   - Idle (green)                   — everything caught up
   function refreshStorageStatusLine() {
     const el = $('#storageStatus');
     if (!el) return;
-    const dot = $('#storageStatusDot');
     const txt = $('#storageStatusText');
     el.classList.remove('is-saving', 'is-warn', 'is-error');
     if (_recoveryMode) {
@@ -15884,9 +16053,31 @@ body.is-row-dragging *        { user-select: none !important; }
       txt.textContent = 'Saving paused — recovery mode';
       return;
     }
+    if (_lastSaveError) {
+      el.classList.add('is-error');
+      txt.textContent = 'Save failed: ' + _lastSaveError.slice(0, 50);
+      return;
+    }
+    // Unsaved edit — _lastEditAt is newer than the last successful save.
+    // For localStorage this is essentially the notes-debounce window; for
+    // commit() the gap is microseconds so we won't notice. ISO strings
+    // sort lexicographically so direct comparison works.
+    if (_lastEditAt && (!_lastSaveAt || _lastEditAt > _lastSaveAt)) {
+      el.classList.add('is-saving');
+      txt.textContent = 'Unsaved changes…';
+      return;
+    }
     if (_opfsLastError) {
       el.classList.add('is-warn');
       txt.textContent = `Saved · OPFS error (${_opfsLastError.slice(0, 40)})`;
+      return;
+    }
+    // OPFS write pending — localStorage already wrote, but the durable
+    // backup is still inside its 3-s debounce window. Show this so the
+    // user can see "the safety net is catching up".
+    if (_opfsDebounceTimer || (_lastSaveAt && _opfsLastSaveAt && _lastSaveAt > _opfsLastSaveAt)) {
+      el.classList.add('is-warn');
+      txt.textContent = `Saved ${fmtRelTime(_lastSaveAt)} · backup pending`;
       return;
     }
     const rel = fmtRelTime(_lastSaveAt);
@@ -19494,10 +19685,20 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // and corrupted storage (must NOT overwrite, surface a recovery overlay).
     const result = loadState();
     if (result.kind === 'empty') {
+      // Empty localStorage — could be a brand-new install, OR the user's
+      // browser cleared site data while OPFS still has their work. Seed
+      // sample data in memory so the UI has something to render, mark
+      // the boot as empty-state, but DO NOT saveState yet: the seed would
+      // overwrite the recovered state if the user picks Restore in the
+      // OPFS-recovery overlay below. The decision branch in
+      // maybeOfferOpfsRecovery() handles the saveState() call.
+      _emptyStateBoot = true;
+      _opfsLocked = true;        // freeze OPFS writes until recovery decision
       state = seedState();
       try { normalizeState(state); }
       catch (e) { state = { people: [], projects: [], settings: {}, currentView: 'board', currentProjectId: null }; normalizeState(state); }
-      saveState();
+      // Note: no saveState() here — committed by maybeOfferOpfsRecovery
+      // (or its no-data fallback below).
     } else if (result.kind === 'corrupted') {
       enterRecoveryMode('parse', result.error, result.raw);
     } else {
@@ -19688,10 +19889,34 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     setTimeout(maybeNotifyInbox, 1500);
 
     render();
-    // Safety prompt first (most important on a fresh install), tour
-    // second. Both no-op if their respective `*Seen` flag is already set.
-    maybeRunFirstRunSafety();
-    maybeRunFirstRunTour();
+    // Empty-state boot: check OPFS for recoverable backups BEFORE any
+    // first-run prompts. If found, the recovery overlay handles the
+    // saveState() of the recovered (or seeded-if-declined) state.
+    if (_emptyStateBoot) {
+      maybeOfferOpfsRecovery().then((didShow) => {
+        // If maybeOfferOpfsRecovery didn't actually open an overlay
+        // (no OPFS or no saved files), commit the seed and continue.
+        if (!$('#opfsRecoveryOverlay')) {
+          _opfsLocked = false;
+          saveState();
+          maybeRunFirstRunSafety();
+          maybeRunFirstRunTour();
+        }
+        // If the overlay IS up, its decision handlers run the safety /
+        // tour as appropriate.
+      }).catch(() => {
+        // Swallow — never let recovery break boot.
+        _opfsLocked = false;
+        saveState();
+        maybeRunFirstRunSafety();
+        maybeRunFirstRunTour();
+      });
+    } else {
+      // Normal boot — safety prompt first (no-op if already seen), tour
+      // second.
+      maybeRunFirstRunSafety();
+      maybeRunFirstRunTour();
+    }
   }
 
   document.addEventListener('DOMContentLoaded', init);
