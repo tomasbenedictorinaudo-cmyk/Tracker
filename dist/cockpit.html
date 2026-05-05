@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-05T23:51:02.406Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-05T23:54:15.668Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3734,9 +3734,86 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
 }
 .reg-head, .reg-row {
   display: grid;
-  /* Title · Component · Owner · Status · Priority · Due · Predicted · Originator · delete */
-  grid-template-columns: 2.2fr 1fr 1.1fr 1.1fr .85fr .9fr .9fr .9fr 36px;
+  /* checkbox · Title · Component · Owner · Status · Priority · Due · Predicted · Originator · delete */
+  grid-template-columns: 28px 2.2fr 1fr 1.1fr 1.1fr .85fr .9fr .9fr .9fr 36px;
   align-items: stretch;
+}
+.reg-col-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.reg-col-check input[type="checkbox"] {
+  width: 14px; height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.reg-cell.reg-cell-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.reg-cell.reg-cell-check input[type="checkbox"] {
+  width: 14px; height: 14px;
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+.reg-row.is-selected {
+  background: rgba(110,168,255,.06);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.reg-row.is-selected:hover { background: rgba(110,168,255,.10); }
+
+/* Sticky bulk-action toolbar — appears at the bottom-center of the
+   Register when one or more rows are selected. Same horizontal anchor
+   as the toast but more spacious. */
+.bulk-bar {
+  position: fixed;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  padding: 6px 10px 6px 14px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.35), 0 0 0 1px rgba(110,168,255,.1);
+  z-index: 180;
+  font-size: 12px;
+  max-width: calc(100vw - 40px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.bulk-bar[hidden] { display: none; }
+.bulk-bar-count {
+  font-weight: 700;
+  color: var(--accent);
+  padding-right: 4px;
+}
+.bulk-bar-divider {
+  width: 1px;
+  align-self: stretch;
+  background: var(--line-2);
+}
+.bulk-bar-select {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 3px 6px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.bulk-bar-select:hover { border-color: var(--accent); }
+.bulk-bar .ghost {
+  padding: 4px 10px;
+  font-size: 11.5px;
 }
 .reg-cell.priority-cell {
   display: flex;
@@ -8852,6 +8929,12 @@ body.is-row-dragging *        { user-select: none !important; }
     return 0;
   }
 
+  // Per-render selection set — held in module scope so it survives a
+  // re-render of the same view (e.g. after a sort change), but reset
+  // on view switch and on filter/search changes.
+  const _regSelection = new Set();
+  let _regLastClickedId = null; // for shift-click range selection
+
   function renderRegister(root) {
     const proj = curProject();
     const view = document.createElement('div');
@@ -8860,7 +8943,7 @@ body.is-row-dragging *        { user-select: none !important; }
       <div class="page-head">
         <div>
           <div class="page-title">${escapeHTML(proj.name)} — Register</div>
-          <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters.</div>
+          <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters. Click the row checkbox or shift-click rows to select multiple, then use the bulk toolbar.</div>
         </div>
         <div class="page-actions">
           <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${(proj.actions || []).filter((a) => a.deletedAt).length ? ` <span class="badge-count">${(proj.actions || []).filter((a) => a.deletedAt).length}</span>` : ''}</button>
@@ -8871,6 +8954,7 @@ body.is-row-dragging *        { user-select: none !important; }
       <div class="reg-kpis" id="regKpis"></div>
       <div class="register">
         <div class="reg-head">
+          <span class="reg-col-check"><input type="checkbox" id="regSelectAll" title="Select / deselect all visible" /></span>
           <button class="reg-col" data-col="title">Title</button>
           <button class="reg-col" data-col="component">Component</button>
           <button class="reg-col" data-col="owner">Owner</button>
@@ -8882,6 +8966,18 @@ body.is-row-dragging *        { user-select: none !important; }
           <span class="reg-col-spacer" aria-hidden="true"></span>
         </div>
         <div class="reg-body" id="regBody"></div>
+      </div>
+      <div class="bulk-bar" id="bulkBar" hidden>
+        <span class="bulk-bar-count"><span id="bulkCount">0</span> selected</span>
+        <span class="bulk-bar-divider"></span>
+        <select class="bulk-bar-select" id="bulkStatus"><option value="">Set status…</option>${STATUSES.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
+        <select class="bulk-bar-select" id="bulkOwner"><option value="">Set owner…</option>${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
+        <select class="bulk-bar-select" id="bulkComp"><option value="">Set component…</option><option value="__none__">— None —</option>${(proj.components || []).map((c) => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join('')}</select>
+        <select class="bulk-bar-select" id="bulkPrio"><option value="">Set priority…</option>${PRIORITY_LEVELS.map((p) => `<option value="${p.id}">${p.label}</option>`).join('')}</select>
+        <button class="ghost" id="bulkSnooze7" title="Snooze 7 days">⏰ +7 d</button>
+        <button class="ghost" id="bulkArchive" title="Move selected to Archive">⌫ Archive</button>
+        <span class="bulk-bar-divider"></span>
+        <button class="ghost" id="bulkClear" title="Clear selection">×</button>
       </div>`;
     root.appendChild(view);
 
@@ -9105,8 +9201,12 @@ body.is-row-dragging *        { user-select: none !important; }
         : '';
       const isDone      = a.status === 'done';
       const isCancelled = a.status === 'cancelled';
+      const checked = _regSelection.has(a.id) ? 'checked' : '';
       return `
-        <div class="reg-row prio-${lvl.id} ${isOverdue ? 'is-overdue' : ''} ${isDone ? 'is-done' : ''} ${isCancelled ? 'is-cancelled' : ''}" data-id="${a.id}"${tint}>
+        <div class="reg-row prio-${lvl.id} ${isOverdue ? 'is-overdue' : ''} ${isDone ? 'is-done' : ''} ${isCancelled ? 'is-cancelled' : ''} ${_regSelection.has(a.id) ? 'is-selected' : ''}" data-id="${a.id}"${tint}>
+          <div class="reg-cell reg-cell-check">
+            <input type="checkbox" class="reg-row-check" data-row-id="${a.id}" ${checked} aria-label="Select row" />
+          </div>
           <div class="reg-cell title-cell">
             ${ROW_GRIP_HTML}
             <input type="text" class="reg-inp title-inp" data-field="title" value="${escapeHTML(a.title)}" />
@@ -9333,6 +9433,144 @@ body.is-row-dragging *        { user-select: none !important; }
       state.currentView = 'archive';
       saveState(); render();
     });
+
+    // Bulk select / bulk-actions wiring. The selection is module-scoped
+    // so it survives a re-render of the same view (sort change, status
+    // edit), but we keep it sane by intersecting with currently-visible
+    // rows on every refresh of the bulk bar.
+    function refreshBulkBar() {
+      const bar = $('#bulkBar');
+      if (!bar) return;
+      const cnt = _regSelection.size;
+      bar.hidden = cnt === 0;
+      const cntEl = $('#bulkCount');
+      if (cntEl) cntEl.textContent = cnt;
+      const all = $('#regSelectAll');
+      if (all) {
+        const ids = view.querySelectorAll('#regBody .reg-row[data-id]');
+        const total = ids.length;
+        const sel = [...ids].filter((r) => _regSelection.has(r.dataset.id)).length;
+        all.checked = total > 0 && sel === total;
+        all.indeterminate = sel > 0 && sel < total;
+      }
+      view.querySelectorAll('.reg-row[data-id]').forEach((r) => {
+        const on = _regSelection.has(r.dataset.id);
+        r.classList.toggle('is-selected', on);
+        const cb = r.querySelector('.reg-row-check');
+        if (cb) cb.checked = on;
+      });
+    }
+    function selectedActions() {
+      const ids = new Set(_regSelection);
+      return (proj.actions || []).filter((a) => ids.has(a.id));
+    }
+
+    view.addEventListener('click', (e) => {
+      const cb = e.target.closest('.reg-row-check');
+      if (!cb) return;
+      const id = cb.dataset.rowId;
+      const allRows = [...view.querySelectorAll('#regBody .reg-row[data-id]')];
+      if (e.shiftKey && _regLastClickedId) {
+        const fromIdx = allRows.findIndex((r) => r.dataset.id === _regLastClickedId);
+        const toIdx   = allRows.findIndex((r) => r.dataset.id === id);
+        if (fromIdx > -1 && toIdx > -1) {
+          const [lo, hi] = fromIdx < toIdx ? [fromIdx, toIdx] : [toIdx, fromIdx];
+          for (let i = lo; i <= hi; i++) _regSelection.add(allRows[i].dataset.id);
+        }
+      } else if (cb.checked) {
+        _regSelection.add(id);
+      } else {
+        _regSelection.delete(id);
+      }
+      _regLastClickedId = id;
+      refreshBulkBar();
+    });
+
+    $('#regSelectAll')?.addEventListener('change', (e) => {
+      const ids = [...view.querySelectorAll('#regBody .reg-row[data-id]')].map((r) => r.dataset.id);
+      if (e.target.checked) ids.forEach((id) => _regSelection.add(id));
+      else                  ids.forEach((id) => _regSelection.delete(id));
+      refreshBulkBar();
+    });
+
+    $('#bulkClear')?.addEventListener('click', () => {
+      _regSelection.clear();
+      refreshBulkBar();
+    });
+
+    function applyBulk(label, mutator) {
+      const items = selectedActions();
+      if (!items.length) return;
+      const count = items.length;
+      const today = todayISO();
+      items.forEach((a) => { mutator(a, today); a.updatedAt = today; stampEdit(a, null, `bulk · ${label}`); });
+      _regSelection.clear();
+      commit('bulk-' + label.replace(/\s+/g, '-').toLowerCase());
+      toast(`${count} updated · ${label}`);
+    }
+
+    $('#bulkStatus')?.addEventListener('change', (e) => {
+      const v = e.target.value; if (!v) return;
+      applyBulk(`status → ${v}`, (a) => {
+        if (a.status === v) return;
+        const wasNotDone = a.status !== 'done';
+        a.history = a.history || [];
+        a.history.push({ at: todayISO(), what: `Status: ${a.status} → ${v}` });
+        a.status = v;
+        if (v === 'done' && wasNotDone && a.recurrence) {
+          const sourceProj = projectOfAction(a.id) || curProject();
+          const nextA = spawnRecurrenceFromDone(a, sourceProj);
+          if (nextA) stampEdit(nextA, null, 'spawned by recurrence (bulk)');
+        }
+      });
+      e.target.value = '';
+    });
+    $('#bulkOwner')?.addEventListener('change', (e) => {
+      const v = e.target.value; if (!v) return;
+      applyBulk(`owner → ${personName(v)}`, (a) => { a.owner = v; });
+      e.target.value = '';
+    });
+    $('#bulkComp')?.addEventListener('change', (e) => {
+      const v = e.target.value; if (!v) return;
+      const target = v === '__none__' ? null : v;
+      const label = target ? `component → ${(curProject().components.find((c) => c.id === target) || {}).name || '?'}` : 'component cleared';
+      applyBulk(label, (a) => { a.component = target; });
+      e.target.value = '';
+    });
+    $('#bulkPrio')?.addEventListener('change', (e) => {
+      const v = e.target.value; if (!v) return;
+      applyBulk(`priority → ${priorityLevel(v).label}`, (a) => { a.priorityLevel = v; });
+      e.target.value = '';
+    });
+    $('#bulkSnooze7')?.addEventListener('click', () => {
+      const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 7);
+      const iso = fmtISO(d);
+      applyBulk(`snoozed until ${iso}`, (a) => { a.snoozedUntil = iso; });
+    });
+    $('#bulkArchive')?.addEventListener('click', () => {
+      const items = selectedActions();
+      if (!items.length) return;
+      if (!confirm(`Move ${items.length} selected action${items.length === 1 ? '' : 's'} to Archive?`)) return;
+      const today = todayISO();
+      items.forEach((a) => {
+        a.deletedAt = today;
+        a.history = a.history || [];
+        a.history.push({ at: today, what: 'Moved to Archive (bulk)' });
+        a.updatedAt = today;
+        stampEdit(a, null, 'bulk · archive');
+      });
+      _regSelection.clear();
+      commit('bulk-archive');
+      toast(`${items.length} archived`);
+    });
+
+    // Filter / search changes invalidate selection (rows scroll out of
+    // view; keeping a "phantom" selection is confusing).
+    ['#search', '#filterOwner', '#filterComponent', '#filterStatus', '#filterDue'].forEach((sel) => {
+      $(sel)?.addEventListener('input',  () => { _regSelection.clear(); refreshBulkBar(); });
+      $(sel)?.addEventListener('change', () => { _regSelection.clear(); refreshBulkBar(); });
+    });
+    refreshBulkBar();
 
     // Archive every currently-visible done action (respecting active filters)
     // → they disappear from the register, remain visible in the Archive panel.
