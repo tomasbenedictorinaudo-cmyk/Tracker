@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-05T23:54:15.668Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-05T23:57:16.024Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -15923,10 +15923,13 @@ body.is-row-dragging *        { user-select: none !important; }
     if (!allowedMins.includes(ab.intervalMinutes)) ab.intervalMinutes = 60;
     if (typeof ab.dirName !== 'string') ab.dirName = '';
     if (typeof ab.lastBackupAt !== 'string') ab.lastBackupAt = null;
-    // Mode: 'folder' (showDirectoryPicker + rotation) or 'download'
-    // (browser download fallback). Default unset so renderer can pick the
-    // best available mode at runtime.
-    if (ab.mode !== 'folder' && ab.mode !== 'download') ab.mode = undefined;
+    // Mode: 'folder' (showDirectoryPicker + rotation), 'download'
+    // (browser download fallback), or 'gdrive' (Google Drive REST API).
+    // Default unset so renderer can pick the best available mode at runtime.
+    if (ab.mode !== 'folder' && ab.mode !== 'download' && ab.mode !== 'gdrive') ab.mode = undefined;
+    // Google Drive — user-supplied OAuth Client ID (paste-once).
+    if (typeof ab.gdriveClientId !== 'string') ab.gdriveClientId = '';
+    if (typeof ab.gdriveSignedIn !== 'boolean') ab.gdriveSignedIn = false;
     // Phase A — added flags / structures used by later phases. All retrocompat.
     if (typeof s.settings.tourSeen     !== 'boolean') s.settings.tourSeen = false;
     if (typeof s.settings.safetySeen   !== 'boolean') s.settings.safetySeen = false;
@@ -16953,6 +16956,174 @@ body.is-row-dragging *        { user-select: none !important; }
     toast('Downloaded');
   }
 
+  /* ----------------------- Google Drive sync mode -------------------- */
+  // Native Drive integration via Google Identity Services + Drive REST.
+  // Uses the `drive.file` scope so the app only sees files it created;
+  // backups land in the user's My Drive as cockpit-latest.json /
+  // cockpit-previous.json. The OAuth client ID is supplied by the user
+  // (paste-it-once into Storage settings) — no secret server needed.
+
+  const GIS_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
+  const GDRIVE_SCOPES  = 'https://www.googleapis.com/auth/drive.file';
+  const GDRIVE_FILES = { latest: 'cockpit-latest.json', previous: 'cockpit-previous.json' };
+  let _gdriveToken = null;        // { access_token, expires_at }
+  let _gdriveTokenClient = null;
+  let _gisLoadingPromise = null;
+
+  function gdriveSupported() {
+    // GIS only works in a secure context with an HTTPS or http://localhost origin.
+    return typeof window !== 'undefined'
+      && (window.isSecureContext === true)
+      && location.protocol !== 'file:';
+  }
+
+  function loadGoogleIdentityServices() {
+    if (window.google?.accounts?.oauth2) return Promise.resolve();
+    if (_gisLoadingPromise) return _gisLoadingPromise;
+    _gisLoadingPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = GIS_SCRIPT_URL;
+      s.async = true;
+      s.defer = true;
+      s.onload  = () => resolve();
+      s.onerror = () => reject(new Error('Failed to load Google Identity Services'));
+      document.head.appendChild(s);
+    });
+    return _gisLoadingPromise;
+  }
+
+  function gdriveTokenValid() {
+    return !!_gdriveToken && _gdriveToken.expires_at > Date.now() + 30_000;
+  }
+
+  // Request an access token. MUST be invoked from a click handler so the
+  // OAuth popup isn't blocked. Returns a Promise that resolves with the
+  // token string.
+  async function gdriveSignIn() {
+    const ab = state.settings.autoBackup;
+    const clientId = ab.gdriveClientId;
+    if (!clientId) throw new Error('Set a Google OAuth Client ID first');
+    if (!gdriveSupported()) throw new Error('Google Drive sync requires https:// or http://localhost (Secure Context)');
+    await loadGoogleIdentityServices();
+    return new Promise((resolve, reject) => {
+      _gdriveTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: GDRIVE_SCOPES,
+        callback: (tok) => {
+          if (tok.error) { reject(new Error(tok.error)); return; }
+          _gdriveToken = {
+            access_token: tok.access_token,
+            // Drive tokens default to 3600 s; subtract a slack buffer.
+            expires_at:   Date.now() + ((tok.expires_in || 3600) - 60) * 1000,
+          };
+          ab.gdriveSignedIn = true;
+          saveState();
+          refreshStorageUI();
+          resolve(_gdriveToken.access_token);
+        },
+        error_callback: (err) => reject(new Error(err?.message || 'OAuth error')),
+      });
+      _gdriveTokenClient.requestAccessToken({ prompt: '' });
+    });
+  }
+
+  function gdriveSignOut() {
+    if (_gdriveToken && window.google?.accounts?.oauth2) {
+      try { google.accounts.oauth2.revoke(_gdriveToken.access_token, () => {}); } catch (_) {}
+    }
+    _gdriveToken = null;
+    state.settings.autoBackup.gdriveSignedIn = false;
+    saveState();
+    refreshStorageUI();
+  }
+
+  async function gdriveAuthHeader() {
+    if (!gdriveTokenValid()) {
+      // Try a silent refresh first (no popup) — works inside the token's
+      // implicit-grant SSO window. Falls back to the user re-clicking
+      // "Sign in" if it fails.
+      if (_gdriveTokenClient) {
+        await new Promise((resolve, reject) => {
+          _gdriveTokenClient.callback = (tok) => {
+            if (tok.error) reject(new Error(tok.error));
+            else { _gdriveToken = { access_token: tok.access_token, expires_at: Date.now() + ((tok.expires_in || 3600) - 60) * 1000 }; resolve(); }
+          };
+          _gdriveTokenClient.requestAccessToken({ prompt: 'none' });
+        }).catch(() => { _gdriveToken = null; });
+      }
+      if (!gdriveTokenValid()) throw new Error('Google Drive sign-in expired — open the Storage panel and re-authenticate');
+    }
+    return 'Bearer ' + _gdriveToken.access_token;
+  }
+
+  async function gdriveFindFile(name) {
+    const auth = await gdriveAuthHeader();
+    const url = `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(`name='${name}' and trashed=false`)}&fields=files(id,name,modifiedTime,size)`;
+    const res = await fetch(url, { headers: { Authorization: auth } });
+    if (!res.ok) throw new Error(`Drive list failed: ${res.status}`);
+    const j = await res.json();
+    return (j.files || [])[0] || null;
+  }
+
+  async function gdriveUploadJson(name, jsonText, existingId) {
+    const auth = await gdriveAuthHeader();
+    const metadata = existingId ? { name } : { name, mimeType: 'application/json' };
+    const boundary = '-------cockpit' + Math.random().toString(36).slice(2);
+    const body =
+      `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n` +
+      JSON.stringify(metadata) +
+      `\r\n--${boundary}\r\nContent-Type: application/json\r\n\r\n` +
+      jsonText +
+      `\r\n--${boundary}--`;
+    const url = existingId
+      ? `https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=multipart&fields=id,name,modifiedTime`
+      : `https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime`;
+    const res = await fetch(url, {
+      method: existingId ? 'PATCH' : 'POST',
+      headers: { Authorization: auth, 'Content-Type': `multipart/related; boundary="${boundary}"` },
+      body,
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(`Drive upload failed: ${res.status} ${txt.slice(0, 120)}`);
+    }
+    return res.json();
+  }
+
+  async function gdriveDownloadJson(fileId) {
+    const auth = await gdriveAuthHeader();
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, { headers: { Authorization: auth } });
+    if (!res.ok) throw new Error(`Drive download failed: ${res.status}`);
+    return res.text();
+  }
+
+  // The actual sync — same rotation as folder mode (latest → previous).
+  async function gdriveBackupNow() {
+    if (!state.settings.autoBackup.gdriveClientId) throw new Error('Configure Drive client ID first');
+    flushPendingSaves();
+    const payload = buildExportPayload();
+    const json = JSON.stringify(payload, null, 2);
+    // Look up the existing latest + previous so we can rotate atomically.
+    const [latest, previous] = await Promise.all([
+      gdriveFindFile(GDRIVE_FILES.latest),
+      gdriveFindFile(GDRIVE_FILES.previous),
+    ]);
+    // Step 1: copy current latest contents into previous (overwrite).
+    if (latest) {
+      try {
+        const oldText = await gdriveDownloadJson(latest.id);
+        await gdriveUploadJson(GDRIVE_FILES.previous, oldText, previous?.id || null);
+      } catch (e) { console.warn('[cockpit] Drive previous-rotation failed (non-fatal):', e); }
+    }
+    // Step 2: write fresh latest.
+    await gdriveUploadJson(GDRIVE_FILES.latest, json, latest?.id || null);
+    state.settings.autoBackup.lastBackupAt = new Date().toISOString();
+    saveState();
+    refreshAutoBackupUI();
+    refreshStorageUI();
+    return true;
+  }
+
   /* --------------------------- Auto-backup ---------------------------- */
   // Persists a FileSystemDirectoryHandle in IndexedDB so the user grants
   // folder access once and the app keeps writing backup JSONs there at the
@@ -17114,6 +17285,16 @@ body.is-row-dragging *        { user-select: none !important; }
     if (mode === 'download') {
       return downloadBackupNow();
     }
+    if (mode === 'gdrive') {
+      try {
+        await gdriveBackupNow();
+        return true;
+      } catch (e) {
+        toast('Drive backup failed: ' + (e?.message || e), 4000);
+        console.warn('[cockpit] gdrive backup error:', e);
+        return false;
+      }
+    }
     if (!_backupDirHandle) {
       toast('Pick a backup folder first', 3000);
       return false;
@@ -17174,12 +17355,14 @@ body.is-row-dragging *        { user-select: none !important; }
 
   // Returns true iff auto-backup is currently armed — i.e. enabled AND
   // the chosen mode has the prerequisites it needs (a folder handle for
-  // folder mode; nothing extra for download mode).
+  // folder mode; a configured client ID + signed-in token for Drive
+  // mode; nothing extra for download mode).
   function isAutoBackupArmed() {
     const ab = state.settings.autoBackup;
     if (!ab.enabled) return false;
     const mode = ab.mode || (pickerAvailable ? 'folder' : 'download');
     if (mode === 'folder' && !_backupDirHandle) return false;
+    if (mode === 'gdrive' && (!ab.gdriveClientId || !gdriveTokenValid())) return false;
     return true;
   }
 
@@ -17252,11 +17435,40 @@ body.is-row-dragging *        { user-select: none !important; }
     const effectiveMode = folderModeUsable ? mode : 'download';
     const folderEnabledForToggle = effectiveMode === 'folder' ? hasHandle : true;
 
-    // Mode-specific explanation + input markup. The two modes have very
-    // different semantics for the text input, so we render them separately
-    // to avoid the user thinking they can type a destination path.
+    // Mode-specific explanation + input markup. The three modes have
+    // very different semantics, so we render them separately to avoid the
+    // user thinking they can type a destination path / forgetting they
+    // need to sign in.
     let modeBlock;
-    if (effectiveMode === 'folder') {
+    if (effectiveMode === 'gdrive') {
+      const clientId = ab.gdriveClientId || '';
+      const signedIn = !!gdriveTokenValid() || !!ab.gdriveSignedIn;
+      const supported = gdriveSupported();
+      modeBlock = `
+        ${supported ? '' : `<div class="ab-warn">
+          Google Drive sync needs a Secure Context (https:// or
+          http://localhost). Open Cockpit via a local server to use this
+          mode.
+        </div>`}
+        <div class="ab-row">
+          <span class="ab-lbl">OAuth Client ID</span>
+          <input type="text" id="abGdriveClient" value="${escapeHTML(clientId)}" placeholder="123456789-abc.apps.googleusercontent.com" style="flex: 1; min-width: 0; background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 6px 8px; color: var(--text); font: monospace 11px;" />
+        </div>
+        <div class="ab-muted" style="font-size: 11px; padding-left: 4px;">
+          Create a free OAuth Client ID at
+          <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer">console.cloud.google.com</a>
+          → APIs & Services → Credentials → <em>Create Credentials → OAuth client ID</em>
+          (Web application). Add <code>${escapeHTML(location.origin || '')}</code>
+          as an authorised JavaScript origin. Paste the client ID here. The
+          ID itself isn't a secret — it's safe to keep in the bundle.
+        </div>
+        <div class="ab-row">
+          <span class="ab-lbl">Sign-in</span>
+          ${signedIn
+            ? '<span class="ab-val" style="color: var(--ok); font-weight: 600;">✓ Connected to Google</span><button class="ghost" id="abGdriveSignout">Sign out</button>'
+            : '<button class="primary" id="abGdriveSignin"' + (clientId && supported ? '' : ' disabled') + '>Sign in with Google</button>'}
+        </div>`;
+    } else if (effectiveMode === 'folder') {
       modeBlock = `
         <div class="ab-row">
           <span class="ab-lbl">Folder</span>
@@ -17297,6 +17509,7 @@ body.is-row-dragging *        { user-select: none !important; }
           <span class="ab-lbl">Mode</span>
           <select id="abMode">
             <option value="folder"   ${effectiveMode === 'folder'   ? 'selected' : ''} ${folderModeUsable ? '' : 'disabled'}>Save to chosen folder${folderModeUsable ? '' : ' (unavailable)'}</option>
+            <option value="gdrive"   ${effectiveMode === 'gdrive'   ? 'selected' : ''} ${gdriveSupported() ? '' : 'disabled'}>Sync to Google Drive${gdriveSupported() ? '' : ' (needs http(s))'}</option>
             <option value="download" ${effectiveMode === 'download' ? 'selected' : ''}>Auto-download to Downloads folder</option>
           </select>
         </div>
@@ -17325,11 +17538,17 @@ body.is-row-dragging *        { user-select: none !important; }
         <div class="ab-note ab-muted" style="font-size: 11px; line-height: 1.45; padding-top: 4px;">
           ${effectiveMode === 'folder'
             ? `Folder mode keeps just two files in the chosen folder: <code>cockpit-latest.json</code> (this save) and <code>cockpit-previous.json</code> (the one before). Older backups are pruned on each rotation.`
-            : `Browsers may append <code>(1)</code>, <code>(2)</code>… to avoid overwriting. To rotate cleanly, turn off "Ask where to save each file" in your browser's download settings.`}
+            : effectiveMode === 'gdrive'
+              ? `Drive mode pushes <code>cockpit-latest.json</code> + <code>cockpit-previous.json</code> to your My Drive on every save. Off-machine durability + multi-device sync (open Cockpit at the same URL on another machine, sign in, restore). Files are visible at <a href="https://drive.google.com/" target="_blank" rel="noopener noreferrer">drive.google.com</a>.`
+              : `Browsers may append <code>(1)</code>, <code>(2)</code>… to avoid overwriting. To rotate cleanly, turn off "Ask where to save each file" in your browser's download settings.`}
         </div>
         <div class="ab-actions">
           <button class="ghost" id="abDownload" title="Trigger one backup right now (downloads to your default Downloads folder)">Download now</button>
-          ${effectiveMode === 'folder' ? `<button class="primary" id="abBackupNow" ${hasHandle ? '' : 'disabled'}>Back up to folder</button>` : `<button class="primary" id="abBackupNow">Download backup</button>`}
+          ${effectiveMode === 'folder'
+            ? `<button class="primary" id="abBackupNow" ${hasHandle ? '' : 'disabled'}>Back up to folder</button>`
+            : effectiveMode === 'gdrive'
+              ? `<button class="primary" id="abBackupNow" ${gdriveTokenValid() ? '' : 'disabled'}>Push to Drive</button>`
+              : `<button class="primary" id="abBackupNow">Download backup</button>`}
         </div>
       </div>`;
 
@@ -17349,6 +17568,27 @@ body.is-row-dragging *        { user-select: none !important; }
         renderAutoBackupPanel();
         scheduleAutoBackup();
       });
+    });
+    // Google Drive — client-id input + sign-in / sign-out
+    panel.querySelector('#abGdriveClient')?.addEventListener('change', (e) => {
+      state.settings.autoBackup.gdriveClientId = (e.target.value || '').trim();
+      saveState();
+      renderAutoBackupPanel();
+    });
+    panel.querySelector('#abGdriveSignin')?.addEventListener('click', () => {
+      gdriveSignIn().then(() => {
+        renderAutoBackupPanel();
+        scheduleAutoBackup();
+        toast('Connected to Google Drive', 2500);
+      }).catch((e) => {
+        toast('Sign-in failed: ' + (e?.message || e), 4000);
+        console.warn('[cockpit] gdrive sign-in error:', e);
+      });
+    });
+    panel.querySelector('#abGdriveSignout')?.addEventListener('click', () => {
+      gdriveSignOut();
+      renderAutoBackupPanel();
+      scheduleAutoBackup();
     });
     // Editable folder-name field — used as the display label and as the
     // filename suffix in download mode. User can rename freely; the change
