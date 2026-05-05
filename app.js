@@ -9946,7 +9946,7 @@
           <div class="desc-title">Where your data lives</div>
           <button class="icon-btn" id="storageClose" title="Close">×</button>
         </div>
-        <div style="padding: 14px 16px; display: flex; flex-direction: column;">
+        <div class="storage-body">
 
           <div class="storage-section">
             <div class="storage-section-head">

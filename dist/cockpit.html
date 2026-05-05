@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-05T21:26:47.361Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-05T21:30:59.401Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -5621,8 +5621,18 @@ body.is-row-dragging *        { user-select: none !important; }
 /* Storage panel — full overlay listing every place data is kept. Reuses
    the .desc-modal width but with a slightly more spacious body for the
    restore lists. */
-.storage-modal { width: 640px; max-width: 92vw; }
-.storage-modal .desc-head { padding-right: 8px; }
+.storage-modal { width: 640px; max-width: 92vw; max-height: 90vh; }
+.storage-modal .desc-head { padding-right: 8px; flex-shrink: 0; }
+/* Body scrolls when sections overflow the viewport — keeps the header
+   pinned and the OPFS history list usable on short screens. */
+.storage-modal .storage-body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
 .storage-section {
   border: 1px solid var(--line);
   background: var(--bg-2);
@@ -15930,7 +15940,7 @@ body.is-row-dragging *        { user-select: none !important; }
           <div class="desc-title">Where your data lives</div>
           <button class="icon-btn" id="storageClose" title="Close">×</button>
         </div>
-        <div style="padding: 14px 16px; display: flex; flex-direction: column;">
+        <div class="storage-body">
 
           <div class="storage-section">
             <div class="storage-section-head">
