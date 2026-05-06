@@ -198,7 +198,12 @@
     { id: 'slate',  name: 'Slate',  rgb: '148,163,184' },
   ];
   const componentColor = (id) => COMPONENT_COLORS.find((c) => c.id === id) || COMPONENT_COLORS[0];
-  const findComponent = (proj, componentId) => (proj.components || []).find((p) => p.id === componentId);
+  // Memoized — at scale this lookup runs hundreds of times per render
+  // (every action chip, calendar item, Register row). Was O(n·m); now O(1).
+  const findComponent = (proj, componentId) => {
+    if (!proj || !componentId) return undefined;
+    return idMap(proj, 'components').get(componentId);
+  };
 
   // Change-request lifecycle states + their colors
   const CR_STATUSES = [
@@ -252,6 +257,53 @@
   // overwrite the original (broken-but-recoverable) localStorage with the
   // in-memory placeholder state.
   let _recoveryMode = false;
+
+  // IndexedDB-backed mirror of the state blob. Lifts the 5–10 MB
+  // localStorage cap and avoids JSON-string contention on large states.
+  // localStorage stays as a fast-read fallback; on every save we write
+  // both, but we may stop writing localStorage if it errors (quota).
+  // Cached state IDB connection — opened lazily.
+  const STATE_IDB_NAME  = 'cockpit-state';
+  const STATE_IDB_STORE = 'kv';
+  const STATE_IDB_KEY   = 'state';
+  let   _stateIdbDb = null;
+  let   _localStorageDisabled = false; // set true after a quota error
+  function stateIdbOpen() {
+    if (_stateIdbDb) return Promise.resolve(_stateIdbDb);
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(STATE_IDB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(STATE_IDB_STORE);
+      req.onsuccess = () => { _stateIdbDb = req.result; resolve(_stateIdbDb); };
+      req.onerror   = () => reject(req.error);
+    });
+  }
+  async function stateIdbWrite(stateObj) {
+    if (typeof indexedDB === 'undefined') return false;
+    try {
+      const db = await stateIdbOpen();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(STATE_IDB_STORE, 'readwrite');
+        tx.objectStore(STATE_IDB_STORE).put(stateObj, STATE_IDB_KEY);
+        tx.oncomplete = () => resolve(true);
+        tx.onerror    = () => reject(tx.error);
+      });
+    } catch (e) {
+      console.warn('[cockpit] state IDB write failed:', e);
+      return false;
+    }
+  }
+  async function stateIdbRead() {
+    if (typeof indexedDB === 'undefined') return null;
+    try {
+      const db = await stateIdbOpen();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(STATE_IDB_STORE, 'readonly');
+        const req = tx.objectStore(STATE_IDB_STORE).get(STATE_IDB_KEY);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror   = () => reject(req.error);
+      });
+    } catch (e) { return null; }
+  }
   // _lastEditAt is bumped whenever the in-memory state has a change
   // that isn't yet reflected in localStorage / OPFS. Compared against
   // _lastSaveAt and _opfsLastSaveAt to drive the status pill so the user
@@ -259,6 +311,35 @@
   let _lastEditAt = null;
   let _lastSaveAt = null;
   let _lastSaveError = null;
+
+  // Per-render memoization cache. Cleared on commit, undo/redo, render,
+  // and any mutation path that bypasses commit(). Lookups for components,
+  // people, deliverables, milestones — all O(1) once cached.
+  const _renderCache = new Map();
+  function invalidateRenderCache() { _renderCache.clear(); }
+  function memo(key, fn) {
+    if (_renderCache.has(key)) return _renderCache.get(key);
+    const v = fn();
+    _renderCache.set(key, v);
+    return v;
+  }
+  // ID-map of any per-project array. Built once per render per project.
+  function idMap(project, arrKey) {
+    const cacheKey = `idmap:${project?.id || '__no'}:${arrKey}`;
+    return memo(cacheKey, () => {
+      const m = new Map();
+      (project?.[arrKey] || []).forEach((x) => { if (x?.id) m.set(x.id, x); });
+      return m;
+    });
+  }
+  // Cross-project people are top-level, not per-project.
+  function peopleMap() {
+    return memo('idmap:people', () => {
+      const m = new Map();
+      (state.people || []).forEach((p) => { if (p?.id) m.set(p.id, p); });
+      return m;
+    });
+  }
 
   // Mark the in-memory state as dirty — any code path that mutates state
   // before a debounced/async write should call this so the status pill
@@ -270,15 +351,29 @@
 
   function saveState() {
     if (_recoveryMode) return;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      _lastSaveAt = new Date().toISOString();
-      _lastSaveError = null;
-    } catch (e) {
-      // Quota or other storage error — surface, don't bury.
-      _lastSaveError = String(e?.message || e);
-      console.warn('[cockpit] localStorage write failed:', e);
+    // Always mirror to IndexedDB — no quota cliff at 5 MB and primary
+    // store of choice once the dataset grows past localStorage limits.
+    try { stateIdbWrite(state); } catch (e) { console.warn('[cockpit] state IDB write rejected:', e); }
+    // Mirror to localStorage as a fast-read fallback, until / unless it
+    // errors (quota exceeded). Once disabled, stays disabled for this
+    // session — the IDB write keeps everything safe.
+    if (!_localStorageDisabled) {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        _lastSaveError = null;
+      } catch (e) {
+        const msg = String(e?.message || e);
+        if (/quota|exceed/i.test(msg)) {
+          _localStorageDisabled = true;
+          _lastSaveError = null; // IDB still has it, not a real failure
+          console.warn('[cockpit] localStorage quota exceeded — switching to IDB-only.');
+        } else {
+          _lastSaveError = msg;
+          console.warn('[cockpit] localStorage write failed:', e);
+        }
+      }
     }
+    _lastSaveAt = new Date().toISOString();
     // Secondary, durable backup to the Origin Private File System —
     // debounced so rapid edits coalesce into a single write.
     try { scheduleOpfsBackup(); } catch (_) { /* opfs may be undefined during early init */ }
@@ -390,8 +485,16 @@
     });
   }
 
+  // structuredClone is browser-native, ~3× faster than JSON.stringify+parse
+  // for our state shape, and preserves Date / Map / Set if we ever add them.
+  // Falls back to JSON for the rare environment that lacks it.
+  function snapshotState(s) {
+    try { return typeof structuredClone === 'function' ? structuredClone(s) : JSON.parse(JSON.stringify(s)); }
+    catch (_) { return JSON.parse(JSON.stringify(s)); }
+  }
+
   function commit(action = 'change') {
-    undoStack.push(JSON.stringify(state));
+    undoStack.push(snapshotState(state));
     if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
     redoStack = [];
     // Mark dirty BEFORE saveState so the status pill can flash "Saving…"
@@ -399,6 +502,7 @@
     // 3-second debounce so the pill reads "Saved · backup pending"
     // until that lands.
     _lastEditAt = new Date().toISOString();
+    invalidateRenderCache();
     saveState();
     render();
   }
@@ -432,18 +536,27 @@
     commit(commitName || 'edit');
     return result;
   }
+  // Stack entries can be either structuredClone snapshots (fast path) or
+  // legacy JSON strings (back-compat with existing entries pushed before
+  // the snapshotState helper landed). Tolerate both on pop.
+  function popStateFromStack(entry) {
+    if (typeof entry === 'string') return JSON.parse(entry);
+    return snapshotState(entry); // defensive copy to avoid aliasing
+  }
   function undo() {
     if (!undoStack.length) return;
-    redoStack.push(JSON.stringify(state));
-    state = JSON.parse(undoStack.pop());
+    redoStack.push(snapshotState(state));
+    state = popStateFromStack(undoStack.pop());
+    invalidateRenderCache();
     saveState();
     render();
     toast('Undone');
   }
   function redo() {
     if (!redoStack.length) return;
-    undoStack.push(JSON.stringify(state));
-    state = JSON.parse(redoStack.pop());
+    undoStack.push(snapshotState(state));
+    state = popStateFromStack(redoStack.pop());
+    invalidateRenderCache();
     saveState();
     render();
     toast('Redone');
@@ -903,7 +1016,8 @@
     return state.projects.find((p) => (p.actions || []).some((a) => a.id === actionId));
   }
   function personName(id) {
-    return state.people.find((p) => p.id === id)?.name || '—';
+    if (!id) return '—';
+    return peopleMap().get(id)?.name || '—';
   }
   function statusOfDue(dueISO, status) {
     if (!dueISO) return 'ok';
@@ -1059,6 +1173,9 @@
   /* ---------------------------- rendering ---------------------------- */
 
   function render() {
+    // A render walks all derived collections fresh — invalidate any stale
+    // memoized id-maps so we don't hand back stale lookup results.
+    invalidateRenderCache();
     renderTopbar();
     renderSidebar();
     renderView();
@@ -14415,19 +14532,20 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const result = loadState();
     if (result.kind === 'empty') {
       // Empty localStorage — could be a brand-new install, OR the user's
-      // browser cleared site data while OPFS still has their work. Seed
-      // sample data in memory so the UI has something to render, mark
-      // the boot as empty-state, but DO NOT saveState yet: the seed would
-      // overwrite the recovered state if the user picks Restore in the
-      // OPFS-recovery overlay below. The decision branch in
-      // maybeOfferOpfsRecovery() handles the saveState() call.
+      // browser cleared site data while OPFS / IndexedDB still has their
+      // work. Seed sample data in memory so the UI has something to
+      // render, mark the boot as empty-state, but DO NOT saveState yet:
+      // the seed would overwrite the recovered state if the user picks
+      // Restore in the OPFS-recovery overlay below. The decision branch
+      // in maybeOfferOpfsRecovery() handles the saveState() call.
       _emptyStateBoot = true;
       _opfsLocked = true;        // freeze OPFS writes until recovery decision
       state = seedState();
       try { normalizeState(state); }
       catch (e) { state = { people: [], projects: [], settings: {}, currentView: 'board', currentProjectId: null }; normalizeState(state); }
       // Note: no saveState() here — committed by maybeOfferOpfsRecovery
-      // (or its no-data fallback below).
+      // (or its no-data fallback below). We also check the IndexedDB
+      // mirror for state — see init's tail below.
     } else if (result.kind === 'corrupted') {
       enterRecoveryMode('parse', result.error, result.raw);
     } else {
@@ -14629,23 +14747,36 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     setTimeout(maybeNotifyInbox, 1500);
 
     render();
-    // Empty-state boot: check OPFS for recoverable backups BEFORE any
-    // first-run prompts. If found, the recovery overlay handles the
-    // saveState() of the recovered (or seeded-if-declined) state.
+    // Empty-state boot: check IDB first (fastest, simplest restore),
+    // then OPFS, then fall through to first-run prompts. Each path
+    // ends in either a saveState() of the chosen state OR an overlay
+    // that owns the saveState() call once the user decides.
     if (_emptyStateBoot) {
-      maybeOfferOpfsRecovery().then((didShow) => {
-        // If maybeOfferOpfsRecovery didn't actually open an overlay
-        // (no OPFS or no saved files), commit the seed and continue.
-        if (!$('#opfsRecoveryOverlay')) {
-          _opfsLocked = false;
-          saveState();
-          maybeRunFirstRunSafety();
-          maybeRunFirstRunTour();
+      stateIdbRead().then((idbState) => {
+        if (idbState && idbState.projects && idbState.people) {
+          // localStorage was wiped but IDB has the user's data — restore
+          // silently. (No overlay; this is the same data they had.)
+          try {
+            state = normalizeState(idbState);
+            _opfsLocked = false;
+            saveState();
+            render();
+            toast('Restored from IndexedDB mirror', 2400);
+            return;
+          } catch (e) {
+            console.warn('[cockpit] IDB state failed schema check, falling back:', e);
+          }
         }
-        // If the overlay IS up, its decision handlers run the safety /
-        // tour as appropriate.
+        // No IDB recovery — try OPFS.
+        return maybeOfferOpfsRecovery().then(() => {
+          if (!$('#opfsRecoveryOverlay')) {
+            _opfsLocked = false;
+            saveState();
+            maybeRunFirstRunSafety();
+            maybeRunFirstRunTour();
+          }
+        });
       }).catch(() => {
-        // Swallow — never let recovery break boot.
         _opfsLocked = false;
         saveState();
         maybeRunFirstRunSafety();
