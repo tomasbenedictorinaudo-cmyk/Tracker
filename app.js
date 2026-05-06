@@ -10223,17 +10223,27 @@
   // user can confirm at a glance that no data has gone missing.
   function summarizeState(s) {
     const summary = {
+      // Top-level collections.
       projects: s.projects?.length || 0,
+      archivedProjects: 0, // populated below from project.archived flag
       people:   s.people?.length || 0,
       todos:    s.todos?.length || 0,
       templates: s.templates?.length || 0,
+      savedViews: s.savedViews?.length || 0,
       // Cross-project record totals — every per-project array surfaces here.
       actions: 0, deliverables: 0, milestones: 0, risks: 0, decisions: 0,
       changes: 0, components: 0, meetings: 0, openPoints: 0,
       links: 0, linkFolders: 0, costCenters: 0, tags: 0, archived: 0,
+      // Action-level signals worth surfacing so the user can spot if
+      // recurrence / snooze data went missing on round-trip.
+      recurringActions: 0,
+      snoozedActions:   0,
+      actionsWithHistory: 0,
       projectNotes: 0,
     };
+    const today = todayISO();
     (s.projects || []).forEach((p) => {
+      if (p.archived) summary.archivedProjects += 1;
       summary.actions      += p.actions?.length      || 0;
       summary.deliverables += p.deliverables?.length || 0;
       summary.milestones   += p.milestones?.length   || 0;
@@ -10248,6 +10258,11 @@
       summary.costCenters  += p.costCenters?.length  || 0;
       summary.tags         += p.tags?.length         || 0;
       summary.archived     += p.archive?.length      || 0;
+      (p.actions || []).forEach((a) => {
+        if (a.recurrence) summary.recurringActions += 1;
+        if (a.snoozedUntil && a.snoozedUntil > today) summary.snoozedActions += 1;
+        if (Array.isArray(a.__history) && a.__history.length) summary.actionsWithHistory += 1;
+      });
     });
     summary.projectNotes = Object.keys(s.notes || {}).length;
     return summary;
