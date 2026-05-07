@@ -6071,6 +6071,15 @@
       show(c, e.clientX, e.clientY);
     });
     svg.addEventListener('mouseleave', hide);
+    // Left-click on a dot opens the editor for that risk / opportunity.
+    // Same affordance as double-clicking a row in the list view.
+    svg.addEventListener('click', (e) => {
+      const c = e.target.closest('.mtx-pt[data-risk-id]');
+      if (!c) return;
+      e.preventDefault();
+      hide();
+      openRiskEditor(c.dataset.riskId);
+    });
     svg.addEventListener('contextmenu', (e) => {
       const c = e.target.closest('.mtx-pt[data-risk-id]');
       if (!c) return;
