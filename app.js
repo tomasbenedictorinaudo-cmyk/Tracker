@@ -7561,9 +7561,7 @@
             ${ROW_GRIP_HTML}
             <button type="button" class="component-swatch component-swatch-btn" style="background: rgba(${c.rgb},.9);" title="Click to change colour" aria-label="Change colour"></button>
             <input class="inline component-name" value="${escapeHTML(pt.name)}" />
-            <select class="inline component-color">
-              ${COMPONENT_COLORS.map((co) => `<option value="${co.id}" ${co.id === pt.color ? 'selected' : ''}>${co.name}</option>`).join('')}
-            </select>
+            <input class="inline component-desc" type="text" placeholder="Description — what this component covers (optional)" value="${escapeHTML(pt.description || '')}" />
             <select class="inline component-cc" title="Cost centre">
               <option value="">— none —</option>
               ${ccOptions.map((code) => `<option value="${escapeHTML(code)}" ${code === pt.costCenter ? 'selected' : ''}>${escapeHTML(code)}</option>`).join('')}
@@ -7571,7 +7569,6 @@
             </select>
             <span class="row-meta">${count} action${count === 1 ? '' : 's'}</span>
             <button class="icon-btn component-del" title="Delete">×</button>
-            <input class="inline component-desc" type="text" placeholder="Description — what this component covers (optional)" value="${escapeHTML(pt.description || '')}" />
           </div>`;
       }).join('');
       wireListReorder(list, {
@@ -7600,13 +7597,9 @@
           }
         });
       });
-      $$('.component-color', list).forEach((sel) => {
-        sel.addEventListener('change', () => {
-          const id = sel.closest('[data-component-id]').dataset.componentId;
-          const pt = proj.components.find((p) => p.id === id);
-          if (pt) { pt.color = sel.value; commit('component-recolor'); }
-        });
-      });
+      // Component colour is now changed exclusively by clicking the
+      // swatch (popover with full palette). The dropdown was redundant
+      // and has been removed for a tighter row.
       // Clicking the colour swatch opens a popover with the full
       // palette so the user can change colour without scrolling
       // through a select dropdown.
