@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-07T21:56:17.023Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-07T21:57:42.272Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -12658,11 +12658,14 @@ body.is-row-dragging *        { user-select: none !important; }
       return { dx: Math.cos(a) * baseRadius * 0.45, dy: Math.sin(a) * baseRadius * 0.45 };
     }
     // Pre-compute ring radii based on the largest group so all packs
-    // are visually consistent within this matrix.
+    // are visually consistent within this matrix. Kept tight (≤18% of
+    // cell size) so co-bucketed risks read as ONE cluster — the user
+    // shouldn't infer that an outer-ring item is more critical than
+    // an inner-ring one when they share the same probability × impact.
     const maxInhSize = Math.max(1, ...[...cellGroups.inherent.values()].map((v) => v.length));
     const maxResSize = Math.max(1, ...[...cellGroups.residual.values()].map((v) => v.length));
-    const inhRingR = Math.min(cellW, cellH) * 0.30 * (maxInhSize > 1 ? 1 : 0);
-    const resRingR = Math.min(cellW, cellH) * 0.26 * (maxResSize > 1 ? 1 : 0);
+    const inhRingR = Math.min(cellW, cellH) * 0.16 * (maxInhSize > 1 ? 1 : 0);
+    const resRingR = Math.min(cellW, cellH) * 0.14 * (maxResSize > 1 ? 1 : 0);
 
     const markers = items.map((r) => {
       const inh = getInherent(r);
