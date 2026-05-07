@@ -6476,15 +6476,24 @@
     root.appendChild(view);
     const list = $('#decList');
     const filteredDecisions = (proj.decisions || []).filter((d) =>
-      matchesSearch(d.title, d.rationale, personName(d.owner)));
+      matchesSearch(d.title, d.rationale, personName(d.owner),
+        findComponent(proj, d.component)?.name));
     if (!filteredDecisions.length) list.innerHTML = `<div class="empty">${searchQuery() ? 'No decisions match the current search.' : 'No decisions logged.'}</div>`;
     else {
-      list.innerHTML = filteredDecisions.map((d) => `
+      list.innerHTML = filteredDecisions.map((d) => {
+        const cmp = findComponent(proj, d.component);
+        const c   = cmp ? componentColor(cmp.color) : null;
+        const compChip = cmp
+          ? `<span class="row-comp" style="background:rgba(${c.rgb},.18);color:rgb(${c.rgb});border:1px solid rgba(${c.rgb},.55);">${escapeHTML(cmp.name)}</span>`
+          : '';
+        return `
         <div class="row" data-decision-id="${d.id}">
           ${ROW_GRIP_HTML}
           <span>⬡ ${escapeHTML(d.title)}</span>
+          ${compChip}
           <span class="row-meta">${escapeHTML(personName(d.owner))} • ${d.date || ''}</span>
-        </div>`).join('');
+        </div>`;
+      }).join('');
       wireListReorder(list, {
         rowSelector: '.row[data-decision-id]',
         idAttr: 'decisionId',
@@ -6532,9 +6541,15 @@
           <div class="field"><label>Rationale</label><textarea id="deRat" style="min-height:90px;">${escapeHTML(d.rationale || '')}</textarea></div>
           <div class="qa-row">
             <div class="field"><label>Owner</label>
-              <select id="deOwner">${state.people.map((p) => `<option value="${p.id}" ${p.id === d.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+              <select id="deOwner" data-person-select>${personOptionsHtml(d.owner)}</select>
             </div>
             <div class="field"><label>Date</label><input id="deDate" type="date" value="${d.date || ''}" /></div>
+          </div>
+          <div class="field"><label>Component <span class="muted">(optional)</span></label>
+            <select id="deComponent">
+              <option value="">—</option>
+              ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === d.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
+            </select>
           </div>
         </div>
         <div class="desc-foot">
@@ -6551,11 +6566,16 @@
     // Modal closes ONLY via the explicit × button (and Cancel where present).
     // Backdrop click and Escape are intentionally NOT bound — losing
     // in-progress edits to a stray click outside the modal is too easy.
+    // Hook the inline person-create flow on the Owner dropdown so a new
+    // person can be added without leaving the editor.
+    overlay.querySelectorAll('select[data-person-select]').forEach(wirePersonSelectInline);
     overlay.querySelector('#deSave').addEventListener('click', () => {
       d.title = document.getElementById('deTitle').value.trim() || d.title;
       d.rationale = document.getElementById('deRat').value;
       d.owner = document.getElementById('deOwner').value;
       d.date = document.getElementById('deDate').value || d.date;
+      d.component = document.getElementById('deComponent').value || null;
+      stampEdit(d, null, 'edit');
       commit('decision-edit');
       close();
       toast('Saved');
@@ -7525,7 +7545,7 @@
         const count = (proj.actions || []).filter((a) => a.component === pt.id).length;
         const ccOptions = [...new Set([...knownCCs, ...(pt.costCenter ? [pt.costCenter] : [])])];
         return `
-          <div class="row" data-component-id="${pt.id}">
+          <div class="row component-row" data-component-id="${pt.id}">
             ${ROW_GRIP_HTML}
             <button type="button" class="component-swatch component-swatch-btn" style="background: rgba(${c.rgb},.9);" title="Click to change colour" aria-label="Change colour"></button>
             <input class="inline component-name" value="${escapeHTML(pt.name)}" />
@@ -7539,6 +7559,7 @@
             </select>
             <span class="row-meta">${count} action${count === 1 ? '' : 's'}</span>
             <button class="icon-btn component-del" title="Delete">×</button>
+            <input class="inline component-desc" type="text" placeholder="Description — what this component covers (optional)" value="${escapeHTML(pt.description || '')}" />
           </div>`;
       }).join('');
       wireListReorder(list, {
@@ -7553,6 +7574,18 @@
           const id = inp.closest('[data-component-id]').dataset.componentId;
           const pt = proj.components.find((p) => p.id === id);
           if (pt) { pt.name = inp.value.trim() || pt.name; commit('component-rename'); }
+        });
+      });
+      $$('.component-desc', list).forEach((inp) => {
+        inp.addEventListener('change', () => {
+          const id = inp.closest('[data-component-id]').dataset.componentId;
+          const pt = proj.components.find((p) => p.id === id);
+          if (!pt) return;
+          const next = inp.value.trim();
+          if ((pt.description || '') !== next) {
+            pt.description = next;
+            commit('component-desc');
+          }
         });
       });
       $$('.component-color', list).forEach((sel) => {
@@ -9507,6 +9540,12 @@
             <select id="qOwner" data-person-select>${personOptionsHtml('')}</select>
           </div>
           <div class="field"><label>Date</label><input id="qDate" type="date" value="${todayISO()}" /></div>
+        </div>
+        <div class="field"><label>Component <span class="muted">(optional)</span></label>
+          <select id="qComponent">
+            <option value="">—</option>
+            ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === qaInit.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
+          </select>
         </div>`;
     } else if (qaType === 'meeting') {
       // Progressive disclosure: title / date / time / repeating-toggle are
@@ -9742,6 +9781,7 @@
         rationale: $('#qRat').value || '',
         owner: $('#qOwner').value,
         date: $('#qDate').value || todayISO(),
+        component: $('#qComponent')?.value || null,
       });
     } else if (qaType === 'meeting') {
       const title = $('#qTitle').value.trim();
@@ -10748,6 +10788,9 @@
         d.rationale = d.rationale || '';
         d.owner = d.owner || null;
         d.date = d.date || todayISO();
+        // Optional component link, mirrors the action / deliverable /
+        // milestone / change-request schemas. null = no allocation.
+        if (d.component === undefined) d.component = null;
       });
 
       p.changes.forEach((c) => {
@@ -10790,6 +10833,9 @@
         cmp.name = cmp.name || '';
         cmp.color = cmp.color || (COMPONENT_COLORS[0] && COMPONENT_COLORS[0].id) || 'sky';
         cmp.costCenter = cmp.costCenter || null;
+        // Free-form description — what this component covers / its scope.
+        // Defaults to '' for retrocompat.
+        if (typeof cmp.description !== 'string') cmp.description = '';
       });
 
       p.meetings.forEach((m) => {

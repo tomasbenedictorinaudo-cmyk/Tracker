@@ -2092,6 +2092,34 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .row .component-name { flex: 1; min-width: 0; max-width: 220px; }
 .row .component-color { width: 110px; }
+
+/* Component row uses flex-wrap so the description input drops onto a
+   second line below the controls without squeezing them. */
+.row.component-row { flex-wrap: wrap; }
+.row.component-row .component-desc {
+  flex-basis: 100%;
+  margin-top: 4px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.row.component-row .component-desc:focus {
+  border-color: var(--accent-2);
+  background: var(--bg-2);
+  color: var(--text);
+}
+
+/* Inline component chip on decision rows (mirrors the action chip). */
+.row .row-comp {
+  font-size: 10.5px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 .color-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
