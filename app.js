@@ -6475,10 +6475,22 @@
       <div class="row-list" id="decList"></div>`;
     root.appendChild(view);
     const list = $('#decList');
-    const filteredDecisions = (proj.decisions || []).filter((d) =>
-      matchesSearch(d.title, d.rationale, personName(d.owner),
-        findComponent(proj, d.component)?.name));
-    if (!filteredDecisions.length) list.innerHTML = `<div class="empty">${searchQuery() ? 'No decisions match the current search.' : 'No decisions logged.'}</div>`;
+    // Topbar component filter applies to every panel that has a
+    // component dimension. Same semantics as the actions path:
+    //   ''         → no filter
+    //   '__none__' → only items with no component
+    //   '<id>'     → only items with that component id
+    const fComp = $('#filterComponent')?.value || '';
+    const filteredDecisions = (proj.decisions || []).filter((d) => {
+      if (fComp === '__none__' && d.component) return false;
+      if (fComp && fComp !== '__none__' && d.component !== fComp) return false;
+      return matchesSearch(d.title, d.rationale, personName(d.owner),
+        findComponent(proj, d.component)?.name);
+    });
+    const noResultsCopy = (searchQuery() || fComp)
+      ? 'No decisions match the current filters.'
+      : 'No decisions logged.';
+    if (!filteredDecisions.length) list.innerHTML = `<div class="empty">${noResultsCopy}</div>`;
     else {
       list.innerHTML = filteredDecisions.map((d) => {
         const cmp = findComponent(proj, d.component);
