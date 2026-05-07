@@ -6230,22 +6230,77 @@
     const yLabels = [1, 2, 3, 4, 5].map((i) =>
       `<text class="mtx-tick" x="${padL - 8}" y="${(padT + (5 - i + 0.5) * cellH + 4).toFixed(1)}" text-anchor="end">${i}</text>`).join('');
 
+    // Cell-pack: group every marker by its (probability, impact, stage)
+    // cell. When multiple risks share a cell, fan them out in a ring
+    // around the cell centre so each dot is independently visible —
+    // otherwise stacked risks would draw on top of each other and
+    // become invisible. Inherent and residual each get their own
+    // grouping so the arrow still connects to the correct dot.
+    const cellGroups = { inherent: new Map(), residual: new Map() };
+    items.forEach((r) => {
+      const inh = getInherent(r);
+      const res = getResidual(r);
+      const inhKey = `${Math.max(1, inh.probability)},${Math.max(1, inh.impact)}`;
+      const resKey = `${Math.max(1, res.probability)},${Math.max(1, res.impact)}`;
+      if (!cellGroups.inherent.has(inhKey)) cellGroups.inherent.set(inhKey, []);
+      if (!cellGroups.residual.has(resKey)) cellGroups.residual.set(resKey, []);
+      cellGroups.inherent.get(inhKey).push(r.id);
+      cellGroups.residual.get(resKey).push(r.id);
+    });
+    // Returns { dx, dy } offset for a marker that's the i-th of n in its
+    // cell. n=1 → centred; n=2..6 → ring; n=7+ → two concentric rings.
+    function packOffset(i, n, baseRadius) {
+      if (n <= 1) return { dx: 0, dy: 0 };
+      // Two-ring fallback when more than 8 share a cell — outer ring
+      // gets 8 slots, the rest go inside on a smaller ring.
+      const outerN = Math.min(n, 8);
+      if (i < outerN) {
+        const a = (i / outerN) * Math.PI * 2 - Math.PI / 2;
+        return { dx: Math.cos(a) * baseRadius, dy: Math.sin(a) * baseRadius };
+      }
+      const innerI = i - outerN;
+      const innerN = n - outerN;
+      const a = (innerI / Math.max(innerN, 1)) * Math.PI * 2;
+      return { dx: Math.cos(a) * baseRadius * 0.45, dy: Math.sin(a) * baseRadius * 0.45 };
+    }
+    // Pre-compute ring radii based on the largest group so all packs
+    // are visually consistent within this matrix.
+    const maxInhSize = Math.max(1, ...[...cellGroups.inherent.values()].map((v) => v.length));
+    const maxResSize = Math.max(1, ...[...cellGroups.residual.values()].map((v) => v.length));
+    const inhRingR = Math.min(cellW, cellH) * 0.30 * (maxInhSize > 1 ? 1 : 0);
+    const resRingR = Math.min(cellW, cellH) * 0.26 * (maxResSize > 1 ? 1 : 0);
+
     const markers = items.map((r) => {
       const inh = getInherent(r);
       const res = getResidual(r);
-      const xInh = padL + (Math.max(1, inh.probability) - 0.5) * cellW;
-      const yInh = padT + (5 - Math.max(1, inh.impact) + 0.5) * cellH;
-      const xRes = padL + (Math.max(1, res.probability) - 0.5) * cellW;
-      const yRes = padT + (5 - Math.max(1, res.impact) + 0.5) * cellH;
+      const inhKey = `${Math.max(1, inh.probability)},${Math.max(1, inh.impact)}`;
+      const resKey = `${Math.max(1, res.probability)},${Math.max(1, res.impact)}`;
+      const inhGroup = cellGroups.inherent.get(inhKey);
+      const resGroup = cellGroups.residual.get(resKey);
+      const inhIdx = inhGroup.indexOf(r.id);
+      const resIdx = resGroup.indexOf(r.id);
+      const inhOff = packOffset(inhIdx, inhGroup.length, inhRingR);
+      const resOff = packOffset(resIdx, resGroup.length, resRingR);
+      const xInh = padL + (Math.max(1, inh.probability) - 0.5) * cellW + inhOff.dx;
+      const yInh = padT + (5 - Math.max(1, inh.impact) + 0.5) * cellH + inhOff.dy;
+      const xRes = padL + (Math.max(1, res.probability) - 0.5) * cellW + resOff.dx;
+      const yRes = padT + (5 - Math.max(1, res.impact) + 0.5) * cellH + resOff.dy;
       const isOpp = (r.kind || 'risk') === 'opportunity';
-      const moved = (xInh !== xRes || yInh !== yRes);
+      // "Moved" now compares CELL identity (not pixel position) so the
+      // arrow only renders when the residual is in a different bucket
+      // than the inherent — packing offsets within a cell don't count.
+      const moved = inhKey !== resKey;
       let svg = '';
       if (moved) {
         svg += `<line class="mtx-arrow ${isOpp ? 'opp' : 'risk'}" x1="${xInh.toFixed(1)}" y1="${yInh.toFixed(1)}" x2="${xRes.toFixed(1)}" y2="${yRes.toFixed(1)}" marker-end="url(#mtxArrow${isOpp ? 'Opp' : 'Risk'})" />`;
       }
-      svg += `<circle class="mtx-pt mtx-pt-inh ${isOpp ? 'opp' : 'risk'}" data-risk-id="${r.id}" data-pt-stage="inherent" cx="${xInh.toFixed(1)}" cy="${yInh.toFixed(1)}" r="7"></circle>`;
+      // Slightly smaller dots when many share a cell — keeps the pack
+      // legible without overlapping. r=7 baseline → r=5 when 5+ share.
+      const inhR = inhGroup.length >= 5 ? 5 : 7;
+      const resR = resGroup.length >= 5 ? 4 : 5;
+      svg += `<circle class="mtx-pt mtx-pt-inh ${isOpp ? 'opp' : 'risk'}" data-risk-id="${r.id}" data-pt-stage="inherent" cx="${xInh.toFixed(1)}" cy="${yInh.toFixed(1)}" r="${inhR}"></circle>`;
       if (moved) {
-        svg += `<circle class="mtx-pt mtx-pt-res ${isOpp ? 'opp' : 'risk'}" data-risk-id="${r.id}" data-pt-stage="residual" cx="${xRes.toFixed(1)}" cy="${yRes.toFixed(1)}" r="5"></circle>`;
+        svg += `<circle class="mtx-pt mtx-pt-res ${isOpp ? 'opp' : 'risk'}" data-risk-id="${r.id}" data-pt-stage="residual" cx="${xRes.toFixed(1)}" cy="${yRes.toFixed(1)}" r="${resR}"></circle>`;
       }
       return svg;
     }).join('');
