@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-07T20:45:21.884Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-07T20:51:22.650Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -2888,7 +2888,7 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .reg-kpi.grow { grid-column: span 2; }
 .reg-kpi.clickable {
   cursor: pointer;
-  transition: border-color var(--transition), transform 80ms ease;
+  transition: border-color var(--transition), transform 80ms ease, background var(--transition);
   user-select: none;
 }
 .reg-kpi.clickable:hover {
@@ -2899,6 +2899,23 @@ body.is-card-dragging * { cursor: grabbing !important; }
   cursor: pointer;
 }
 .cmp-leg-item.clickable:hover { color: var(--text); }
+/* Active-filter highlight — applied to whichever KPI / legend chip
+   matches the topbar filter so the user knows what's currently on
+   and that re-clicking will toggle it off. */
+.reg-kpi.is-active-filter {
+  border-color: var(--accent);
+  background: rgba(110, 168, 255, .07);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cmp-leg-item.is-active-filter,
+.kpi-stack .seg.is-active-filter {
+  background: rgba(110, 168, 255, .14);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: -2px -2px;
+  font-weight: 700;
+}
 .donut-slice { cursor: pointer; transition: stroke-width var(--transition); }
 .donut-slice:hover { stroke-width: 11; }
 .kpi-stack .seg.clickable:hover { opacity: .7; }
@@ -9356,9 +9373,13 @@ body.is-row-dragging *        { user-select: none !important; }
         `;
 
       // Wire KPI click filters (idempotent — replaces previous listener).
-      // Single click → set filter. Double click → clear that filter only.
+      // Click on a KPI TOGGLES that filter: setting the value when off,
+      // clearing it when the same value is already the active filter. So
+      // re-clicking the same KPI removes the filter — no need for a
+      // separate "clear" gesture, though dblclick keeps the same effect
+      // for muscle-memory.
       const kpiPanel = $('#regKpis');
-      const handleKpi = (e, mode) => {
+      const handleKpi = (e) => {
         const el = e.target.closest('[data-set-status],[data-set-due],[data-set-component],[data-clear-filters]');
         if (!el) return;
         e.preventDefault();
@@ -9367,14 +9388,42 @@ body.is-row-dragging *        { user-select: none !important; }
           return;
         }
         const set = {};
-        const v = mode === 'clear' ? '' : undefined;
-        if (el.dataset.setStatus !== undefined)   set.status    = v ?? el.dataset.setStatus;
-        if (el.dataset.setDue !== undefined)      set.due       = v ?? el.dataset.setDue;
-        if (el.dataset.setComponent !== undefined) set.component = v ?? el.dataset.setComponent;
+        const cur = {
+          status:    $('#filterStatus')?.value    || '',
+          due:       $('#filterDue')?.value       || '',
+          component: $('#filterComponent')?.value || '',
+        };
+        if (el.dataset.setStatus !== undefined) {
+          set.status = (cur.status === el.dataset.setStatus) ? '' : el.dataset.setStatus;
+        }
+        if (el.dataset.setDue !== undefined) {
+          set.due = (cur.due === el.dataset.setDue) ? '' : el.dataset.setDue;
+        }
+        if (el.dataset.setComponent !== undefined) {
+          set.component = (cur.component === el.dataset.setComponent) ? '' : el.dataset.setComponent;
+        }
         applyTopbarFilter(set);
       };
-      kpiPanel.onclick    = (e) => handleKpi(e, 'set');
-      kpiPanel.ondblclick = (e) => handleKpi(e, 'clear');
+      kpiPanel.onclick    = handleKpi;
+      kpiPanel.ondblclick = handleKpi;
+
+      // Visually mark KPIs whose value matches the current filter so the
+      // user can see at a glance which one is "on" and that re-clicking
+      // will turn it off.
+      const cur = {
+        status:    $('#filterStatus')?.value    || '',
+        due:       $('#filterDue')?.value       || '',
+        component: $('#filterComponent')?.value || '',
+      };
+      $$('[data-set-status]', kpiPanel).forEach((el) => {
+        el.classList.toggle('is-active-filter', el.dataset.setStatus === cur.status && cur.status !== '');
+      });
+      $$('[data-set-due]', kpiPanel).forEach((el) => {
+        el.classList.toggle('is-active-filter', el.dataset.setDue === cur.due && cur.due !== '');
+      });
+      $$('[data-set-component]', kpiPanel).forEach((el) => {
+        el.classList.toggle('is-active-filter', el.dataset.setComponent === cur.component && cur.component !== '');
+      });
     }
 
     function rowHTML(a) {

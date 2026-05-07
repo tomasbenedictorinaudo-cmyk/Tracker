@@ -2879,7 +2879,7 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .reg-kpi.grow { grid-column: span 2; }
 .reg-kpi.clickable {
   cursor: pointer;
-  transition: border-color var(--transition), transform 80ms ease;
+  transition: border-color var(--transition), transform 80ms ease, background var(--transition);
   user-select: none;
 }
 .reg-kpi.clickable:hover {
@@ -2890,6 +2890,23 @@ body.is-card-dragging * { cursor: grabbing !important; }
   cursor: pointer;
 }
 .cmp-leg-item.clickable:hover { color: var(--text); }
+/* Active-filter highlight — applied to whichever KPI / legend chip
+   matches the topbar filter so the user knows what's currently on
+   and that re-clicking will toggle it off. */
+.reg-kpi.is-active-filter {
+  border-color: var(--accent);
+  background: rgba(110, 168, 255, .07);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.cmp-leg-item.is-active-filter,
+.kpi-stack .seg.is-active-filter {
+  background: rgba(110, 168, 255, .14);
+  color: var(--accent);
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin: -2px -2px;
+  font-weight: 700;
+}
 .donut-slice { cursor: pointer; transition: stroke-width var(--transition); }
 .donut-slice:hover { stroke-width: 11; }
 .kpi-stack .seg.clickable:hover { opacity: .7; }

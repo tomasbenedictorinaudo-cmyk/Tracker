@@ -3136,9 +3136,13 @@
         `;
 
       // Wire KPI click filters (idempotent — replaces previous listener).
-      // Single click → set filter. Double click → clear that filter only.
+      // Click on a KPI TOGGLES that filter: setting the value when off,
+      // clearing it when the same value is already the active filter. So
+      // re-clicking the same KPI removes the filter — no need for a
+      // separate "clear" gesture, though dblclick keeps the same effect
+      // for muscle-memory.
       const kpiPanel = $('#regKpis');
-      const handleKpi = (e, mode) => {
+      const handleKpi = (e) => {
         const el = e.target.closest('[data-set-status],[data-set-due],[data-set-component],[data-clear-filters]');
         if (!el) return;
         e.preventDefault();
@@ -3147,14 +3151,42 @@
           return;
         }
         const set = {};
-        const v = mode === 'clear' ? '' : undefined;
-        if (el.dataset.setStatus !== undefined)   set.status    = v ?? el.dataset.setStatus;
-        if (el.dataset.setDue !== undefined)      set.due       = v ?? el.dataset.setDue;
-        if (el.dataset.setComponent !== undefined) set.component = v ?? el.dataset.setComponent;
+        const cur = {
+          status:    $('#filterStatus')?.value    || '',
+          due:       $('#filterDue')?.value       || '',
+          component: $('#filterComponent')?.value || '',
+        };
+        if (el.dataset.setStatus !== undefined) {
+          set.status = (cur.status === el.dataset.setStatus) ? '' : el.dataset.setStatus;
+        }
+        if (el.dataset.setDue !== undefined) {
+          set.due = (cur.due === el.dataset.setDue) ? '' : el.dataset.setDue;
+        }
+        if (el.dataset.setComponent !== undefined) {
+          set.component = (cur.component === el.dataset.setComponent) ? '' : el.dataset.setComponent;
+        }
         applyTopbarFilter(set);
       };
-      kpiPanel.onclick    = (e) => handleKpi(e, 'set');
-      kpiPanel.ondblclick = (e) => handleKpi(e, 'clear');
+      kpiPanel.onclick    = handleKpi;
+      kpiPanel.ondblclick = handleKpi;
+
+      // Visually mark KPIs whose value matches the current filter so the
+      // user can see at a glance which one is "on" and that re-clicking
+      // will turn it off.
+      const cur = {
+        status:    $('#filterStatus')?.value    || '',
+        due:       $('#filterDue')?.value       || '',
+        component: $('#filterComponent')?.value || '',
+      };
+      $$('[data-set-status]', kpiPanel).forEach((el) => {
+        el.classList.toggle('is-active-filter', el.dataset.setStatus === cur.status && cur.status !== '');
+      });
+      $$('[data-set-due]', kpiPanel).forEach((el) => {
+        el.classList.toggle('is-active-filter', el.dataset.setDue === cur.due && cur.due !== '');
+      });
+      $$('[data-set-component]', kpiPanel).forEach((el) => {
+        el.classList.toggle('is-active-filter', el.dataset.setComponent === cur.component && cur.component !== '');
+      });
     }
 
     function rowHTML(a) {
