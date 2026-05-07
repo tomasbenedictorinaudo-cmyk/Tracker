@@ -2864,7 +2864,13 @@
   /* ---------------------------- Register ----------------------------- */
 
   // Persistent sort state (so it survives navigation away and back)
-  const regState = { sortBy: 'due', sortDir: 'asc' };
+  // Multi-column sort: regState.sortStack is an ordered list of
+  //   { col, dir }
+  // entries that drive a stable, lexicographic comparator. The first
+  // entry is the primary sort, the rest are tie-breakers in order. An
+  // empty stack means "manual" — drag-reorder works as the source of
+  // truth and we render the project's actions in their array order.
+  const regState = { sortStack: [{ col: 'due', dir: 'asc' }] };
 
   // Predicted completion = explicit override or the due date.
   function predictedCompletion(a) {
@@ -2929,14 +2935,14 @@
       <div class="register">
         <div class="reg-head">
           <span class="reg-col-check"><input type="checkbox" id="regSelectAll" title="Select / deselect all visible" /></span>
-          <button class="reg-col" data-col="title">Title</button>
-          <button class="reg-col" data-col="component">Component</button>
-          <button class="reg-col" data-col="owner">Owner</button>
-          <button class="reg-col" data-col="status">Status</button>
-          <button class="reg-col" data-col="priority">Priority</button>
-          <button class="reg-col" data-col="due">Due</button>
-          <button class="reg-col" data-col="predicted" title="Predicted completion (defaults to due)">Predicted</button>
-          <button class="reg-col" data-col="originatorDate" title="When this action was originated">Originator date</button>
+          <button class="reg-col" data-col="title"          title="Click to sort · Shift-click to add as secondary · Right-click to remove">Title</button>
+          <button class="reg-col" data-col="component"      title="Click to sort · Shift-click to add as secondary · Right-click to remove">Component</button>
+          <button class="reg-col" data-col="owner"          title="Click to sort · Shift-click to add as secondary · Right-click to remove">Owner</button>
+          <button class="reg-col" data-col="status"         title="Click to sort · Shift-click to add as secondary · Right-click to remove">Status</button>
+          <button class="reg-col" data-col="priority"       title="Click to sort · Shift-click to add as secondary · Right-click to remove">Priority</button>
+          <button class="reg-col" data-col="due"            title="Click to sort · Shift-click to add as secondary · Right-click to remove">Due</button>
+          <button class="reg-col" data-col="predicted"      title="Predicted completion (defaults to due) · Shift-click to add as secondary · Right-click to remove">Predicted</button>
+          <button class="reg-col" data-col="originatorDate" title="When this action was originated · Shift-click to add as secondary · Right-click to remove">Originator date</button>
           <span class="reg-col-spacer" aria-hidden="true"></span>
         </div>
         <div class="reg-body" id="regBody"></div>
@@ -3224,13 +3230,18 @@
 
     function drawTable() {
       let acts = (proj.actions || []).filter(actionMatchesFilters).slice();
-      // 'manual' sort = preserve project array order (set by drag-reorder)
-      if (regState.sortBy !== 'manual') {
+      // Empty sortStack = "manual" mode (drag-reorder source-of-truth).
+      // Otherwise compare entries in stack order, returning the first
+      // non-zero comparison.
+      const stack = regState.sortStack || [];
+      if (stack.length) {
         acts.sort((a, b) => {
-          const av = regSortValue(a, regState.sortBy, proj);
-          const bv = regSortValue(b, regState.sortBy, proj);
-          if (av < bv) return regState.sortDir === 'asc' ? -1 : 1;
-          if (av > bv) return regState.sortDir === 'asc' ? 1 : -1;
+          for (const s of stack) {
+            const av = regSortValue(a, s.col, proj);
+            const bv = regSortValue(b, s.col, proj);
+            if (av < bv) return s.dir === 'asc' ? -1 : 1;
+            if (av > bv) return s.dir === 'asc' ?  1 : -1;
+          }
           return 0;
         });
       }
@@ -3240,9 +3251,19 @@
       } else {
         body.innerHTML = acts.map(rowHTML).join('');
       }
-      $$('.reg-col', view).forEach((b) => b.classList.remove('asc', 'desc'));
-      const active = view.querySelector(`.reg-col[data-col="${regState.sortBy}"]`);
-      if (active) active.classList.add(regState.sortDir);
+      // Reset every header indicator, then paint the current sort stack.
+      $$('.reg-col', view).forEach((b) => {
+        b.classList.remove('asc', 'desc');
+        b.removeAttribute('data-sort-priority');
+      });
+      stack.forEach((s, i) => {
+        const el = view.querySelector(`.reg-col[data-col="${s.col}"]`);
+        if (!el) return;
+        el.classList.add(s.dir);
+        // Show the "1 / 2 / 3" priority badge only when there's more
+        // than one sort column — single-column sort doesn't need it.
+        if (stack.length > 1) el.setAttribute('data-sort-priority', String(i + 1));
+      });
       // Wire drag-to-reorder on the rendered rows
       wireListReorder(body, {
         rowSelector: '.reg-row[data-id]',
@@ -3266,8 +3287,7 @@
           });
           proj.actions = next;
           // Switch to manual sort so the new order is preserved across re-renders
-          regState.sortBy = 'manual';
-          regState.sortDir = 'asc';
+          regState.sortStack = [];
         },
         commitName: 'register-reorder',
       });
@@ -3344,10 +3364,33 @@
     }
 
     $$('.reg-col', view).forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
         const col = btn.dataset.col;
-        if (regState.sortBy === col) regState.sortDir = regState.sortDir === 'asc' ? 'desc' : 'asc';
-        else { regState.sortBy = col; regState.sortDir = 'asc'; }
+        const stack = regState.sortStack;
+        if (e.shiftKey) {
+          // Additive — add this column as a secondary sort, OR if it's
+          // already in the stack, flip its direction.
+          const existing = stack.find((s) => s.col === col);
+          if (existing) existing.dir = existing.dir === 'asc' ? 'desc' : 'asc';
+          else stack.push({ col, dir: 'asc' });
+        } else {
+          // Replace — single-column primary sort. If the column is
+          // already the only sort, flip its direction (classic toggle).
+          if (stack.length === 1 && stack[0].col === col) {
+            stack[0].dir = stack[0].dir === 'asc' ? 'desc' : 'asc';
+          } else {
+            regState.sortStack = [{ col, dir: 'asc' }];
+          }
+        }
+        drawTable();
+      });
+      btn.addEventListener('contextmenu', (e) => {
+        const col = btn.dataset.col;
+        const stack = regState.sortStack;
+        const idx = stack.findIndex((s) => s.col === col);
+        if (idx === -1) return; // not sorted — let the browser context menu open
+        e.preventDefault();
+        stack.splice(idx, 1);
         drawTable();
       });
     });

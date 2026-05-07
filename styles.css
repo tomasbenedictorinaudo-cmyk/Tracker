@@ -3882,10 +3882,34 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
   text-transform: uppercase;
   letter-spacing: .08em;
   cursor: pointer;
+  position: relative;
 }
 .reg-col:hover { color: var(--text); }
+.reg-col.asc,
+.reg-col.desc { color: var(--text); }
 .reg-col.asc::after  { content: ' ↑'; color: var(--accent); }
 .reg-col.desc::after { content: ' ↓'; color: var(--accent); }
+/* Multi-column sort: when there's more than one sort column, each
+   sorted header gets a small priority badge ("1", "2", "3"…) in its
+   top-right corner so the user can see the sort hierarchy at a glance.
+   Single-column sort omits the badge — it adds noise. */
+.reg-col[data-sort-priority]::before {
+  content: attr(data-sort-priority);
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  background: var(--accent);
+  color: var(--bg-1);
+  font-size: 8.5px;
+  font-weight: 800;
+  width: 12px;
+  height: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  letter-spacing: 0;
+}
 .reg-col-spacer { padding: 9px 6px; }
 .reg-body {
   max-height: calc(100vh - 320px);
