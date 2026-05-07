@@ -3031,6 +3031,129 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .op-filterbar input:focus,
 .op-filterbar select:focus { border-color: var(--accent); }
 .op-filterbar .ghost { font-size: 11.5px; padding: 4px 10px; height: 28px; }
+
+/* Matrix view — 4×4 criticality (rows) × priority (cols) grid with
+   packed bubbles per cell. Top-right cells (high+ × high+) tinted red
+   so the danger quadrant pops. */
+.op-list.op-view-matrix { display: block; }
+.op-matrix {
+  display: grid;
+  grid-template-columns: 130px repeat(4, 1fr);
+  grid-template-rows: 36px repeat(4, 130px);
+  gap: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.op-matrix-corner {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.op-matrix-axis-y { writing-mode: vertical-rl; transform: rotate(180deg); }
+.op-matrix-col-head,
+.op-matrix-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  border-radius: var(--radius-sm);
+}
+.op-matrix-col-head { padding: 4px; }
+.op-matrix-row-head { padding: 4px 6px; text-align: center; }
+.op-matrix-col-head.crit-low,
+.op-matrix-row-head.crit-low      { color: var(--text-faint); }
+.op-matrix-col-head.crit-med,
+.op-matrix-row-head.crit-med      { color: var(--text-dim); }
+.op-matrix-col-head.crit-high,
+.op-matrix-row-head.crit-high     { color: #f5c150; }
+.op-matrix-col-head.crit-critical,
+.op-matrix-row-head.crit-critical { color: var(--bad); }
+.op-matrix-cell {
+  position: relative;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+.op-matrix-cell.is-danger {
+  background: rgba(248, 113, 113, .06);
+  border-color: rgba(248, 113, 113, .25);
+}
+.op-matrix-cell-count {
+  position: absolute;
+  top: 4px; left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-faint);
+  background: rgba(0, 0, 0, .25);
+  padding: 1px 5px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 1;
+}
+.op-matrix-cell-svg { width: 100%; height: 100%; display: block; }
+.op-bubble {
+  cursor: pointer;
+  transition: filter .12s ease, stroke-width .12s ease;
+}
+.op-bubble:hover {
+  filter: brightness(1.2);
+  stroke-width: 2.5;
+}
+
+/* Bubbles view — single packed pile, importance-sized. */
+.op-list.op-view-bubbles { display: block; }
+.op-bubbles-shell {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.op-bubbles-svg {
+  width: 100%;
+  display: block;
+  height: 60vh;
+  min-height: 360px;
+}
+.op-bubble-g { cursor: pointer; }
+.op-bubble-lbl {
+  fill: var(--text);
+  font-weight: 600;
+  pointer-events: none;
+  letter-spacing: -.01em;
+}
+.op-bubbles-legend {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.op-leg-hint code { background: var(--bg-2); padding: 0 4px; border-radius: 3px; }
+
+/* Tiny flash highlight when the user clicks a bubble and we jump to
+   List view scrolled to the matching card. */
+.op-item.op-flash {
+  animation: op-flash 1.4s ease-out 1;
+}
+@keyframes op-flash {
+  0%   { box-shadow: 0 0 0 0   rgba(110,168,255,.55); }
+  20%  { box-shadow: 0 0 0 6px rgba(110,168,255,.45); }
+  100% { box-shadow: 0 0 0 0   rgba(110,168,255,0); }
+}
+
 .op-list {
   display: flex;
   flex-direction: column;

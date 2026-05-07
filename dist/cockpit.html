@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-07T21:05:22.872Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-07T21:19:19.122Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3040,6 +3040,129 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .op-filterbar input:focus,
 .op-filterbar select:focus { border-color: var(--accent); }
 .op-filterbar .ghost { font-size: 11.5px; padding: 4px 10px; height: 28px; }
+
+/* Matrix view — 4×4 criticality (rows) × priority (cols) grid with
+   packed bubbles per cell. Top-right cells (high+ × high+) tinted red
+   so the danger quadrant pops. */
+.op-list.op-view-matrix { display: block; }
+.op-matrix {
+  display: grid;
+  grid-template-columns: 130px repeat(4, 1fr);
+  grid-template-rows: 36px repeat(4, 130px);
+  gap: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.op-matrix-corner {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: flex-start;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-faint);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.op-matrix-axis-y { writing-mode: vertical-rl; transform: rotate(180deg); }
+.op-matrix-col-head,
+.op-matrix-row-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  border-radius: var(--radius-sm);
+}
+.op-matrix-col-head { padding: 4px; }
+.op-matrix-row-head { padding: 4px 6px; text-align: center; }
+.op-matrix-col-head.crit-low,
+.op-matrix-row-head.crit-low      { color: var(--text-faint); }
+.op-matrix-col-head.crit-med,
+.op-matrix-row-head.crit-med      { color: var(--text-dim); }
+.op-matrix-col-head.crit-high,
+.op-matrix-row-head.crit-high     { color: #f5c150; }
+.op-matrix-col-head.crit-critical,
+.op-matrix-row-head.crit-critical { color: var(--bad); }
+.op-matrix-cell {
+  position: relative;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+}
+.op-matrix-cell.is-danger {
+  background: rgba(248, 113, 113, .06);
+  border-color: rgba(248, 113, 113, .25);
+}
+.op-matrix-cell-count {
+  position: absolute;
+  top: 4px; left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-faint);
+  background: rgba(0, 0, 0, .25);
+  padding: 1px 5px;
+  border-radius: 999px;
+  pointer-events: none;
+  z-index: 1;
+}
+.op-matrix-cell-svg { width: 100%; height: 100%; display: block; }
+.op-bubble {
+  cursor: pointer;
+  transition: filter .12s ease, stroke-width .12s ease;
+}
+.op-bubble:hover {
+  filter: brightness(1.2);
+  stroke-width: 2.5;
+}
+
+/* Bubbles view — single packed pile, importance-sized. */
+.op-list.op-view-bubbles { display: block; }
+.op-bubbles-shell {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+.op-bubbles-svg {
+  width: 100%;
+  display: block;
+  height: 60vh;
+  min-height: 360px;
+}
+.op-bubble-g { cursor: pointer; }
+.op-bubble-lbl {
+  fill: var(--text);
+  font-weight: 600;
+  pointer-events: none;
+  letter-spacing: -.01em;
+}
+.op-bubbles-legend {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.op-leg-hint code { background: var(--bg-2); padding: 0 4px; border-radius: 3px; }
+
+/* Tiny flash highlight when the user clicks a bubble and we jump to
+   List view scrolled to the matching card. */
+.op-item.op-flash {
+  animation: op-flash 1.4s ease-out 1;
+}
+@keyframes op-flash {
+  0%   { box-shadow: 0 0 0 0   rgba(110,168,255,.55); }
+  20%  { box-shadow: 0 0 0 6px rgba(110,168,255,.45); }
+  100% { box-shadow: 0 0 0 0   rgba(110,168,255,0); }
+}
+
 .op-list {
   display: flex;
   flex-direction: column;
@@ -8654,7 +8777,29 @@ body.is-row-dragging *        { user-select: none !important; }
 
   // Persistent filter / sort state for the Open Points page (volatile; not
   // in state because it's pure UI).
-  const opFilterState = { q: '', component: '', criticality: '', priority: '', progress: '', sort: 'manual' };
+  const opFilterState = { q: '', component: '', criticality: '', priority: '', progress: '', sort: 'manual', view: 'list' };
+  // Severity / priority rank used by both Matrix (cell location) and
+  // Bubbles (importance score). Higher = worse.
+  const _OP_RANK = { low: 1, med: 2, high: 3, critical: 4 };
+  const _OP_LEVELS = ['low', 'med', 'high', 'critical'];
+  function _opCritRank(op)  { return _OP_RANK[op.criticality   || 'med']; }
+  function _opPrioRank(op)  { return _OP_RANK[op.priorityLevel || 'med']; }
+  function _opAgeDays(op)   { return Math.max(0, dayDiff(todayISO(), op.createdAt || todayISO())); }
+  function _opStepsRatio(op){
+    const t = (op.steps || []).length;
+    return t === 0 ? 0 : (op.steps || []).filter((s) => s.done).length / t;
+  }
+  // Composite importance for the Bubbles view: criticality × priority,
+  // bumped by age (logarithmic so a 60-day-old item gets bigger but doesn't
+  // dwarf everything fresh). Resolution progress gently shrinks the score
+  // — points being actively worked on shouldn't visually dominate.
+  function _opImportance(op) {
+    const c = _opCritRank(op);
+    const p = _opPrioRank(op);
+    const ageWeight = 1 + 0.5 * Math.log2(1 + _opAgeDays(op) / 7);
+    const stepShrink = 1 - 0.4 * _opStepsRatio(op);
+    return c * p * ageWeight * Math.max(0.4, stepShrink);
+  }
   function renderOpenPoints(root) {
     const proj = curProject();
     proj.openPoints = proj.openPoints || [];
@@ -8665,6 +8810,13 @@ body.is-row-dragging *        { user-select: none !important; }
         <div>
           <div class="page-title">Open points</div>
           <div class="page-sub">Quick capture for ideas, follow-ups, and questions. Convert any item to an action when ready.</div>
+        </div>
+        <div class="page-actions">
+          <div class="seg" id="opViewSeg" role="tablist" aria-label="View mode">
+            <button class="seg-btn ${opFilterState.view === 'list'    ? 'active' : ''}" data-op-view="list"   title="Inline-editable list" role="tab">≣ List</button>
+            <button class="seg-btn ${opFilterState.view === 'matrix'  ? 'active' : ''}" data-op-view="matrix" title="4×4 criticality × priority matrix — bubbles sized by age" role="tab">▦ Matrix</button>
+            <button class="seg-btn ${opFilterState.view === 'bubbles' ? 'active' : ''}" data-op-view="bubbles" title="Packed bubbles — sized by composite importance, coloured by component" role="tab">◯ Bubbles</button>
+          </div>
         </div>
       </div>
       <div class="op-quick">
@@ -8756,12 +8908,23 @@ body.is-row-dragging *        { user-select: none !important; }
       const all = proj.openPoints || [];
       const filtered = all.filter(matchesFilters);
       const items = opFilterState.sort === 'manual' ? filtered : filtered.slice().sort(compareForSort);
+      // Reflect the active view as a class on the container — used by CSS
+      // to switch layout and to enable / disable inline editing.
+      list.className = 'op-list op-view-' + opFilterState.view;
       if (!all.length) {
         list.innerHTML = '<div class="empty">No open points yet — capture something above.</div>';
         return;
       }
       if (!items.length) {
         list.innerHTML = '<div class="empty">No open points match the current filters.</div>';
+        return;
+      }
+      if (opFilterState.view === 'matrix') {
+        drawMatrixView(items);
+        return;
+      }
+      if (opFilterState.view === 'bubbles') {
+        drawBubblesView(items);
         return;
       }
       list.innerHTML = items.map((op) => {
@@ -9095,7 +9258,229 @@ body.is-row-dragging *        { user-select: none !important; }
       draw();
     });
 
+    // View toggle — segmented control switches between List, Matrix, and
+    // Bubbles. Re-renders in place; selection state goes back to '' so
+    // bubble views don't carry stale highlights.
+    const segView = view.querySelector('#opViewSeg');
+    if (segView) {
+      segView.querySelectorAll('[data-op-view]').forEach((b) => {
+        b.addEventListener('click', () => {
+          opFilterState.view = b.dataset.opView;
+          segView.querySelectorAll('[data-op-view]').forEach((x) =>
+            x.classList.toggle('active', x.dataset.opView === opFilterState.view));
+          draw();
+        });
+      });
+    }
+
+    // ─── Matrix view: 4×4 criticality (rows) × priority (cols) ────────
+    // Each cell holds bubbles for the points falling into that bucket;
+    // bubble size = age in days (newer ones smaller); colour = component
+    // (with severity fallback when no component is set). Hover for full
+    // detail; click to switch to List view scrolled to that point.
+    function drawMatrixView(items) {
+      const list = $('#opList');
+      // Group items into 16 cells indexed by `${critRank}-${prioRank}`.
+      const cells = new Map();
+      items.forEach((op) => {
+        const k = `${_opCritRank(op)}-${_opPrioRank(op)}`;
+        if (!cells.has(k)) cells.set(k, []);
+        cells.get(k).push(op);
+      });
+      // Build the grid header row + 4 row labels + 16 cells. Top row =
+      // critical, bottom row = low; left = low priority, right = critical.
+      // The "danger" cells (high+, high+) get a subtle red wash so the
+      // dangerous quadrant pops without screaming.
+      const rowOrder = [4, 3, 2, 1]; // criticality
+      const colOrder = [1, 2, 3, 4]; // priority
+      let html = '<div class="op-matrix">';
+      // Header — column labels (priority axis)
+      html += '<div class="op-matrix-corner"><div class="op-matrix-axis-y">Criticality →</div><div class="op-matrix-axis-x">Priority →</div></div>';
+      colOrder.forEach((p) => {
+        const lbl = _OP_LEVELS[p - 1];
+        html += `<div class="op-matrix-col-head crit-${lbl}">${escapeHTML(CRITICALITY_LABEL[lbl])}</div>`;
+      });
+      // Each row = one criticality, then 4 cells for the priority axis.
+      rowOrder.forEach((c) => {
+        const cLbl = _OP_LEVELS[c - 1];
+        html += `<div class="op-matrix-row-head crit-${cLbl}">${escapeHTML(CRITICALITY_LABEL[cLbl])}</div>`;
+        colOrder.forEach((p) => {
+          const k = `${c}-${p}`;
+          const bucket = cells.get(k) || [];
+          const danger = (c >= 3 && p >= 3) ? ' is-danger' : '';
+          const count  = bucket.length;
+          html += `<div class="op-matrix-cell${danger}" data-cell="${k}">`;
+          html += `<div class="op-matrix-cell-count">${count}</div>`;
+          html += `<svg class="op-matrix-cell-svg" preserveAspectRatio="xMidYMid meet" viewBox="0 0 200 100"></svg>`;
+          html += `</div>`;
+        });
+      });
+      html += '</div>';
+      list.innerHTML = html;
+
+      // Pack each cell's bubbles after the DOM is in place so we know
+      // each SVG's actual pixel size.
+      list.querySelectorAll('.op-matrix-cell').forEach((cellEl) => {
+        const k = cellEl.dataset.cell;
+        const bucket = cells.get(k) || [];
+        if (!bucket.length) return;
+        const svg = cellEl.querySelector('svg');
+        // Use a fixed viewBox so packing is deterministic; the SVG scales
+        // to fit the cell.
+        const W = 200, H = 100;
+        svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+        // Bubble radius: 5 + log(age) — capped — so a fresh point is small,
+        // an old point is big. Range ≈ [5, 16] px in viewBox units.
+        const bubbles = bucket.map((op) => {
+          const r = 5 + Math.min(11, Math.log2(1 + _opAgeDays(op)) * 1.8);
+          const cmp = findComponent(proj, op.component);
+          const c   = cmp ? componentColor(cmp.color) : null;
+          const fallbackRgb = CRITICALITY_RGB[op.criticality || 'med'];
+          const rgb = c ? c.rgb : fallbackRgb;
+          return { op, r, rgb };
+        });
+        packBubbles(bubbles, W, H, 1.3);
+        const frag = bubbles.map((b) => {
+          const ageDays = _opAgeDays(b.op);
+          const stepRatio = _opStepsRatio(b.op);
+          const tip = `${b.op.title}\nAge: ${ageDays}d\n${stepRatio > 0 ? Math.round(stepRatio*100) + '% steps done' : ''}`;
+          return `<circle class="op-bubble" data-op-id="${escapeHTML(b.op.id)}" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="rgba(${b.rgb}, .55)" stroke="rgb(${b.rgb})" stroke-width="1"><title>${escapeHTML(tip)}</title></circle>`;
+        }).join('');
+        svg.innerHTML = frag;
+      });
+      wireBubbleClicks(list);
+    }
+
+    // ─── Bubbles view: single packed circle pile, importance-sized ────
+    function drawBubblesView(items) {
+      const list = $('#opList');
+      // One big SVG; bubble size = importance score (criticality × priority
+      // × log-age × step-shrink). Colour = component (severity fallback).
+      // Sort largest first so the simulation has a stable order.
+      const W = 1100, H = 520;
+      const bubbles = items.slice()
+        .sort((a, b) => _opImportance(b) - _opImportance(a))
+        .map((op) => {
+          const r   = 10 + Math.sqrt(_opImportance(op)) * 5;
+          const cmp = findComponent(proj, op.component);
+          const c   = cmp ? componentColor(cmp.color) : null;
+          const fallbackRgb = CRITICALITY_RGB[op.criticality || 'med'];
+          const rgb = c ? c.rgb : fallbackRgb;
+          return { op, r, rgb };
+        });
+      packBubbles(bubbles, W, H, 2);
+      const fontFor = (r) => Math.max(9, Math.min(13, Math.round(r * 0.36)));
+      const labelOf = (op) => {
+        const t = (op.title || '').trim();
+        return t.length > 26 ? t.slice(0, 24) + '…' : t;
+      };
+      list.innerHTML = `
+        <div class="op-bubbles-shell">
+          <svg class="op-bubbles-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
+            ${bubbles.map((b) => {
+              const ageDays   = _opAgeDays(b.op);
+              const stepRatio = _opStepsRatio(b.op);
+              const stepText  = (b.op.steps || []).length ? `${(b.op.steps || []).filter((s) => s.done).length}/${(b.op.steps || []).length} steps` : 'no steps';
+              const cmp       = findComponent(proj, b.op.component);
+              const compName  = cmp ? cmp.name : '— no component —';
+              const tip       = `${b.op.title}\n${compName}\nAge: ${ageDays}d · ${stepText}\nCriticality: ${CRITICALITY_LABEL[b.op.criticality || 'med']}\nPriority: ${priorityLevel(b.op.priorityLevel).label}`;
+              return `
+                <g class="op-bubble-g" data-op-id="${escapeHTML(b.op.id)}">
+                  <circle class="op-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="rgba(${b.rgb}, .50)" stroke="rgb(${b.rgb})" stroke-width="1.5">
+                    <title>${escapeHTML(tip)}</title>
+                  </circle>
+                  ${b.r > 18 ? `<text class="op-bubble-lbl" x="${b.x.toFixed(1)}" y="${(b.y + 4).toFixed(1)}" text-anchor="middle" font-size="${fontFor(b.r)}">${escapeHTML(labelOf(b.op))}</text>` : ''}
+                </g>`;
+            }).join('')}
+          </svg>
+          <div class="op-bubbles-legend">
+            <span class="op-leg-hint">Bubble size = composite importance (criticality × priority × age, dampened by resolution progress). Colour = component.</span>
+          </div>
+        </div>`;
+      wireBubbleClicks(list);
+    }
+
+    // Both bubble views share the same click affordance: clicking a
+    // bubble switches to List view filtered to that one point's title,
+    // so the user can instantly inspect / edit the underlying card. The
+    // q-filter is set so the list narrows to that exact item; clearing
+    // the filter (Reset) brings everything back.
+    function wireBubbleClicks(scope) {
+      scope.querySelectorAll('[data-op-id]').forEach((el) => {
+        el.addEventListener('click', (e) => {
+          e.preventDefault();
+          const id = el.dataset.opId;
+          const op = (proj.openPoints || []).find((x) => x.id === id);
+          if (!op) return;
+          opFilterState.view = 'list';
+          opFilterState.q = op.title;
+          const fq = $('#opFilterQ'); if (fq) fq.value = op.title;
+          const seg = $('#opViewSeg');
+          if (seg) seg.querySelectorAll('[data-op-view]').forEach((x) =>
+            x.classList.toggle('active', x.dataset.opView === 'list'));
+          draw();
+          setTimeout(() => {
+            const card = list.querySelector(`.op-item[data-id="${CSS.escape(id)}"]`);
+            if (card) {
+              card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              card.classList.add('op-flash');
+              setTimeout(() => card.classList.remove('op-flash'), 1400);
+            }
+          }, 30);
+        });
+      });
+    }
+
     draw();
+  }
+
+  // Simple force-style packing for circles. Iterates centre-attraction +
+  // collision resolution; plenty good for ~300 bubbles. Mutates each
+  // entry to add { x, y } in [r..W-r] × [r..H-r]. `pad` adds margin so
+  // bubbles don't kiss their neighbours.
+  function packBubbles(bubbles, W, H, pad = 1) {
+    if (!bubbles.length) return;
+    const cx = W / 2, cy = H / 2;
+    // Initial positions — concentric ring spread, biggest first at the
+    // centre so the layout feels "weighted".
+    bubbles.forEach((b, i) => {
+      const a = (i * 137.508) * Math.PI / 180; // golden-angle spiral
+      const d = Math.sqrt(i + 0.5) * (Math.min(W, H) / Math.sqrt(bubbles.length + 1) / 2);
+      b.x = cx + d * Math.cos(a);
+      b.y = cy + d * Math.sin(a);
+    });
+    const iters = 90;
+    for (let it = 0; it < iters; it++) {
+      // Centre-pull (gentle, decaying with iteration so we settle).
+      const pull = 0.4 * (1 - it / iters) + 0.05;
+      bubbles.forEach((b) => {
+        b.x += (cx - b.x) * pull * 0.04;
+        b.y += (cy - b.y) * pull * 0.04;
+      });
+      // Pairwise collision separation.
+      for (let i = 0; i < bubbles.length; i++) {
+        const a = bubbles[i];
+        for (let j = i + 1; j < bubbles.length; j++) {
+          const c = bubbles[j];
+          const dx = c.x - a.x, dy = c.y - a.y;
+          const d = Math.sqrt(dx * dx + dy * dy) || 0.01;
+          const minD = a.r + c.r + pad;
+          if (d < minD) {
+            const overlap = (minD - d) / 2;
+            const ux = dx / d, uy = dy / d;
+            a.x -= ux * overlap;
+            a.y -= uy * overlap;
+            c.x += ux * overlap;
+            c.y += uy * overlap;
+          }
+        }
+      }
+      // Clamp to bounds.
+      bubbles.forEach((b) => {
+        b.x = Math.max(b.r + 2, Math.min(W - b.r - 2, b.x));
+        b.y = Math.max(b.r + 2, Math.min(H - b.r - 2, b.y));
+      });
+    }
   }
 
   /* ---------------------------- Register ----------------------------- */
