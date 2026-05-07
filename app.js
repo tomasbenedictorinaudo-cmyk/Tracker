@@ -7737,13 +7737,45 @@
         }).join('');
       }
 
-      const linePath = evm.budgets.map((v, i) =>
-        `${i === 0 ? 'M' : 'L'} ${xMid(i).toFixed(1)} ${yFor(v).toFixed(1)}`).join(' ');
+      // Group weeks into calendar months — the budget line is now drawn
+      // as one horizontal segment per month at that month's TOTAL value
+      // (sum of weekly budgets), with a single draggable red dot at the
+      // month's centre. Dragging the dot distributes the new total
+      // evenly across the weeks the month covers.
+      const monthGroups = [];
+      weeks.forEach((w, i) => {
+        const key = w.start.getFullYear() + '-' + String(w.start.getMonth() + 1).padStart(2, '0');
+        let g = monthGroups[monthGroups.length - 1];
+        if (!g || g.key !== key) {
+          g = { key, indices: [], firstIdx: i, lastIdx: i };
+          monthGroups.push(g);
+        }
+        g.indices.push(i);
+        g.lastIdx = i;
+      });
+      monthGroups.forEach((g) => {
+        g.total = g.indices.reduce((s, i) => s + (evm.budgets[i] || 0), 0);
+        g.midX  = (xLeft(g.firstIdx) + xLeft(g.lastIdx + 1)) / 2;
+      });
 
-      const points = evm.budgets.map((v, i) =>
-        `<circle class="b-point" data-cc="${escapeHTML(cc)}" data-idx="${i}" data-iso="${weeks[i].isoStart}" cx="${xMid(i).toFixed(1)}" cy="${yFor(v).toFixed(1)}" r="4">
-          <title>Week of ${weeks[i].isoStart} — drag to set budget (${fmtV(v)})</title>
-        </circle>`).join('');
+      // Step line: each month flat at its total, vertical jumps between
+      // months. M xL yT  L xR yT  L xR(next) yT(next)  L … and so on.
+      let linePath = '';
+      monthGroups.forEach((g, gi) => {
+        const left  = xLeft(g.firstIdx);
+        const right = xLeft(g.lastIdx + 1); // right edge of last week in month
+        const y     = yFor(g.total);
+        if (gi === 0) linePath += `M ${left.toFixed(1)} ${y.toFixed(1)} `;
+        else          linePath += `L ${left.toFixed(1)} ${y.toFixed(1)} `;
+        linePath += `L ${right.toFixed(1)} ${y.toFixed(1)} `;
+      });
+
+      const points = monthGroups.map((g) => {
+        const monthLbl = weeks[g.firstIdx].start.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+        return `<circle class="b-point" data-cc="${escapeHTML(cc)}" data-month-key="${g.key}" data-first-idx="${g.firstIdx}" data-last-idx="${g.lastIdx}" cx="${g.midX.toFixed(1)}" cy="${yFor(g.total).toFixed(1)}" r="4">
+          <title>${escapeHTML(monthLbl)} — drag to set budget for the whole month (${fmtV(g.total)})</title>
+        </circle>`;
+      }).join('');
 
       const todayLine = todayIdx >= 0
         ? `<line class="b-today" x1="${xLeft(todayIdx).toFixed(1)}" x2="${xLeft(todayIdx).toFixed(1)}" y1="${padT}" y2="${padT + innerH}" />
@@ -7830,16 +7862,21 @@
         pt.addEventListener('mousedown', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          const idx = parseInt(pt.dataset.idx, 10);
-          const iso = pt.dataset.iso;
+          const firstIdx = parseInt(pt.dataset.firstIdx, 10);
+          const lastIdx  = parseInt(pt.dataset.lastIdx, 10);
+          const monthKey = pt.dataset.monthKey;
+          const monthIndices = [];
+          for (let i = firstIdx; i <= lastIdx; i++) monthIndices.push(i);
           const liveBudgets = evm.budgets.slice();
           state.budgets[cc] = state.budgets[cc] || {};
           const isCost = mode === 'cost';
           const avg = avgHourlyRate();
           const step = isCost ? 100 : 1;
-          let displayed = liveBudgets[idx] || 0;
+          // Displayed value = the month's total budget, summed across its weeks.
+          let displayed = monthIndices.reduce((s, i) => s + (liveBudgets[i] || 0), 0);
 
-          // Floating editable input — shown near the point during drag, focusable on release
+          // Floating editable input — shown near the point during drag,
+          // focusable on release for fine-tuning.
           let editor = document.getElementById('budgetEditor');
           if (!editor) {
             editor = document.createElement('input');
@@ -7848,18 +7885,38 @@
             editor.className = 'budget-edit';
             document.body.appendChild(editor);
           }
-          editor._cc = cc; editor._iso = iso; editor._idx = idx;
+          editor._cc = cc; editor._monthKey = monthKey;
           editor._isCost = isCost; editor._avg = avg; editor._step = step;
           editor._chartCtx = { cc, weeks, redraw: () => drawChart(cc, weeks) };
 
           function applyDisplayedValue(v) {
             displayed = Math.max(0, Math.round(v / step) * step);
-            const hours = isCost ? displayed / avg : displayed;
-            state.budgets[cc][iso] = Math.round(hours * 10) / 10;
-            liveBudgets[idx] = displayed;
+            // Distribute the month's total evenly across its weeks. Each
+            // week's stored value is in HOURS — convert from cost mode
+            // when needed before division.
+            const totalHours = isCost ? displayed / avg : displayed;
+            const perWeekHours = totalHours / monthIndices.length;
+            const perWeekDisplayed = displayed / monthIndices.length;
+            monthIndices.forEach((i) => {
+              const iso = weeks[i].isoStart;
+              state.budgets[cc][iso] = Math.round(perWeekHours * 10) / 10;
+              liveBudgets[i] = perWeekDisplayed;
+            });
+            // Repaint the dot at the month's centre at the new total.
             pt.setAttribute('cy', yFor(displayed).toFixed(1));
-            const newPath = liveBudgets.map((vv, ii) =>
-              `${ii === 0 ? 'M' : 'L'} ${xMid(ii).toFixed(1)} ${yFor(vv).toFixed(1)}`).join(' ');
+            // Repaint the step line — recompute month totals from liveBudgets
+            // (only the dragged month's total changes, but recomputing the
+            // whole path is cheap).
+            let newPath = '';
+            monthGroups.forEach((g, gi) => {
+              const total = g.indices.reduce((s, i) => s + (liveBudgets[i] || 0), 0);
+              const left  = xLeft(g.firstIdx);
+              const right = xLeft(g.lastIdx + 1);
+              const y     = yFor(total);
+              if (gi === 0) newPath += `M ${left.toFixed(1)} ${y.toFixed(1)} `;
+              else          newPath += `L ${left.toFixed(1)} ${y.toFixed(1)} `;
+              newPath += `L ${right.toFixed(1)} ${y.toFixed(1)} `;
+            });
             svg.querySelector('.b-budget-line').setAttribute('d', newPath);
             editor.value = isCost ? `${displayed} €` : `${displayed} h`;
           }
@@ -7882,7 +7939,8 @@
           function commitDrag() {
             saveState();
             drawChart(cc, weeks);
-            toast(`${cc}: ${fmtV(displayed)} for ${iso}`);
+            const monthLabel = weeks[firstIdx].start.toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+            toast(`${cc}: ${fmtV(displayed)} for ${monthLabel} (split across ${monthIndices.length} week${monthIndices.length === 1 ? '' : 's'})`);
           }
           function onUp(em) {
             window.removeEventListener('mousemove', onMove);
