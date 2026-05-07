@@ -7164,7 +7164,10 @@
         tree.innerHTML = '<div class="empty">No links yet — add one or create a folder to start.</div>';
         return;
       }
-      tree.innerHTML = ungroupedHTML() + proj.linkFolders.map(folderHTML).join('');
+      // Folders first, loose links at the bottom — keeps named groups
+      // (typically the curated content) visually prioritised, with the
+      // unfiled overflow at the end of the page.
+      tree.innerHTML = proj.linkFolders.map(folderHTML).join('') + ungroupedHTML();
       wireTree();
     }
 

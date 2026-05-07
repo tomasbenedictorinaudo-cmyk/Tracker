@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-07T21:49:39.431Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-07T21:56:17.023Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -13558,7 +13558,10 @@ body.is-row-dragging *        { user-select: none !important; }
         tree.innerHTML = '<div class="empty">No links yet — add one or create a folder to start.</div>';
         return;
       }
-      tree.innerHTML = ungroupedHTML() + proj.linkFolders.map(folderHTML).join('');
+      // Folders first, loose links at the bottom — keeps named groups
+      // (typically the curated content) visually prioritised, with the
+      // unfiled overflow at the end of the page.
+      tree.innerHTML = proj.linkFolders.map(folderHTML).join('') + ungroupedHTML();
       wireTree();
     }
 
