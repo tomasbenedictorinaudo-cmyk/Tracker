@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-07T20:58:33.188Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-07T21:05:22.872Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -13904,15 +13904,28 @@ body.is-row-dragging *        { user-select: none !important; }
       // screen-X / screen-Y → viewBox coords is a straight scale (no letterbox).
       svg.setAttribute('preserveAspectRatio', 'none');
 
-      // Tight Y range — fit data plus ~12% headroom; tiny floor so an empty CC
-      // doesn't render a degenerate axis.
-      const dataMax = Math.max(0, ...evm.budgets, ...evm.actuals);
-      const maxData = dataMax > 0 ? dataMax : (mode === 'cost' ? 100 : 5);
-      const maxY = maxData * 1.12;
       const xLeft = (i) => padL + (i / weeks.length) * innerW;
       const xMid  = (i) => padL + ((i + 0.5) / weeks.length) * innerW;
-      const yFor  = (v) => padT + innerH - (v / maxY) * innerH;
       const barW = innerW / weeks.length;
+
+      // Build month groupings up-front — both the budget line and the
+      // stacked actuals are now drawn at monthly resolution so they
+      // share Y units (was the cause of the chart-overflow bug).
+      const monthGroups = [];
+      weeks.forEach((w, i) => {
+        const key = w.start.getFullYear() + '-' + String(w.start.getMonth() + 1).padStart(2, '0');
+        let g = monthGroups[monthGroups.length - 1];
+        if (!g || g.key !== key) {
+          g = { key, indices: [], firstIdx: i, lastIdx: i };
+          monthGroups.push(g);
+        }
+        g.indices.push(i);
+        g.lastIdx = i;
+      });
+      monthGroups.forEach((g) => {
+        g.total = g.indices.reduce((s, i) => s + (evm.budgets[i] || 0), 0);
+        g.midX  = (xLeft(g.firstIdx) + xLeft(g.lastIdx + 1)) / 2;
+      });
 
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const todayT = today.getTime();
@@ -13945,13 +13958,56 @@ body.is-row-dragging *        { user-select: none !important; }
         });
       }
 
-      // Stack the series — each layer's TOP is its top boundary, building up
-      let cumPrev = new Array(weeks.length).fill(0);
+      // Aggregate each layer's per-week series to monthly totals so they
+      // share Y units with the budget step line. Stacking is done at the
+      // monthly resolution; each layer becomes a stepped band that's
+      // flat across the month.
+      layerEntities.forEach((ent) => {
+        ent.monthSeries = monthGroups.map((g) =>
+          g.indices.reduce((s, i) => s + (ent.series[i] || 0), 0)
+        );
+      });
+
+      // Determine Y range from MONTHLY units — both the budget totals
+      // and the cumulative monthly actuals (sum across all layers) need
+      // to fit. With per-week scaling, monthly totals overflowed the
+      // chart top; this is the fix.
+      const monthlyActualTotals = monthGroups.map((_, gi) =>
+        layerEntities.reduce((s, ent) => s + (ent.monthSeries[gi] || 0), 0)
+      );
+      const monthlyBudgetTotals = monthGroups.map((g) => g.total);
+      const dataMax = Math.max(0, ...monthlyBudgetTotals, ...monthlyActualTotals);
+      const maxData = dataMax > 0 ? dataMax : (mode === 'cost' ? 100 : 5);
+      const maxY = maxData * 1.12;
+      const yFor = (v) => padT + innerH - (v / maxY) * innerH;
+
+      // Stack the series at MONTHLY resolution — each layer's TOP is its
+      // running sum at each month. The forward path traces the top of
+      // the layer as a step function (flat per month, vertical at month
+      // boundaries); the back path returns along cumPrev to close the
+      // band.
+      let cumPrev = monthGroups.map(() => 0);
       const layers = layerEntities.map((ent) => {
-        const top = ent.series.map((v, i) => cumPrev[i] + v);
-        const fwd = top.map((v, i) => `${i === 0 ? 'M' : 'L'} ${xMid(i).toFixed(1)} ${yFor(v).toFixed(1)}`).join(' ');
-        const back = cumPrev.slice().reverse().map((v, i) => `L ${xMid(weeks.length - 1 - i).toFixed(1)} ${yFor(v).toFixed(1)}`).join(' ');
-        const path = fwd + ' ' + back + ' Z';
+        const top = ent.monthSeries.map((v, i) => cumPrev[i] + v);
+        let fwd = '';
+        monthGroups.forEach((g, i) => {
+          const left  = xLeft(g.firstIdx);
+          const right = xLeft(g.lastIdx + 1);
+          const y     = yFor(top[i]);
+          if (i === 0) fwd += `M ${left.toFixed(1)} ${y.toFixed(1)} `;
+          else         fwd += `L ${left.toFixed(1)} ${y.toFixed(1)} `;
+          fwd += `L ${right.toFixed(1)} ${y.toFixed(1)} `;
+        });
+        let back = '';
+        for (let i = monthGroups.length - 1; i >= 0; i--) {
+          const g = monthGroups[i];
+          const left  = xLeft(g.firstIdx);
+          const right = xLeft(g.lastIdx + 1);
+          const y     = yFor(cumPrev[i]);
+          back += `L ${right.toFixed(1)} ${y.toFixed(1)} `;
+          back += `L ${left.toFixed(1)}  ${y.toFixed(1)} `;
+        }
+        const path = fwd + back + 'Z';
         const layer = { path, ent };
         cumPrev = top;
         return layer;
@@ -13974,27 +14030,9 @@ body.is-row-dragging *        { user-select: none !important; }
         }).join('');
       }
 
-      // Group weeks into calendar months — the budget line is now drawn
-      // as one horizontal segment per month at that month's TOTAL value
-      // (sum of weekly budgets), with a single draggable red dot at the
-      // month's centre. Dragging the dot distributes the new total
-      // evenly across the weeks the month covers.
-      const monthGroups = [];
-      weeks.forEach((w, i) => {
-        const key = w.start.getFullYear() + '-' + String(w.start.getMonth() + 1).padStart(2, '0');
-        let g = monthGroups[monthGroups.length - 1];
-        if (!g || g.key !== key) {
-          g = { key, indices: [], firstIdx: i, lastIdx: i };
-          monthGroups.push(g);
-        }
-        g.indices.push(i);
-        g.lastIdx = i;
-      });
-      monthGroups.forEach((g) => {
-        g.total = g.indices.reduce((s, i) => s + (evm.budgets[i] || 0), 0);
-        g.midX  = (xLeft(g.firstIdx) + xLeft(g.lastIdx + 1)) / 2;
-      });
-
+      // monthGroups is precomputed at the top of drawChart so the Y-axis
+      // scaling can include monthly totals. Just rebuild the budget step
+      // line from the existing monthGroups.totals here.
       // Step line: each month flat at its total, vertical jumps between
       // months. M xL yT  L xR yT  L xR(next) yT(next)  L … and so on.
       let linePath = '';
@@ -14055,28 +14093,34 @@ body.is-row-dragging *        { user-select: none !important; }
           hoverPanel.style.display = 'none';
           return;
         }
-        let bestI = 0, bestD = Infinity;
-        for (let i = 0; i < weeks.length; i++) {
-          const d = Math.abs(xMid(i) - localX);
-          if (d < bestD) { bestD = d; bestI = i; }
+        // Snap the crosshair to the closest MONTH (since the chart now
+        // renders at monthly resolution). The vertical line lands at the
+        // month's centre and the panel reports monthly aggregates so the
+        // numbers line up with what's drawn.
+        let bestG = 0, bestD = Infinity;
+        for (let g = 0; g < monthGroups.length; g++) {
+          const d = Math.abs(monthGroups[g].midX - localX);
+          if (d < bestD) { bestD = d; bestG = g; }
         }
-        const lineX = xMid(bestI);
+        const grp  = monthGroups[bestG];
+        const lineX = grp.midX;
         hoverLine.setAttribute('x1', lineX.toFixed(1));
         hoverLine.setAttribute('x2', lineX.toFixed(1));
         hoverLine.style.display = '';
-        const w = weeks[bestI];
-        const budget = evm.budgets[bestI];
-        const totalActual = isCostMode
-          ? actualCostForCCWeek(cc, w.isoStart)
-          : actualHoursForCCWeek(cc, w.isoStart);
+        const monthLabel = weeks[grp.firstIdx].start.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+        const budget = grp.total;
+        const totalActual = grp.indices.reduce((s, i) => s + (
+          isCostMode ? actualCostForCCWeek(cc, weeks[i].isoStart)
+                     : actualHoursForCCWeek(cc, weeks[i].isoStart)
+        ), 0);
         const compRows = layerEntities.map((ent) => {
-          const v = ent.series[bestI];
+          const v = ent.monthSeries[bestG];
           if (v === 0) return '';
           return `<div class="b-h-row"><span class="b-h-dot" style="background:rgba(${ent.color.rgb},.95)"></span><b>${escapeHTML(ent.name)}</b><span class="b-h-val">${fmtV(v)}</span></div>`;
         }).filter(Boolean).join('');
         const overBudget = totalActual > budget && budget > 0;
         hoverPanel.innerHTML = `
-          <div class="b-h-head">Week of ${w.isoStart}</div>
+          <div class="b-h-head">${escapeHTML(monthLabel)} · ${grp.indices.length} week${grp.indices.length === 1 ? '' : 's'}</div>
           ${compRows || '<div class="b-h-empty">No activity</div>'}
           <div class="b-h-row b-h-tot"><b>Total actual</b><span class="b-h-val">${fmtV(totalActual)}</span></div>
           <div class="b-h-row"><span class="b-h-dot b-h-dot-budget"></span><b>Budget</b><span class="b-h-val ${overBudget ? 'bad' : 'ok'}">${fmtV(budget)}</span></div>
