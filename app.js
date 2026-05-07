@@ -9196,6 +9196,63 @@
 
   /* --------------------------- Quick add ----------------------------- */
 
+  // Build the option list for a person <select> with a sentinel "+ New
+  // person…" entry at the bottom. Used everywhere the Quick Add picks
+  // an Owner / Originator / etc. so users can create a person without
+  // leaving the form. Pair with wirePersonSelectInline().
+  function personOptionsHtml(selectedId, placeholder) {
+    const placeOpt = placeholder ? `<option value="">${escapeHTML(placeholder)}</option>` : '';
+    return placeOpt
+      + state.people.map((p) => `<option value="${escapeHTML(p.id)}"${p.id === selectedId ? ' selected' : ''}>${escapeHTML(p.name)}</option>`).join('')
+      + '<option disabled>──────────</option>'
+      + '<option value="__new__">+ New person…</option>';
+  }
+
+  // Prompt-based inline person creation. Pushes the new person into
+  // state.people, persists, and returns the new id. Returns null on
+  // cancel / empty name.
+  function createPersonInlinePrompt() {
+    const rawName = prompt('New person — name:');
+    if (rawName === null) return null;
+    const name = rawName.trim();
+    if (!name) { toast('Name is required'); return null; }
+    const role = (prompt('Role (optional):') || '').trim();
+    const person = { id: uid('p'), name, role, capacity: 100, hourlyRate: 100 };
+    state.people.push(person);
+    stampEdit(person, null, 'created inline from Quick Add');
+    saveState();
+    return person.id;
+  }
+
+  // Wire a <select> built with personOptionsHtml. Captures the previous
+  // value so that cancelling the inline prompt reverts the dropdown
+  // instead of leaving "+ New person…" selected. Refreshes ALL the
+  // person-selects inside the same Quick Add panel so a person added
+  // via the Owner dropdown appears in the Originator dropdown too.
+  function wirePersonSelectInline(sel) {
+    let prev = sel.value;
+    sel.addEventListener('change', () => {
+      if (sel.value !== '__new__') { prev = sel.value; return; }
+      const newId = createPersonInlinePrompt();
+      const scope = sel.closest('.qa-panel') || document;
+      if (newId) {
+        // Refresh every person-select in the same Quick Add panel,
+        // preserving each one's current selection but pointing the one
+        // the user clicked at the new person.
+        $$('select[data-person-select]', scope).forEach((other) => {
+          const cur = other === sel ? newId : (other.value === '__new__' ? '' : other.value);
+          const placeholder = other.dataset.personPlaceholder || '';
+          other.innerHTML = personOptionsHtml(cur, placeholder || null);
+          other.value = cur;
+        });
+        prev = newId;
+        toast(`Added ${state.people.find((p) => p.id === newId)?.name}`);
+      } else {
+        sel.value = prev;
+      }
+    });
+  }
+
   let qaType = 'action';
   let qaInit = {};
   let qaSaveCallback = null;
@@ -9227,10 +9284,10 @@
         <div class="field"><label>Title</label><input id="qTitle" placeholder="What needs to be done?" value="${escapeHTML(initTitle)}" /></div>
         <div class="qa-row">
           <div class="field"><label>Owner</label>
-            <select id="qOwner">${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
+            <select id="qOwner" data-person-select>${personOptionsHtml(qaInit.owner)}</select>
           </div>
           <div class="field"><label>Originator</label>
-            <select id="qOriginator"><option value="">— same as owner</option>${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
+            <select id="qOriginator" data-person-select data-person-placeholder="— same as owner">${personOptionsHtml('', '— same as owner')}</select>
           </div>
           <div class="field"><label>Originator date</label>
             <input id="qOriginatorDate" type="date" value="${todayISO()}" title="Auto-set to today; editable" />
@@ -9327,7 +9384,7 @@
           <div class="field"><label>Residual I (post-action)</label><input id="qImpR" type="number" min="1" max="5" value="2" /></div>
         </div>
         <div class="field"><label>Owner</label>
-          <select id="qOwner">${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
+          <select id="qOwner" data-person-select>${personOptionsHtml('')}</select>
         </div>
         <div class="field"><label id="qMitLbl">${kind === 'opportunity' ? 'Capture plan' : 'Mitigation'}</label><textarea id="qMit" placeholder="Brief description of the response"></textarea></div>
         <div class="field"><label>Linked action (optional)</label>
@@ -9350,7 +9407,7 @@
         <div class="field"><label>Rationale</label><textarea id="qRat"></textarea></div>
         <div class="qa-row">
           <div class="field"><label>Owner</label>
-            <select id="qOwner">${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
+            <select id="qOwner" data-person-select>${personOptionsHtml('')}</select>
           </div>
           <div class="field"><label>Date</label><input id="qDate" type="date" value="${todayISO()}" /></div>
         </div>`;
@@ -9478,6 +9535,10 @@
           </div>
         </div>`;
     }
+    // Hook every person-picker rendered in the body so the "+ New
+    // person…" sentinel option triggers an inline create flow without
+    // leaving the Quick Add.
+    $$('select[data-person-select]', body).forEach(wirePersonSelectInline);
   }
 
   function saveQA() {
