@@ -2048,6 +2048,48 @@ body.is-card-dragging * { cursor: grabbing !important; }
   border: 1px solid var(--line-2);
   flex-shrink: 0;
 }
+.component-swatch-btn {
+  cursor: pointer;
+  transition: transform .12s ease, box-shadow .12s ease;
+  padding: 0;
+  appearance: none;
+}
+.component-swatch-btn:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3px var(--accent);
+}
+.component-swatch-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg-1), 0 0 0 3px var(--accent);
+}
+
+/* Floating popover used by the Components panel to change a
+   component's colour without scrolling through the dropdown. */
+.comp-color-pop {
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  box-shadow: 0 8px 28px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.04) inset;
+  z-index: 9500;
+  display: grid;
+  grid-template-columns: repeat(6, 22px);
+  gap: 6px;
+}
+.comp-color-pick {
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  appearance: none;
+  transition: transform .12s ease, border-color .12s ease;
+}
+.comp-color-pick:hover  { transform: scale(1.12); }
+.comp-color-pick.is-active {
+  border-color: var(--text);
+  box-shadow: 0 0 0 2px var(--bg-1) inset;
+}
 .row .component-name { flex: 1; min-width: 0; max-width: 220px; }
 .row .component-color { width: 110px; }
 .color-grid {
@@ -3852,7 +3894,10 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
 .reg-row {
   padding: 0;
   border-bottom: 1px solid var(--line);
-  background: var(--row-tint, transparent);
+  /* Background tint is now driven by status (see below) — overdue /
+     blocked rows get a red fill that catches the eye, done / cancelled
+     fade. The default starts transparent so todo rows stay clean. */
+  background: transparent;
   transition: background var(--transition);
 }
 .reg-row:hover { background: var(--bg-2); }
@@ -3916,29 +3961,37 @@ input[type="date"].reg-inp {
 }
 .row-del:hover { color: var(--bad); background: rgba(248,113,113,.08); }
 
-/* Register row left edge — encodes priority, not overdue state.
-   Every row gets a 3px coloured strip from --prio-rgb (set inline).
-   Low/Med priorities get reduced opacity so the eye is drawn to
-   High and Critical rows; the latter stay full saturation. */
+/* Register row LEFT EDGE — encodes COMPONENT (allocation). The 3 px
+   strip uses --comp-rgb when the action has a component assigned;
+   otherwise stays a neutral subtle grey so unassigned actions read
+   as "neutral" rather than mis-coloured. */
 .reg-row {
-  box-shadow: inset 3px 0 0 rgb(var(--prio-rgb, 96, 165, 250));
+  box-shadow: inset 3px 0 0 rgba(148, 163, 184, .35);
 }
-.reg-row.prio-low,
-.reg-row.prio-med {
-  box-shadow: inset 3px 0 0 rgba(var(--prio-rgb, 96, 165, 250), .42);
-}
-.reg-row.prio-high,
-.reg-row.prio-critical {
-  box-shadow: inset 3px 0 0 rgb(var(--prio-rgb));
+.reg-row[style*="--comp-rgb"] {
+  box-shadow: inset 3px 0 0 rgb(var(--comp-rgb));
 }
 
-/* Status overrides — mirror the board's treatment of done / cancelled
-   rows. Done cards on the board show a green (ok) left edge; here we
-   match that and additionally fade the row + strike through the title
-   so the row reads as 'past tense' even without a column to imply it.
-   Cancelled gets the board's stronger grey-out treatment. */
+/* Row BACKGROUND — encodes STATUS so the user can scan for trouble.
+   Overdue + blocked get a red wash that's impossible to miss; in-
+   progress gets a faint blue cue; done fades to a quiet green; todo
+   stays clean. Selected rows still win (handled below). */
+.reg-row.is-overdue            { background: rgba(248, 113, 113, .12); }
+.reg-row.is-overdue:hover      { background: rgba(248, 113, 113, .18); }
+.reg-row.status-blocked:not(.is-overdue) {
+  background: rgba(248, 113, 113, .07);
+}
+.reg-row.status-blocked:not(.is-overdue):hover { background: rgba(248, 113, 113, .12); }
+.reg-row.status-doing:not(.is-overdue) {
+  background: rgba(110, 168, 255, .04);
+}
+.reg-row.status-doing:not(.is-overdue):hover { background: rgba(110, 168, 255, .09); }
+
+/* Done / cancelled — mirror the board's "past tense" treatment.
+   Background fades to a quiet tone, the row dims, the title gets
+   struck through. Hover restores legibility. */
 .reg-row.is-done {
-  box-shadow: inset 3px 0 0 var(--ok);
+  background: rgba(74, 222, 128, .05);
   opacity: .68;
 }
 .reg-row.is-done .title-inp {
@@ -3946,9 +3999,9 @@ input[type="date"].reg-inp {
   text-decoration-color: rgba(255,255,255,.4);
   text-decoration-thickness: 1.5px;
 }
-.reg-row.is-done:hover { opacity: 1; }
+.reg-row.is-done:hover { opacity: 1; background: rgba(74, 222, 128, .10); }
 .reg-row.is-cancelled {
-  box-shadow: inset 3px 0 0 rgb(107,114,128);
+  background: rgba(148, 163, 184, .06);
   opacity: .55;
 }
 .reg-row.is-cancelled .title-inp {

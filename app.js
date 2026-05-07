@@ -3157,14 +3157,12 @@
       const dueCls = statusOfDue(a.due, a.status);
       const stat = STATUSES.find((s) => s.id === a.status);
       const lvl = priorityLevel(a.priorityLevel);
-      // Left edge of the row now reflects priority (not the binary
-      // overdue state). The dedicated priority pip column is dropped —
-      // the left edge encodes the same signal more scannably.
-      const tintProps = [
-        c ? `--row-tint: rgba(${c.rgb},.10);` : '',
-        `--prio-rgb: ${lvl.rgb};`,
-      ].filter(Boolean).join(' ');
-      const tint = ` style="${tintProps}"`;
+      // Visual encoding: left edge = COMPONENT (allocation) so the user
+      // can scan the table for "what kind of work" at a glance, and the
+      // ROW BACKGROUND = STATUS so in-trouble actions (overdue, blocked)
+      // pop visually with a tinted fill.
+      const tintProps = c ? `--comp-rgb: ${c.rgb};` : '';
+      const tint = tintProps ? ` style="${tintProps}"` : '';
       // Lateness as a 'drag tail' — a thin red trail whose width grows
       // with days late, capped at 30 days so a 90-d-late item doesn't
       // bully the title cell. Replaces the old ⏰ emoji.
@@ -3177,7 +3175,7 @@
       const isCancelled = a.status === 'cancelled';
       const checked = _regSelection.has(a.id) ? 'checked' : '';
       return `
-        <div class="reg-row prio-${lvl.id} ${isOverdue ? 'is-overdue' : ''} ${isDone ? 'is-done' : ''} ${isCancelled ? 'is-cancelled' : ''} ${_regSelection.has(a.id) ? 'is-selected' : ''}" data-id="${a.id}"${tint}>
+        <div class="reg-row prio-${lvl.id} status-${a.status} ${isOverdue ? 'is-overdue' : ''} ${isDone ? 'is-done' : ''} ${isCancelled ? 'is-cancelled' : ''} ${_regSelection.has(a.id) ? 'is-selected' : ''}" data-id="${a.id}"${tint}>
           <div class="reg-cell reg-cell-check">
             <input type="checkbox" class="reg-row-check" data-row-id="${a.id}" ${checked} aria-label="Select row" />
           </div>
@@ -7058,6 +7056,56 @@
     });
   }
 
+  // Floating colour-picker popover anchored to a swatch button. Closes
+  // on outside click, Escape, or selecting a colour. Lives in module
+  // scope so multiple call sites (Components panel, etc.) reuse it.
+  let _compColorPopoverEl = null;
+  function closeComponentColorPopover() {
+    if (_compColorPopoverEl) {
+      _compColorPopoverEl.remove();
+      _compColorPopoverEl = null;
+      document.removeEventListener('mousedown', _compColorPopoverDismiss, true);
+      document.removeEventListener('keydown', _compColorPopoverKey, true);
+    }
+  }
+  function _compColorPopoverDismiss(e) {
+    if (_compColorPopoverEl && !_compColorPopoverEl.contains(e.target) && !e.target.closest('.component-swatch-btn')) {
+      closeComponentColorPopover();
+    }
+  }
+  function _compColorPopoverKey(e) {
+    if (e.key === 'Escape') closeComponentColorPopover();
+  }
+  function openComponentColorPopover(anchor, pt) {
+    closeComponentColorPopover();
+    const r = anchor.getBoundingClientRect();
+    const pop = document.createElement('div');
+    pop.className = 'comp-color-pop';
+    pop.style.position = 'fixed';
+    pop.style.left = Math.round(r.left) + 'px';
+    pop.style.top  = Math.round(r.bottom + 6) + 'px';
+    pop.innerHTML = COMPONENT_COLORS.map((co) => {
+      const active = co.id === pt.color ? ' is-active' : '';
+      return `<button type="button" class="comp-color-pick${active}" data-color="${co.id}" title="${escapeHTML(co.name)}" style="background: rgb(${co.rgb});"></button>`;
+    }).join('');
+    document.body.appendChild(pop);
+    _compColorPopoverEl = pop;
+    pop.querySelectorAll('.comp-color-pick').forEach((b) => {
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pt.color = b.dataset.color;
+        closeComponentColorPopover();
+        commit('component-recolor');
+      });
+    });
+    // Defer listener-attach so the click that opened the popover doesn't
+    // immediately close it via the document mousedown handler.
+    setTimeout(() => {
+      document.addEventListener('mousedown', _compColorPopoverDismiss, true);
+      document.addEventListener('keydown', _compColorPopoverKey, true);
+    }, 0);
+  }
+
   function renderComponents(root) {
     const proj = curProject();
     proj.components = proj.components || [];
@@ -7087,7 +7135,7 @@
         return `
           <div class="row" data-component-id="${pt.id}">
             ${ROW_GRIP_HTML}
-            <span class="component-swatch" style="background: rgba(${c.rgb},.9);"></span>
+            <button type="button" class="component-swatch component-swatch-btn" style="background: rgba(${c.rgb},.9);" title="Click to change colour" aria-label="Change colour"></button>
             <input class="inline component-name" value="${escapeHTML(pt.name)}" />
             <select class="inline component-color">
               ${COMPONENT_COLORS.map((co) => `<option value="${co.id}" ${co.id === pt.color ? 'selected' : ''}>${co.name}</option>`).join('')}
@@ -7120,6 +7168,18 @@
           const id = sel.closest('[data-component-id]').dataset.componentId;
           const pt = proj.components.find((p) => p.id === id);
           if (pt) { pt.color = sel.value; commit('component-recolor'); }
+        });
+      });
+      // Clicking the colour swatch opens a popover with the full
+      // palette so the user can change colour without scrolling
+      // through a select dropdown.
+      $$('.component-swatch-btn', list).forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = btn.closest('[data-component-id]').dataset.componentId;
+          const pt = proj.components.find((p) => p.id === id);
+          if (!pt) return;
+          openComponentColorPopover(btn, pt);
         });
       });
       $$('.component-cc', list).forEach((sel) => {
