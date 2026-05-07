@@ -5280,6 +5280,11 @@ kbd {
   border-radius: var(--radius-sm); padding: 7px 10px; outline: none;
 }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent-2); }
+.field input.field-err, .field select.field-err, .field textarea.field-err {
+  border-color: var(--bad);
+  box-shadow: 0 0 0 2px rgba(248,113,133,.15);
+}
+.field input.field-err::placeholder { color: rgba(248,113,133,.7); }
 .field textarea { resize: vertical; min-height: 70px; font-family: inherit; }
 
 .history { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-dim); }

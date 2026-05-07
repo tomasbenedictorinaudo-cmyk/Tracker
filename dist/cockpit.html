@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-07T21:26:16.747Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-07T21:29:56.305Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -5289,6 +5289,11 @@ kbd {
   border-radius: var(--radius-sm); padding: 7px 10px; outline: none;
 }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent-2); }
+.field input.field-err, .field select.field-err, .field textarea.field-err {
+  border-color: var(--bad);
+  box-shadow: 0 0 0 2px rgba(248,113,133,.15);
+}
+.field input.field-err::placeholder { color: rgba(248,113,133,.7); }
 .field textarea { resize: vertical; min-height: 70px; font-family: inherit; }
 
 .history { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-dim); }
@@ -15568,37 +15573,81 @@ body.is-row-dragging *        { user-select: none !important; }
       + '<option value="__new__">+ New person…</option>';
   }
 
-  // Prompt-based inline person creation. Pushes the new person into
-  // state.people, persists, and returns the new id. Returns null on
-  // cancel / empty name.
-  function createPersonInlinePrompt() {
-    const rawName = prompt('New person — name:');
-    if (rawName === null) return null;
-    const name = rawName.trim();
-    if (!name) { toast('Name is required'); return null; }
-    const role = (prompt('Role (optional):') || '').trim();
-    const person = { id: uid('p'), name, role, capacity: 100, hourlyRate: 100 };
-    state.people.push(person);
-    stampEdit(person, null, 'created inline from Quick Add');
-    saveState();
-    return person.id;
+  // Inline person-creation dialog: a small modal with Name + Role in a
+  // single form so the user can fill both at once. Returns a Promise
+  // that resolves to the new person's id, or null if the user cancels.
+  function createPersonInlineDialog() {
+    return new Promise((resolve) => {
+      const overlay = document.createElement('div');
+      overlay.className = 'overlay desc-overlay';
+      overlay.style.zIndex = '9700'; // above Quick Add
+      overlay.innerHTML = `
+        <div class="desc-modal" style="width: 380px;">
+          <div class="desc-head">
+            <div class="desc-title">+ Add person</div>
+            <button class="icon-btn" id="newPersonClose" title="Cancel" aria-label="Cancel">×</button>
+          </div>
+          <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+            <div class="field">
+              <label>Name <span class="muted">(required)</span></label>
+              <input id="newPersonName" type="text" autocomplete="off" placeholder="e.g. Carol Davis" />
+            </div>
+            <div class="field">
+              <label>Role <span class="muted">(optional)</span></label>
+              <input id="newPersonRole" type="text" autocomplete="off" placeholder="e.g. Reviewer" />
+            </div>
+            <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
+              <button class="ghost" id="newPersonCancel">Cancel</button>
+              <button class="primary" id="newPersonSave">Add person</button>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const nameInp = overlay.querySelector('#newPersonName');
+      const roleInp = overlay.querySelector('#newPersonRole');
+      const close = (id) => { overlay.remove(); resolve(id); };
+      const save = () => {
+        const name = (nameInp.value || '').trim();
+        if (!name) { nameInp.focus(); nameInp.setAttribute('placeholder', 'Name is required'); nameInp.classList.add('field-err'); return; }
+        const role = (roleInp.value || '').trim();
+        const person = { id: uid('p'), name, role, capacity: 100, hourlyRate: 100 };
+        state.people.push(person);
+        stampEdit(person, null, 'created inline from Quick Add');
+        saveState();
+        close(person.id);
+      };
+      overlay.querySelector('#newPersonClose').addEventListener('click', () => close(null));
+      overlay.querySelector('#newPersonCancel').addEventListener('click', () => close(null));
+      overlay.querySelector('#newPersonSave').addEventListener('click', save);
+      // Enter on either field saves; Escape cancels. Tab moves between
+      // the two inputs as expected.
+      [nameInp, roleInp].forEach((inp) => {
+        inp.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter')   { e.preventDefault(); save(); }
+          if (e.key === 'Escape')  { e.preventDefault(); close(null); }
+        });
+        inp.addEventListener('input', () => inp.classList.remove('field-err'));
+      });
+      setTimeout(() => nameInp.focus(), 30);
+    });
   }
 
   // Wire a <select> built with personOptionsHtml. Captures the previous
-  // value so that cancelling the inline prompt reverts the dropdown
+  // value so that cancelling the inline dialog reverts the dropdown
   // instead of leaving "+ New person…" selected. Refreshes ALL the
   // person-selects inside the same Quick Add panel so a person added
   // via the Owner dropdown appears in the Originator dropdown too.
   function wirePersonSelectInline(sel) {
     let prev = sel.value;
-    sel.addEventListener('change', () => {
+    sel.addEventListener('change', async () => {
       if (sel.value !== '__new__') { prev = sel.value; return; }
-      const newId = createPersonInlinePrompt();
+      // Revert the visible value immediately while the dialog is open
+      // so the dropdown doesn't read "+ New person…" if the user
+      // glances away. We re-set it to the new id on resolve.
+      sel.value = prev;
+      const newId = await createPersonInlineDialog();
       const scope = sel.closest('.qa-panel') || document;
       if (newId) {
-        // Refresh every person-select in the same Quick Add panel,
-        // preserving each one's current selection but pointing the one
-        // the user clicked at the new person.
         $$('select[data-person-select]', scope).forEach((other) => {
           const cur = other === sel ? newId : (other.value === '__new__' ? '' : other.value);
           const placeholder = other.dataset.personPlaceholder || '';
@@ -15607,8 +15656,6 @@ body.is-row-dragging *        { user-select: none !important; }
         });
         prev = newId;
         toast(`Added ${state.people.find((p) => p.id === newId)?.name}`);
-      } else {
-        sel.value = prev;
       }
     });
   }
