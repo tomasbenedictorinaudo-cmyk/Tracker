@@ -6247,47 +6247,64 @@
       cellGroups.inherent.get(inhKey).push(r.id);
       cellGroups.residual.get(resKey).push(r.id);
     });
-    // Returns { dx, dy } offset for a marker that's the i-th of n in its
-    // cell. n=1 → centred; n=2..6 → ring; n=7+ → two concentric rings.
-    function packOffset(i, n, baseRadius) {
-      if (n <= 1) return { dx: 0, dy: 0 };
-      // Two-ring fallback when more than 8 share a cell — outer ring
-      // gets 8 slots, the rest go inside on a smaller ring.
-      const outerN = Math.min(n, 8);
-      if (i < outerN) {
-        const a = (i / outerN) * Math.PI * 2 - Math.PI / 2;
-        return { dx: Math.cos(a) * baseRadius, dy: Math.sin(a) * baseRadius };
-      }
-      const innerI = i - outerN;
-      const innerN = n - outerN;
-      const a = (innerI / Math.max(innerN, 1)) * Math.PI * 2;
-      return { dx: Math.cos(a) * baseRadius * 0.45, dy: Math.sin(a) * baseRadius * 0.45 };
+    // The matrix's logical (0, 0) origin sits at the bottom-left
+    // corner of the grid (probability = 0, impact = 0). Co-bucketed
+    // markers are spread along the ARC of constant radius from that
+    // origin so every dot in a cell is exactly equidistant from (0,0)
+    // — preventing the visual reading that "outer-ring" risks are more
+    // severe than "inner-ring" ones when they share the same rating.
+    const origX = padL;
+    const origY = padT + 5 * cellH;
+
+    // Pack one item along its cell's iso-distance arc. For a single
+    // item the position is the cell centre; for n > 1 the cluster
+    // walks along the arc with a small angular step. Step is sized
+    // from a target arc-length so all clusters look equally tight
+    // regardless of their distance from the origin.
+    function arcPosition(probability, impact, i, n, arcLen) {
+      const cx = padL + (probability - 0.5) * cellW;
+      const cy = padT + (5 - impact + 0.5) * cellH;
+      if (n <= 1) return { x: cx, y: cy };
+      const dx = cx - origX;
+      const dy = cy - origY;
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const baseAngle = Math.atan2(dy, dx);
+      // Arc length → angle: θ = s / r. Each step covers (arcLen / dist)
+      // radians; centre the cluster on baseAngle so even-count packs
+      // straddle the cell centre, odd-count packs put one dot dead-on.
+      const stepAng = arcLen / dist;
+      const t = (i - (n - 1) / 2);            // -…–1, 0, 1…+ (centred)
+      const angle = baseAngle + t * stepAng;
+      return {
+        x: origX + Math.cos(angle) * dist,
+        y: origY + Math.sin(angle) * dist,
+      };
     }
-    // Pre-compute ring radii based on the largest group so all packs
-    // are visually consistent within this matrix. Kept tight (≤18% of
-    // cell size) so co-bucketed risks read as ONE cluster — the user
-    // shouldn't infer that an outer-ring item is more critical than
-    // an inner-ring one when they share the same probability × impact.
-    const maxInhSize = Math.max(1, ...[...cellGroups.inherent.values()].map((v) => v.length));
-    const maxResSize = Math.max(1, ...[...cellGroups.residual.values()].map((v) => v.length));
-    const inhRingR = Math.min(cellW, cellH) * 0.16 * (maxInhSize > 1 ? 1 : 0);
-    const resRingR = Math.min(cellW, cellH) * 0.14 * (maxResSize > 1 ? 1 : 0);
+    // Calibrate arc length so the cluster spread is ~1/3 of cell size
+    // — wide enough that co-bucketed dots don't visually merge, narrow
+    // enough that they read as a single "this rating" cluster.
+    const inhArcLen = Math.min(cellW, cellH) * 0.22;
+    const resArcLen = Math.min(cellW, cellH) * 0.20;
 
     const markers = items.map((r) => {
       const inh = getInherent(r);
       const res = getResidual(r);
-      const inhKey = `${Math.max(1, inh.probability)},${Math.max(1, inh.impact)}`;
-      const resKey = `${Math.max(1, res.probability)},${Math.max(1, res.impact)}`;
+      const inhP = Math.max(1, inh.probability);
+      const inhI = Math.max(1, inh.impact);
+      const resP = Math.max(1, res.probability);
+      const resI = Math.max(1, res.impact);
+      const inhKey = `${inhP},${inhI}`;
+      const resKey = `${resP},${resI}`;
       const inhGroup = cellGroups.inherent.get(inhKey);
       const resGroup = cellGroups.residual.get(resKey);
       const inhIdx = inhGroup.indexOf(r.id);
       const resIdx = resGroup.indexOf(r.id);
-      const inhOff = packOffset(inhIdx, inhGroup.length, inhRingR);
-      const resOff = packOffset(resIdx, resGroup.length, resRingR);
-      const xInh = padL + (Math.max(1, inh.probability) - 0.5) * cellW + inhOff.dx;
-      const yInh = padT + (5 - Math.max(1, inh.impact) + 0.5) * cellH + inhOff.dy;
-      const xRes = padL + (Math.max(1, res.probability) - 0.5) * cellW + resOff.dx;
-      const yRes = padT + (5 - Math.max(1, res.impact) + 0.5) * cellH + resOff.dy;
+      const inhPos = arcPosition(inhP, inhI, inhIdx, inhGroup.length, inhArcLen);
+      const resPos = arcPosition(resP, resI, resIdx, resGroup.length, resArcLen);
+      const xInh = inhPos.x;
+      const yInh = inhPos.y;
+      const xRes = resPos.x;
+      const yRes = resPos.y;
       const isOpp = (r.kind || 'risk') === 'opportunity';
       // "Moved" now compares CELL identity (not pixel position) so the
       // arrow only renders when the residual is in a different bucket
