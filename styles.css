@@ -3925,6 +3925,16 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
 .b-tick { fill: var(--text-faint); font-size: 10px; }
 .b-ytick line { stroke: var(--text-faint); stroke-width: 1; }
 .b-ytick text { fill: var(--text-faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+/* Minor vertical gridlines marking each month boundary. Quiet stroke
+   so they help the eye line up the month labels at the axis without
+   competing with the actuals area or the budget line. */
+.b-month-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+  opacity: .55;
+  pointer-events: none;
+}
 
 /* Cost centre input on components page */
 .row .component-cc {

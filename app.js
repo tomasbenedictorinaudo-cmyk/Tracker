@@ -8335,6 +8335,15 @@
         return `<text class="b-tick" x="${xMid(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${w.start.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</text>`;
       }).join('');
 
+      // Minor vertical gridlines at each month boundary — one line at
+      // each group's left edge. Skip the very first one because the chart
+      // border already shows that x = padL. Quiet stroke; sits BEHIND
+      // the actuals area so it doesn't distract from the data.
+      const monthGrid = monthGroups.slice(1).map((g) => {
+        const x = xLeft(g.firstIdx).toFixed(1);
+        return `<line class="b-month-grid" x1="${x}" x2="${x}" y1="${padT}" y2="${(padT + innerH).toFixed(1)}" />`;
+      }).join('');
+
       const yTicks = [0, maxY / 2, maxY].map((v) =>
         `<g class="b-ytick">
           <line x1="${padL - 3}" x2="${padL}" y1="${yFor(v).toFixed(1)}" y2="${yFor(v).toFixed(1)}" />
@@ -8343,6 +8352,7 @@
 
       svg.innerHTML = `
         ${yTicks}
+        ${monthGrid}
         ${areas}
         <path class="b-budget-line" d="${linePath}" />
         ${todayLine}

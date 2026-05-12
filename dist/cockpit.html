@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-12T16:55:30.729Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-12T16:59:28.871Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3934,6 +3934,16 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
 .b-tick { fill: var(--text-faint); font-size: 10px; }
 .b-ytick line { stroke: var(--text-faint); stroke-width: 1; }
 .b-ytick text { fill: var(--text-faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+/* Minor vertical gridlines marking each month boundary. Quiet stroke
+   so they help the eye line up the month labels at the axis without
+   competing with the actuals area or the budget line. */
+.b-month-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 4;
+  opacity: .55;
+  pointer-events: none;
+}
 
 /* Cost centre input on components page */
 .row .component-cc {
@@ -14759,6 +14769,15 @@ body.is-row-dragging *        { user-select: none !important; }
         return `<text class="b-tick" x="${xMid(i).toFixed(1)}" y="${H - 12}" text-anchor="middle">${w.start.toLocaleDateString(undefined, { month: 'short', year: '2-digit' })}</text>`;
       }).join('');
 
+      // Minor vertical gridlines at each month boundary — one line at
+      // each group's left edge. Skip the very first one because the chart
+      // border already shows that x = padL. Quiet stroke; sits BEHIND
+      // the actuals area so it doesn't distract from the data.
+      const monthGrid = monthGroups.slice(1).map((g) => {
+        const x = xLeft(g.firstIdx).toFixed(1);
+        return `<line class="b-month-grid" x1="${x}" x2="${x}" y1="${padT}" y2="${(padT + innerH).toFixed(1)}" />`;
+      }).join('');
+
       const yTicks = [0, maxY / 2, maxY].map((v) =>
         `<g class="b-ytick">
           <line x1="${padL - 3}" x2="${padL}" y1="${yFor(v).toFixed(1)}" y2="${yFor(v).toFixed(1)}" />
@@ -14767,6 +14786,7 @@ body.is-row-dragging *        { user-select: none !important; }
 
       svg.innerHTML = `
         ${yTicks}
+        ${monthGrid}
         ${areas}
         <path class="b-budget-line" d="${linePath}" />
         ${todayLine}
