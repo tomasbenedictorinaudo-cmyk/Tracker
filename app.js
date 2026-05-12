@@ -8108,8 +8108,22 @@
     function drawList() {
       const list = $('#budgetsList');
       if (!ccs.length) { list.innerHTML = ''; return; }
+      // Apply the topbar search to the cost-centre list. A match counts
+      // when the query is found in the CC code itself OR in the name of
+      // any component allocated to that CC — so typing "avionics" still
+      // narrows to the CC its components live under, even if the CC code
+      // is opaque.
+      const proj = curProject();
+      const componentsByCC = (cc) => (proj.components || []).filter((c) => c.costCenter === cc);
+      const visible = ccs.filter((cc) =>
+        matchesSearch(cc, componentsByCC(cc).map((c) => c.name).join(' '))
+      );
+      if (!visible.length) {
+        list.innerHTML = `<div class="empty">No cost centres match the current search.</div>`;
+        return;
+      }
       const weeks = weekStarts(state.settings.budgetWeeks);
-      list.innerHTML = ccs.map((cc) => {
+      list.innerHTML = visible.map((cc) => {
         const safe = cc.replace(/[^A-Za-z0-9_-]/g, '_');
         return `
           <div class="budget-card" data-cc="${escapeHTML(cc)}">
@@ -8121,7 +8135,7 @@
             <div class="budget-chart-wrap"><svg class="budget-chart" id="chart-${safe}"></svg></div>
           </div>`;
       }).join('');
-      ccs.forEach((cc) => drawChart(cc, weeks));
+      visible.forEach((cc) => drawChart(cc, weeks));
     }
 
     function drawChart(cc, weeks) {
