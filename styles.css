@@ -3144,19 +3144,46 @@ body.is-card-dragging * { cursor: grabbing !important; }
   stroke-width: 2.5;
 }
 
-/* Bubbles view — single packed pile, importance-sized. */
+/* Bubbles view — single packed pile, importance-sized.
+   Inner scroller pans the SVG when zoomed beyond the viewport. */
 .op-list.op-view-bubbles { display: block; }
 .op-bubbles-shell {
   background: var(--bg-1);
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  padding: 14px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.op-bubbles-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+}
+.op-bubbles-toolbar .ghost { padding: 3px 10px; font-size: 12px; min-width: 30px; }
+.op-bubbles-zoom-val {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  min-width: 48px;
+  text-align: center;
+}
+.op-bubbles-scroll {
+  /* Tall, scrollable viewport — the SVG renders at its natural pixel
+     size (width/height attributes set by drawBubblesView from
+     baseW × zoom) and scrolls within this box. Ctrl/⌘ + wheel
+     toggles to zoom (handled in JS); plain wheel pans. */
+  height: 72vh;
+  min-height: 480px;
+  overflow: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
 }
 .op-bubbles-svg {
-  width: 100%;
   display: block;
-  height: 60vh;
-  min-height: 360px;
+  /* width / height set inline by drawBubblesView */
 }
 .op-bubble-g { cursor: pointer; }
 .op-bubble-lbl {
@@ -3164,11 +3191,6 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-weight: 600;
   pointer-events: none;
   letter-spacing: -.01em;
-}
-.op-bubbles-legend {
-  margin-top: 10px;
-  font-size: 11px;
-  color: var(--text-faint);
 }
 .op-leg-hint code { background: var(--bg-2); padding: 0 4px; border-radius: 3px; }
 

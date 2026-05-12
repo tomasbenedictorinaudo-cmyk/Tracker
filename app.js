@@ -2417,7 +2417,7 @@
 
   // Persistent filter / sort state for the Open Points page (volatile; not
   // in state because it's pure UI).
-  const opFilterState = { q: '', component: '', criticality: '', priority: '', progress: '', sort: 'manual', view: 'list' };
+  const opFilterState = { q: '', component: '', criticality: '', priority: '', progress: '', sort: 'manual', view: 'list', bubbleZoom: 1 };
   // Severity / priority rank used by both Matrix (cell location) and
   // Bubbles (importance score). Higher = worse.
   const _OP_RANK = { low: 1, med: 2, high: 3, critical: 4 };
@@ -2994,50 +2994,120 @@
     // ─── Bubbles view: single packed circle pile, importance-sized ────
     function drawBubblesView(items) {
       const list = $('#opList');
-      // One big SVG; bubble size = importance score (criticality × priority
-      // × log-age × step-shrink). Colour = component (severity fallback).
-      // Sort largest first so the simulation has a stable order.
-      const W = 1100, H = 520;
+      // Bigger natural canvas (1600 × 900) than before so bubbles have
+      // room to breathe; the wrapper scrolls horizontally + vertically
+      // when the zoomed SVG exceeds the visible area. Sort largest first
+      // so the simulation has a stable order.
+      const baseW = 1600, baseH = 900;
       const bubbles = items.slice()
         .sort((a, b) => _opImportance(b) - _opImportance(a))
         .map((op) => {
-          const r   = 10 + Math.sqrt(_opImportance(op)) * 5;
+          // Slightly larger base radius — more space for labels inside.
+          const r   = 14 + Math.sqrt(_opImportance(op)) * 6;
           const cmp = findComponent(proj, op.component);
           const c   = cmp ? componentColor(cmp.color) : null;
           const fallbackRgb = CRITICALITY_RGB[op.criticality || 'med'];
           const rgb = c ? c.rgb : fallbackRgb;
           return { op, r, rgb };
         });
-      packBubbles(bubbles, W, H, 2);
-      const fontFor = (r) => Math.max(9, Math.min(13, Math.round(r * 0.36)));
-      const labelOf = (op) => {
+      // pad = 14 (was 2): bubbles keep a generous gap so neighbouring
+      // labels don't visually run into each other.
+      packBubbles(bubbles, baseW, baseH, 14);
+      const fontFor = (r) => Math.max(11, Math.min(15, Math.round(r * 0.34)));
+      const labelOf = (op, r) => {
         const t = (op.title || '').trim();
-        return t.length > 26 ? t.slice(0, 24) + '…' : t;
+        // Bigger bubbles can carry longer labels — cap ramps with radius
+        // so giant bubbles can show ~52 chars while small ones still
+        // clamp at ~14.
+        const maxLen = Math.max(14, Math.min(56, Math.round(r * 1.7)));
+        return t.length > maxLen ? t.slice(0, maxLen - 2) + '…' : t;
       };
+      // Multi-line label support — break the title every ~ceil(r) chars
+      // so the text wraps inside the circle instead of running off the
+      // edge. Bigger bubbles → more lines.
+      const wrapLines = (op, r) => {
+        const max = Math.max(10, Math.min(36, Math.round(r * 1.1)));
+        const words = (op.title || '').trim().split(/\s+/);
+        const lines = [];
+        let line = '';
+        for (const w of words) {
+          if (!line.length) { line = w; continue; }
+          if ((line + ' ' + w).length <= max) line += ' ' + w;
+          else { lines.push(line); line = w; }
+        }
+        if (line) lines.push(line);
+        // Bigger bubbles get up to 3 lines; smaller get 1.
+        const maxLines = r > 38 ? 3 : r > 26 ? 2 : 1;
+        if (lines.length > maxLines) {
+          lines.length = maxLines;
+          lines[maxLines - 1] = (lines[maxLines - 1] || '').replace(/.{0,3}$/, '…');
+        }
+        return lines;
+      };
+      const zoom = Math.max(0.4, Math.min(3, opFilterState.bubbleZoom || 1));
+      const renderW = Math.round(baseW * zoom);
+      const renderH = Math.round(baseH * zoom);
       list.innerHTML = `
         <div class="op-bubbles-shell">
-          <svg class="op-bubbles-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet">
-            ${bubbles.map((b) => {
-              const ageDays   = _opAgeDays(b.op);
-              const stepRatio = _opStepsRatio(b.op);
-              const stepText  = (b.op.steps || []).length ? `${(b.op.steps || []).filter((s) => s.done).length}/${(b.op.steps || []).length} steps` : 'no steps';
-              const cmp       = findComponent(proj, b.op.component);
-              const compName  = cmp ? cmp.name : '— no component —';
-              const tip       = `${b.op.title}\n${compName}\nAge: ${ageDays}d · ${stepText}\nCriticality: ${CRITICALITY_LABEL[b.op.criticality || 'med']}\nPriority: ${priorityLevel(b.op.priorityLevel).label}`;
-              return `
-                <g class="op-bubble-g" data-op-id="${escapeHTML(b.op.id)}">
-                  <circle class="op-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="rgba(${b.rgb}, .50)" stroke="rgb(${b.rgb})" stroke-width="1.5">
-                    <title>${escapeHTML(tip)}</title>
-                  </circle>
-                  ${b.r > 18 ? `<text class="op-bubble-lbl" x="${b.x.toFixed(1)}" y="${(b.y + 4).toFixed(1)}" text-anchor="middle" font-size="${fontFor(b.r)}">${escapeHTML(labelOf(b.op))}</text>` : ''}
-                </g>`;
-            }).join('')}
-          </svg>
-          <div class="op-bubbles-legend">
-            <span class="op-leg-hint">Bubble size = composite importance (criticality × priority × age, dampened by resolution progress). Colour = component.</span>
+          <div class="op-bubbles-toolbar">
+            <button type="button" class="ghost" id="opBzOut"   title="Zoom out (Ctrl+wheel)">−</button>
+            <span class="op-bubbles-zoom-val" id="opBzVal">${Math.round(zoom * 100)}%</span>
+            <button type="button" class="ghost" id="opBzIn"    title="Zoom in (Ctrl+wheel)">+</button>
+            <button type="button" class="ghost" id="opBzReset" title="Reset to 100%">100%</button>
+            <button type="button" class="ghost" id="opBzFit"   title="Fit width">⤢ Fit</button>
+            <span class="op-leg-hint" style="margin-left: 10px;">Bubble size = composite importance · Colour = component · Click any bubble to jump to its row</span>
+          </div>
+          <div class="op-bubbles-scroll" id="opBubblesScroll">
+            <svg class="op-bubbles-svg" id="opBubblesSvg" viewBox="0 0 ${baseW} ${baseH}" width="${renderW}" height="${renderH}">
+              ${bubbles.map((b) => {
+                const ageDays   = _opAgeDays(b.op);
+                const stepText  = (b.op.steps || []).length ? `${(b.op.steps || []).filter((s) => s.done).length}/${(b.op.steps || []).length} steps` : 'no steps';
+                const cmp       = findComponent(proj, b.op.component);
+                const compName  = cmp ? cmp.name : '— no component —';
+                const tip       = `${b.op.title}\n${compName}\nAge: ${ageDays}d · ${stepText}\nCriticality: ${CRITICALITY_LABEL[b.op.criticality || 'med']}\nPriority: ${priorityLevel(b.op.priorityLevel).label}`;
+                let labelSvg = '';
+                if (b.r > 14) {
+                  const fs    = fontFor(b.r);
+                  const lines = wrapLines(b.op, b.r);
+                  // Stack lines vertically centred on the bubble.
+                  const startDy = -((lines.length - 1) * fs * 0.55);
+                  labelSvg = lines.map((ln, i) =>
+                    `<text class="op-bubble-lbl" x="${b.x.toFixed(1)}" y="${(b.y + startDy + i * fs * 1.1 + 4).toFixed(1)}" text-anchor="middle" font-size="${fs}">${escapeHTML(ln)}</text>`
+                  ).join('');
+                }
+                return `
+                  <g class="op-bubble-g" data-op-id="${escapeHTML(b.op.id)}">
+                    <circle class="op-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="rgba(${b.rgb}, .50)" stroke="rgb(${b.rgb})" stroke-width="1.5">
+                      <title>${escapeHTML(tip)}</title>
+                    </circle>
+                    ${labelSvg}
+                  </g>`;
+              }).join('')}
+            </svg>
           </div>
         </div>`;
       wireBubbleClicks(list);
+      // Zoom controls — buttons re-set opFilterState.bubbleZoom and
+      // re-render only the bubbles view to keep the packing stable.
+      const applyZoom = (z) => {
+        opFilterState.bubbleZoom = Math.max(0.4, Math.min(3, z));
+        drawBubblesView(items);
+      };
+      list.querySelector('#opBzOut')?.addEventListener('click',   () => applyZoom(zoom - 0.2));
+      list.querySelector('#opBzIn')?.addEventListener('click',    () => applyZoom(zoom + 0.2));
+      list.querySelector('#opBzReset')?.addEventListener('click', () => applyZoom(1));
+      list.querySelector('#opBzFit')?.addEventListener('click',   () => {
+        const sc = list.querySelector('#opBubblesScroll');
+        if (sc) applyZoom(sc.clientWidth / baseW);
+      });
+      // Ctrl/⌘ + wheel inside the scroller zooms; plain wheel scrolls
+      // (default behaviour).
+      list.querySelector('#opBubblesScroll')?.addEventListener('wheel', (e) => {
+        if (!(e.ctrlKey || e.metaKey)) return;
+        e.preventDefault();
+        const step = e.deltaY < 0 ? 0.12 : -0.12;
+        applyZoom(zoom + step);
+      }, { passive: false });
     }
 
     // Both bubble views share the same click affordance: clicking a
