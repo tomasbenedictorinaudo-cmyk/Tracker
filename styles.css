@@ -3793,8 +3793,16 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
 .bk-v.ok { color: var(--ok); }
 .bk-v.bad { color: var(--bad); }
 
-.budget-chart-wrap { position: relative; }
-.budget-chart { width: 100%; height: 240px; display: block; user-select: none; }
+.budget-chart-wrap {
+  position: relative;
+  /* Each chart scrolls horizontally on its own — wide datasets keep a
+     comfortable per-week column density (drawChart computes the SVG
+     width dynamically) instead of being squished to fit the panel. */
+  overflow-x: auto;
+}
+/* SVG width is set inline by drawChart (matches the viewBox so the
+   chart never gets distorted). Height stays fixed at 240px. */
+.budget-chart { height: 240px; display: block; user-select: none; }
 .b-actual { fill: rgba(110,168,255,.55); }
 .b-actual.past   { fill: rgba(110,168,255,.7); }
 .b-actual.future { fill: rgba(110,168,255,.3); }

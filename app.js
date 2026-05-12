@@ -8046,13 +8046,22 @@
       ].join('');
 
       const svg = document.getElementById(`chart-${safe}`);
-      const W = 1100, H = 240;
+      const H = 240;
       const padL = 64, padR = 18, padT = 14, padB = 32;
+      // Allocate a comfortable per-week column on screen (~22 px) so a
+      // 52-week year renders ~1144 px wide; the container scrolls
+      // horizontally when this exceeds the panel width. Floor at 800 px
+      // so short windows still have a usable axis range.
+      const WEEK_PX = 22;
+      const minW   = 800;
+      const W      = Math.max(minW, weeks.length * WEEK_PX);
       const innerW = W - padL - padR, innerH = H - padT - padB;
+      // viewBox AND inline width set to the same number — no stretching,
+      // text and lines render at their natural aspect ratio. Default
+      // preserveAspectRatio (xMidYMid meet) is fine here.
       svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-      // 'none' makes the SVG stretch to fill its rendered box exactly, so
-      // screen-X / screen-Y → viewBox coords is a straight scale (no letterbox).
-      svg.setAttribute('preserveAspectRatio', 'none');
+      svg.removeAttribute('preserveAspectRatio');
+      svg.style.width = W + 'px';
 
       const xLeft = (i) => padL + (i / weeks.length) * innerW;
       const xMid  = (i) => padL + ((i + 0.5) / weeks.length) * innerW;
