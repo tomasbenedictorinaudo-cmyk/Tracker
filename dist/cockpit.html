@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-12T16:59:28.871Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-12T17:18:47.295Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3762,6 +3762,29 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
   flex-wrap: wrap;
 }
 .budget-head h3 { margin: 0; font-size: 15px; font-family: ui-monospace, SFMono-Regular, monospace; }
+/* Inline date-range pair — quiet styling so it doesn't compete with
+   the cost-centre title or the budget legend. */
+.budget-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.budget-range input[type="date"] {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  cursor: pointer;
+  color-scheme: dark;
+}
+.budget-range input[type="date"]:hover { border-color: var(--line); background: var(--bg-2); }
+.budget-range input[type="date"]:focus { border-color: var(--accent-2); background: var(--bg-2); color: var(--text); outline: none; }
+.budget-range .bc-range-sep { color: var(--text-faint); }
 .budget-comps { display: flex; flex-wrap: wrap; gap: 6px; }
 .budget-kpis {
   display: grid;
@@ -14439,14 +14462,11 @@ body.is-row-dragging *        { user-select: none !important; }
     if (state.settings.budgetGroupBy !== 'component' && state.settings.budgetGroupBy !== 'person') {
       state.settings.budgetGroupBy = 'component';
     }
-    // Visible time-window for the budget charts, in weeks. Stored on
-    // settings so it survives reloads. Allowed: 52 (1 y), 104 (2 y),
-    // 156 (3 y), 260 (5 y). Default to 2 y so users have meaningful
-    // horizontal scroll out of the box.
-    const ALLOWED_BUDGET_WEEKS = [52, 104, 156, 260];
-    if (!ALLOWED_BUDGET_WEEKS.includes(state.settings.budgetWeeks)) {
-      state.settings.budgetWeeks = 104;
-    }
+    // Per-cost-centre date ranges. Each entry is { start, end } in
+    // ISO YYYY-MM-DD, snapped to the previous Monday at read-time so
+    // the week grid stays aligned. Missing entries fall back to the
+    // default (26 w past + 78 w future, ≈ 2 years centred on now).
+    state.settings.budgetRanges = state.settings.budgetRanges || {};
 
     const view = document.createElement('div');
     view.className = 'view';
@@ -14466,12 +14486,6 @@ body.is-row-dragging *        { user-select: none !important; }
             <button class="seg-btn ${state.settings.budgetView === 'cost' ? 'active' : ''}" data-budget-view="cost">€ Cost</button>
             <button class="seg-btn ${state.settings.budgetView === 'hours' ? 'active' : ''}" data-budget-view="hours">⏱ Hours</button>
           </div>
-          <select id="budgetWeeks" title="Time window — how many weeks each chart spans (horizontal scroll covers the full range)">
-            <option value="52"  ${state.settings.budgetWeeks === 52  ? 'selected' : ''}>1 year (52 w)</option>
-            <option value="104" ${state.settings.budgetWeeks === 104 ? 'selected' : ''}>2 years (104 w)</option>
-            <option value="156" ${state.settings.budgetWeeks === 156 ? 'selected' : ''}>3 years (156 w)</option>
-            <option value="260" ${state.settings.budgetWeeks === 260 ? 'selected' : ''}>5 years (260 w)</option>
-          </select>
           <button class="primary" id="btnNewCC">+ Cost centre</button>
         </div>
       </div>
@@ -14495,15 +14509,6 @@ body.is-row-dragging *        { user-select: none !important; }
         drawList();
       });
     });
-    // Time-window selector — persists to state.settings.budgetWeeks and
-    // re-draws every cost-centre chart at the new horizon.
-    view.querySelector('#budgetWeeks')?.addEventListener('change', (e) => {
-      const n = parseInt(e.target.value, 10);
-      if (!ALLOWED_BUDGET_WEEKS.includes(n)) return;
-      state.settings.budgetWeeks = n;
-      saveState();
-      drawList();
-    });
     $('#btnNewCC').addEventListener('click', () => {
       if (curProjectIsMerged()) { toast('Pick a single project first'); return; }
       const code = prompt('New cost-centre name:');
@@ -14519,21 +14524,41 @@ body.is-row-dragging *        { user-select: none !important; }
       render();
     });
 
-    function weekStarts(n) {
-      const total = ALLOWED_BUDGET_WEEKS.includes(n)
-        ? n
-        : (state.settings.budgetWeeks || 104);
-      // Roughly 25% of the window is past so the user always has some
-      // historical context to anchor against. Floor at 12 weeks past so
-      // even the 52-week window keeps a quarter of past visible.
-      const pastWeeks = Math.max(12, Math.round(total * 0.25));
+    // Snap an arbitrary date to the Monday of its week (Monday = 1).
+    function snapToMonday(d) {
+      const out = new Date(d); out.setHours(0, 0, 0, 0);
+      const diff = (out.getDay() + 6) % 7; // days to subtract to reach Mon
+      return new Date(out.getTime() - diff * dayMs);
+    }
+    // Default range for a freshly-created CC: 26 past + 78 future weeks
+    // centred on this Monday — same total span as the old 2-year default.
+    function defaultBudgetRange() {
       const today = new Date(); today.setHours(0, 0, 0, 0);
-      let monday = new Date(today);
-      while (monday.getDay() !== 1) monday = new Date(monday.getTime() - dayMs);
-      const start = new Date(monday.getTime() - pastWeeks * 7 * dayMs);
+      const mon = snapToMonday(today);
+      const start = new Date(mon.getTime() - 26 * 7 * dayMs);
+      const end   = new Date(mon.getTime() + 78 * 7 * dayMs);
+      return { start: fmtISO(start), end: fmtISO(end) };
+    }
+    // Read the persisted range for `cc`, falling back to the default.
+    // Clamps end >= start + 4 weeks so the chart always has a usable axis.
+    function getBudgetRange(cc) {
+      const stored = state.settings.budgetRanges?.[cc];
+      const def = defaultBudgetRange();
+      const start = stored?.start || def.start;
+      let end = stored?.end || def.end;
+      const startD = snapToMonday(parseDate(start) || new Date());
+      let   endD   = snapToMonday(parseDate(end)   || new Date());
+      const minEnd = new Date(startD.getTime() + 4 * 7 * dayMs);
+      if (endD.getTime() < minEnd.getTime()) endD = minEnd;
+      return { start: fmtISO(startD), end: fmtISO(endD) };
+    }
+    // Build the per-week table for a given range.
+    function weekStartsForRange(range) {
+      const startMon = snapToMonday(parseDate(range.start));
+      const endMon   = snapToMonday(parseDate(range.end));
       const out = [];
-      for (let i = 0; i < total; i++) {
-        const s = new Date(start.getTime() + i * 7 * dayMs);
+      for (let t = startMon.getTime(); t <= endMon.getTime(); t += 7 * dayMs) {
+        const s = new Date(t);
         out.push({ start: s, isoStart: fmtISO(s) });
       }
       return out;
@@ -14542,11 +14567,6 @@ body.is-row-dragging *        { user-select: none !important; }
     function drawList() {
       const list = $('#budgetsList');
       if (!ccs.length) { list.innerHTML = ''; return; }
-      // Apply the topbar search to the cost-centre list. A match counts
-      // when the query is found in the CC code itself OR in the name of
-      // any component allocated to that CC — so typing "avionics" still
-      // narrows to the CC its components live under, even if the CC code
-      // is opaque.
       const proj = curProject();
       const componentsByCC = (cc) => (proj.components || []).filter((c) => c.costCenter === cc);
       const visible = ccs.filter((cc) =>
@@ -14556,20 +14576,53 @@ body.is-row-dragging *        { user-select: none !important; }
         list.innerHTML = `<div class="empty">No cost centres match the current search.</div>`;
         return;
       }
-      const weeks = weekStarts(state.settings.budgetWeeks);
       list.innerHTML = visible.map((cc) => {
         const safe = cc.replace(/[^A-Za-z0-9_-]/g, '_');
+        const range = getBudgetRange(cc);
         return `
           <div class="budget-card" data-cc="${escapeHTML(cc)}">
             <div class="budget-head">
               <h3>${escapeHTML(cc)}</h3>
+              <span class="budget-range" title="Time range for this cost centre — snaps to weeks">
+                <input type="date" class="bc-start" data-cc="${escapeHTML(cc)}" value="${range.start}" />
+                <span class="bc-range-sep" aria-hidden="true">→</span>
+                <input type="date" class="bc-end"   data-cc="${escapeHTML(cc)}" value="${range.end}" />
+              </span>
               <div class="budget-legend" id="legend-${safe}"></div>
             </div>
             <div class="budget-kpis" id="kpis-${safe}"></div>
             <div class="budget-chart-wrap"><svg class="budget-chart" id="chart-${safe}"></svg></div>
           </div>`;
       }).join('');
-      visible.forEach((cc) => drawChart(cc, weeks));
+      visible.forEach((cc) => {
+        const weeks = weekStartsForRange(getBudgetRange(cc));
+        drawChart(cc, weeks);
+      });
+      // Wire per-CC range inputs. On change, persist the new range and
+      // redraw only the affected card — the others stay scrolled where
+      // the user left them.
+      $$('.bc-start, .bc-end', list).forEach((inp) => {
+        inp.addEventListener('change', () => {
+          const cc = inp.dataset.cc;
+          const card = inp.closest('.budget-card');
+          if (!cc || !card) return;
+          const startInp = card.querySelector('.bc-start');
+          const endInp   = card.querySelector('.bc-end');
+          state.settings.budgetRanges = state.settings.budgetRanges || {};
+          state.settings.budgetRanges[cc] = {
+            start: startInp.value || getBudgetRange(cc).start,
+            end:   endInp.value   || getBudgetRange(cc).end,
+          };
+          saveState();
+          // Snap-back the input values to the resolved (possibly clamped)
+          // range so the user sees the actual displayed window.
+          const eff = getBudgetRange(cc);
+          startInp.value = eff.start;
+          endInp.value   = eff.end;
+          const weeks = weekStartsForRange(eff);
+          drawChart(cc, weeks);
+        });
+      });
     }
 
     function drawChart(cc, weeks) {
@@ -17175,9 +17228,20 @@ body.is-row-dragging *        { user-select: none !important; }
     s.settings.holidayCountries = s.settings.holidayCountries || [];
     if (s.settings.budgetView !== 'hours' && s.settings.budgetView !== 'cost') s.settings.budgetView = 'cost';
     if (s.settings.budgetGroupBy !== 'component' && s.settings.budgetGroupBy !== 'person') s.settings.budgetGroupBy = 'component';
-    // Budgets time horizon — weeks shown on each cost-centre chart.
-    // Allowed: 52 / 104 / 156 / 260. Defaults to 2 years.
+    // Legacy global window — replaced by per-CC date ranges (below).
+    // Kept on the schema for backward compat with older exports, but no
+    // longer read at render time.
     if (![52, 104, 156, 260].includes(s.settings.budgetWeeks)) s.settings.budgetWeeks = 104;
+    // Per-cost-centre date range. Map of cc-code → { start, end } in
+    // ISO YYYY-MM-DD; missing entries fall back to a 2-year default
+    // centred on today. Filter out malformed entries.
+    if (!s.settings.budgetRanges || typeof s.settings.budgetRanges !== 'object') s.settings.budgetRanges = {};
+    Object.keys(s.settings.budgetRanges).forEach((k) => {
+      const v = s.settings.budgetRanges[k];
+      if (!v || typeof v.start !== 'string' || typeof v.end !== 'string') {
+        delete s.settings.budgetRanges[k];
+      }
+    });
     // Notes panel width in pixels — added later; default keeps full-screen layouts breathing.
     if (typeof s.settings.notesWidth !== 'number' || s.settings.notesWidth < 200 || s.settings.notesWidth > 800) {
       s.settings.notesWidth = 340;

@@ -3753,6 +3753,29 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
   flex-wrap: wrap;
 }
 .budget-head h3 { margin: 0; font-size: 15px; font-family: ui-monospace, SFMono-Regular, monospace; }
+/* Inline date-range pair — quiet styling so it doesn't compete with
+   the cost-centre title or the budget legend. */
+.budget-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.budget-range input[type="date"] {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  cursor: pointer;
+  color-scheme: dark;
+}
+.budget-range input[type="date"]:hover { border-color: var(--line); background: var(--bg-2); }
+.budget-range input[type="date"]:focus { border-color: var(--accent-2); background: var(--bg-2); color: var(--text); outline: none; }
+.budget-range .bc-range-sep { color: var(--text-faint); }
 .budget-comps { display: flex; flex-wrap: wrap; gap: 6px; }
 .budget-kpis {
   display: grid;
