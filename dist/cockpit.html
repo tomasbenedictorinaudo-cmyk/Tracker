@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-05-12T17:22:38.437Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-05-12T17:27:14.744Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -21025,6 +21025,31 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       wireTimelineDragPan(view);
       wireTimelineHoverMarker(view);
       wireTimelineEventDrag(view);
+      // Today / format-toggle / first mount: park scrollLeft on today.
+      // Timeline windows can stretch years to cover historical records,
+      // so the freshly-rendered .tl-scroll starts at scrollLeft = 0 and
+      // today may be far to the right — clicking "Today" used to look
+      // like it did nothing because the visible viewport hadn't moved.
+      if (calState.scrollToTodayPending) {
+        const tlScroll = view.querySelector('.tl-scroll');
+        if (tlScroll && calState._tlWindowStartMs != null) {
+          const todayMs = parseDate(todayISO()).getTime();
+          const pxPerDay = clamp(calState.tlPxPerDay || 26, 0.5, 80);
+          const todayX = (todayMs - calState._tlWindowStartMs) / dayMs * pxPerDay;
+          const max = Math.max(0, tlScroll.scrollWidth - tlScroll.clientWidth);
+          // Place today ~30% from the left of the viewport — matches the
+          // ~30% "history lead" the window-math already builds in.
+          const target = clamp(todayX - tlScroll.clientWidth * 0.30, 0, max);
+          tlScroll.scrollLeft = target;
+          calState._tlLastScrollLeft = target;
+        }
+        calState.scrollToTodayPending = false;
+      } else if (typeof calState._tlLastScrollLeft === 'number') {
+        // Preserve horizontal scroll across re-renders that aren't an
+        // explicit Today press (e.g. data change while zoomed in).
+        const tlScroll = view.querySelector('.tl-scroll');
+        if (tlScroll) tlScroll.scrollLeft = calState._tlLastScrollLeft;
+      }
     }
 
     // Month view: vertical scroll-to-reveal-more-weeks. When the user
@@ -21196,6 +21221,13 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   function wireTimelineDragPan(viewEl) {
     const scroll = viewEl.querySelector('.tl-scroll');
     if (!scroll) return;
+    // Mirror user-driven scroll into calState so subsequent re-renders
+    // (zoom, data change) restore the position the user was looking at.
+    // The Today button bypasses this by setting scrollToTodayPending,
+    // which the render path consumes BEFORE reading _tlLastScrollLeft.
+    scroll.addEventListener('scroll', () => {
+      calState._tlLastScrollLeft = scroll.scrollLeft;
+    }, { passive: true });
     let active = false;
     let startX = 0;
     let startScrollLeft = 0;
