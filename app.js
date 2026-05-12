@@ -8005,6 +8005,14 @@
     if (state.settings.budgetGroupBy !== 'component' && state.settings.budgetGroupBy !== 'person') {
       state.settings.budgetGroupBy = 'component';
     }
+    // Visible time-window for the budget charts, in weeks. Stored on
+    // settings so it survives reloads. Allowed: 52 (1 y), 104 (2 y),
+    // 156 (3 y), 260 (5 y). Default to 2 y so users have meaningful
+    // horizontal scroll out of the box.
+    const ALLOWED_BUDGET_WEEKS = [52, 104, 156, 260];
+    if (!ALLOWED_BUDGET_WEEKS.includes(state.settings.budgetWeeks)) {
+      state.settings.budgetWeeks = 104;
+    }
 
     const view = document.createElement('div');
     view.className = 'view';
@@ -8024,6 +8032,12 @@
             <button class="seg-btn ${state.settings.budgetView === 'cost' ? 'active' : ''}" data-budget-view="cost">€ Cost</button>
             <button class="seg-btn ${state.settings.budgetView === 'hours' ? 'active' : ''}" data-budget-view="hours">⏱ Hours</button>
           </div>
+          <select id="budgetWeeks" title="Time window — how many weeks each chart spans (horizontal scroll covers the full range)">
+            <option value="52"  ${state.settings.budgetWeeks === 52  ? 'selected' : ''}>1 year (52 w)</option>
+            <option value="104" ${state.settings.budgetWeeks === 104 ? 'selected' : ''}>2 years (104 w)</option>
+            <option value="156" ${state.settings.budgetWeeks === 156 ? 'selected' : ''}>3 years (156 w)</option>
+            <option value="260" ${state.settings.budgetWeeks === 260 ? 'selected' : ''}>5 years (260 w)</option>
+          </select>
           <button class="primary" id="btnNewCC">+ Cost centre</button>
         </div>
       </div>
@@ -8047,6 +8061,15 @@
         drawList();
       });
     });
+    // Time-window selector — persists to state.settings.budgetWeeks and
+    // re-draws every cost-centre chart at the new horizon.
+    view.querySelector('#budgetWeeks')?.addEventListener('change', (e) => {
+      const n = parseInt(e.target.value, 10);
+      if (!ALLOWED_BUDGET_WEEKS.includes(n)) return;
+      state.settings.budgetWeeks = n;
+      saveState();
+      drawList();
+    });
     $('#btnNewCC').addEventListener('click', () => {
       if (curProjectIsMerged()) { toast('Pick a single project first'); return; }
       const code = prompt('New cost-centre name:');
@@ -8062,13 +8085,20 @@
       render();
     });
 
-    function weekStarts(n = 52) {
+    function weekStarts(n) {
+      const total = ALLOWED_BUDGET_WEEKS.includes(n)
+        ? n
+        : (state.settings.budgetWeeks || 104);
+      // Roughly 25% of the window is past so the user always has some
+      // historical context to anchor against. Floor at 12 weeks past so
+      // even the 52-week window keeps a quarter of past visible.
+      const pastWeeks = Math.max(12, Math.round(total * 0.25));
       const today = new Date(); today.setHours(0, 0, 0, 0);
       let monday = new Date(today);
       while (monday.getDay() !== 1) monday = new Date(monday.getTime() - dayMs);
-      const start = new Date(monday.getTime() - 12 * 7 * dayMs); // 12w past + 40w future
+      const start = new Date(monday.getTime() - pastWeeks * 7 * dayMs);
       const out = [];
-      for (let i = 0; i < n; i++) {
+      for (let i = 0; i < total; i++) {
         const s = new Date(start.getTime() + i * 7 * dayMs);
         out.push({ start: s, isoStart: fmtISO(s) });
       }
@@ -8078,7 +8108,7 @@
     function drawList() {
       const list = $('#budgetsList');
       if (!ccs.length) { list.innerHTML = ''; return; }
-      const weeks = weekStarts(52);
+      const weeks = weekStarts(state.settings.budgetWeeks);
       list.innerHTML = ccs.map((cc) => {
         const safe = cc.replace(/[^A-Za-z0-9_-]/g, '_');
         return `
@@ -10687,6 +10717,9 @@
     s.settings.holidayCountries = s.settings.holidayCountries || [];
     if (s.settings.budgetView !== 'hours' && s.settings.budgetView !== 'cost') s.settings.budgetView = 'cost';
     if (s.settings.budgetGroupBy !== 'component' && s.settings.budgetGroupBy !== 'person') s.settings.budgetGroupBy = 'component';
+    // Budgets time horizon — weeks shown on each cost-centre chart.
+    // Allowed: 52 / 104 / 156 / 260. Defaults to 2 years.
+    if (![52, 104, 156, 260].includes(s.settings.budgetWeeks)) s.settings.budgetWeeks = 104;
     // Notes panel width in pixels — added later; default keeps full-screen layouts breathing.
     if (typeof s.settings.notesWidth !== 'number' || s.settings.notesWidth < 200 || s.settings.notesWidth > 800) {
       s.settings.notesWidth = 340;
