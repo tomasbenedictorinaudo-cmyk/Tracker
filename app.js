@@ -8232,7 +8232,18 @@
 
       const today = new Date(); today.setHours(0, 0, 0, 0);
       const todayT = today.getTime();
-      const todayIdx = weeks.findIndex((w) => w.start.getTime() === todayT);
+      // Precise X for today inside the chart — find the week that
+      // contains today (start ≤ today < start + 7d) and interpolate by
+      // weekday within that week. Returns null when today is outside
+      // the visible range so the marker disappears cleanly.
+      let todayX = null;
+      const firstStart = weeks[0]?.start.getTime();
+      const lastEnd    = weeks.length ? weeks[weeks.length - 1].start.getTime() + 7 * dayMs : null;
+      if (firstStart != null && todayT >= firstStart && todayT < lastEnd) {
+        const weekIdx = Math.floor((todayT - firstStart) / (7 * dayMs));
+        const dayFrac = ((todayT - firstStart) / dayMs % 7) / 7; // 0..1 within the week
+        todayX = xLeft(weekIdx) + dayFrac * (xLeft(weekIdx + 1) - xLeft(weekIdx));
+      }
 
       const isCostMode = mode === 'cost';
       const groupBy = state.settings.budgetGroupBy;
@@ -8355,9 +8366,9 @@
         </circle>`;
       }).join('');
 
-      const todayLine = todayIdx >= 0
-        ? `<line class="b-today" x1="${xLeft(todayIdx).toFixed(1)}" x2="${xLeft(todayIdx).toFixed(1)}" y1="${padT}" y2="${padT + innerH}" />
-           <text class="b-today-lbl" x="${(xLeft(todayIdx) + 4).toFixed(1)}" y="${padT + 10}">today</text>`
+      const todayLine = todayX != null
+        ? `<line class="b-today" x1="${todayX.toFixed(1)}" x2="${todayX.toFixed(1)}" y1="${padT}" y2="${padT + innerH}" />
+           <text class="b-today-lbl" x="${(todayX + 4).toFixed(1)}" y="${padT + 10}">today</text>`
         : '';
 
       const months = weeks.map((w, i) => {
