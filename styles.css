@@ -5601,8 +5601,43 @@ body.is-row-dragging *        { user-select: none !important; }
   font-weight: 600;
   font-style: italic;
 }
+/* Multi-level list rendering.
+   - Bulleted lists alternate disc → circle → square → disc … by depth.
+   - Numbered lists render compound markers so a level-3 item shows
+     "1.A.2." instead of just "2." (level alternates decimal /
+     upper-alpha / decimal / lower-alpha).
+   Implementation: each OL level has its own counter, and the ::before
+   pseudo-element on each LI concatenates ancestor counters using the
+   per-level style. The LI's natural list marker is suppressed
+   (list-style: none) so we can hand-render. */
 .notes-body ul, .notes-body ol { padding-left: 22px; margin: 6px 0 10px; }
 .notes-body li { margin-bottom: 3px; }
+.notes-body ul                  { list-style-type: disc;   }
+.notes-body ul ul               { list-style-type: circle; }
+.notes-body ul ul ul            { list-style-type: square; }
+.notes-body ul ul ul ul         { list-style-type: disc;   }
+.notes-body ul ul ul ul ul      { list-style-type: circle; }
+.notes-body ul ul ul ul ul ul   { list-style-type: square; }
+
+.notes-body ol                  { counter-reset: nt-lvl1; list-style: none; padding-left: 28px; }
+.notes-body ol > li             { counter-increment: nt-lvl1; position: relative; }
+.notes-body ol > li::before     { content: counter(nt-lvl1, decimal) "."; position: absolute; left: -28px; width: 24px; text-align: right; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+
+.notes-body ol ol               { counter-reset: nt-lvl2; padding-left: 36px; }
+.notes-body ol ol > li          { counter-increment: nt-lvl2; }
+.notes-body ol ol > li::before  { content: counter(nt-lvl1, decimal) "." counter(nt-lvl2, upper-alpha) "."; left: -36px; width: 32px; }
+
+.notes-body ol ol ol            { counter-reset: nt-lvl3; padding-left: 46px; }
+.notes-body ol ol ol > li       { counter-increment: nt-lvl3; }
+.notes-body ol ol ol > li::before { content: counter(nt-lvl1, decimal) "." counter(nt-lvl2, upper-alpha) "." counter(nt-lvl3, decimal) "."; left: -46px; width: 42px; }
+
+.notes-body ol ol ol ol         { counter-reset: nt-lvl4; padding-left: 56px; }
+.notes-body ol ol ol ol > li    { counter-increment: nt-lvl4; }
+.notes-body ol ol ol ol > li::before { content: counter(nt-lvl1, decimal) "." counter(nt-lvl2, upper-alpha) "." counter(nt-lvl3, decimal) "." counter(nt-lvl4, lower-alpha) "."; left: -56px; width: 52px; }
+
+.notes-body ol ol ol ol ol      { counter-reset: nt-lvl5; padding-left: 70px; }
+.notes-body ol ol ol ol ol > li { counter-increment: nt-lvl5; }
+.notes-body ol ol ol ol ol > li::before { content: counter(nt-lvl1, decimal) "." counter(nt-lvl2, upper-alpha) "." counter(nt-lvl3, decimal) "." counter(nt-lvl4, lower-alpha) "." counter(nt-lvl5, decimal) "."; left: -70px; width: 66px; }
 .notes-body i, .notes-body em { font-style: italic; color: var(--text-dim); }
 /* Subtle pulse when a TOC link scrolls a heading into view */
 .notes-body .nt-flash {
@@ -5617,13 +5652,42 @@ body.is-row-dragging *        { user-select: none !important; }
 /* Auto-built table of contents — sits above the editable body */
 .notes-toc {
   border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
   background: var(--bg-2);
   padding: 8px 14px 10px;
-  max-height: 30vh;
+  /* Default height; overridden inline by JS when the user drags the
+     handle (state.settings.notesTocHeight). Min height keeps it usable
+     even after extreme drag-up. */
+  height: 30vh;
+  min-height: 36px;
+  max-height: 70vh;
   overflow-y: auto;
 }
 .notes-toc[hidden] { display: none; }
+/* Drag handle separating the TOC from the editable body. Six-px tall
+   target with a subtle indicator on hover; ns-resize cursor so the
+   affordance is obvious. */
+.notes-toc-resize {
+  height: 6px;
+  margin: 0;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  cursor: ns-resize;
+  position: relative;
+  flex-shrink: 0;
+}
+.notes-toc-resize::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 36px; height: 2px;
+  background: var(--line-2);
+  border-radius: 2px;
+  transform: translate(-50%, -50%);
+  transition: background var(--transition);
+}
+.notes-toc-resize:hover::after { background: var(--accent-2); }
+.notes-toc-resize.is-dragging::after { background: var(--accent-2); }
+.notes-toc-resize[hidden] { display: none; }
 .notes-toc-head {
   font-size: 9.5px;
   font-weight: 700;

@@ -10343,6 +10343,10 @@
     body.innerHTML = html || `<p><i>Notes for <b>${escapeHTML(proj.name)}</b> — type freely. Use the toolbar to format and to insert actions assigned to people.</i></p><p></p>`;
     $('#notesMeta').textContent = proj.name;
     buildNotesToc();
+    // Tag each block's language so the browser's native spellcheck
+    // picks the right dictionary on first open, not just after typing.
+    applyNotesLangDetection();
+    applyNotesTocHeight();
   }
 
   function saveNotesNow() {
@@ -10375,7 +10379,12 @@
       }
       items.push({ id: h.id, text, lvl: parseInt(h.tagName[1], 10) || 3 });
     });
-    if (!items.length) { toc.hidden = true; toc.innerHTML = ''; return; }
+    const resize = $('#notesTocResize');
+    if (!items.length) {
+      toc.hidden = true; toc.innerHTML = '';
+      if (resize) resize.hidden = true;
+      return;
+    }
     toc.innerHTML = `
       <div class="notes-toc-head">Contents</div>
       <ol class="notes-toc-list">
@@ -10385,7 +10394,82 @@
           </li>`).join('')}
       </ol>`;
     toc.hidden = false;
+    if (resize) resize.hidden = false;
+    // Apply the user's persisted TOC height (if any) on every rebuild
+    // — TOC content changes but the chosen visual height should stick.
+    applyNotesTocHeight();
   }
+
+  // Apply state.settings.notesTocHeight (px) to the TOC element. Clamped
+  // to a sensible range so a stale very-small or very-large persisted
+  // value doesn't make the TOC unusable.
+  function applyNotesTocHeight() {
+    const toc = $('#notesToc');
+    if (!toc) return;
+    const h = state.settings?.notesTocHeight;
+    if (typeof h === 'number' && h > 0) {
+      toc.style.height = Math.max(36, Math.min(900, h)) + 'px';
+    } else {
+      toc.style.height = '';
+    }
+  }
+  // ---- Per-line language detection ----------------------------------
+  // Lightweight signature-word detector. Each language has a small set
+  // of high-frequency function words; counting how many of each block's
+  // tokens fall into each language's set gives a usable score for
+  // blocks of ≥ ~6 words. Shorter blocks inherit the nearest previous
+  // block's language so spell-check still uses a sensible dictionary.
+  //
+  // The detector sets each block's `lang` attribute; the browser's
+  // native spellcheck (Path A) picks the matching dictionary, draws
+  // squiggle underlines for unknown words, and supplies its own
+  // right-click suggestions menu — all without our help.
+  const NOTES_LANG_SIGS = {
+    en: new Set(['the','and','of','to','in','is','it','that','for','was','with','this','are','from','have','not','but','they','you','will','can','their','has','one','our','its']),
+    fr: new Set(['le','la','les','des','de','et','que','un','une','est','dans','pour','avec','plus','mais','nous','vous','sont','aux','par','sur','ils','elle','elles','ses','ces','ont','cette','comme','tout','sans','si','où','même','aussi']),
+    de: new Set(['der','die','das','und','ist','von','den','ein','eine','mit','sich','nicht','auch','aber','sind','aus','dem','wenn','wir','sie','ich','zu','auf','für','im','an','des','dass','war','noch','nur','wie','oder','als','bei']),
+    es: new Set(['el','la','los','las','de','que','y','es','un','una','en','para','con','por','sobre','del','sus','este','esta','son','como','más','también','pero','sin','muy','sus','está','han','hay','ese','esa','esto']),
+    it: new Set(['il','la','le','di','e','che','non','un','una','del','dei','per','con','sono','come','più','anche','ma','dove','gli','degli','della','delle','dal','dalla','suoi','questa','questo','molto']),
+    pt: new Set(['o','a','os','as','de','que','e','do','da','em','para','com','não','uma','um','por','isso','mais','ser','muito','está','são','dos','das','isso','também','seu','sua','pelo','pela']),
+  };
+  function detectNotesLang(text) {
+    const tokens = (text || '').toLowerCase().match(/[a-záàâäçéèêëîïôöûùüÿñæœßãõ]+/g) || [];
+    if (tokens.length < 6) return null; // not enough signal
+    let best = null, bestScore = 0;
+    for (const lang of Object.keys(NOTES_LANG_SIGS)) {
+      const sig = NOTES_LANG_SIGS[lang];
+      let hits = 0;
+      for (const t of tokens) if (sig.has(t)) hits++;
+      const score = hits / tokens.length;
+      if (score > bestScore) { best = lang; bestScore = score; }
+    }
+    // Require at least 4 % of tokens to be signature words — guards
+    // against false positives on technical / sparse text.
+    return bestScore >= 0.04 ? best : null;
+  }
+  // Walk every direct block-level descendant and tag it with `lang`.
+  // Short blocks inherit the previous block's language so a one-line
+  // comment doesn't fall back to the browser's UI locale.
+  function applyNotesLangDetection() {
+    const body = $('#notesBody');
+    if (!body) return;
+    const blocks = body.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, blockquote, div');
+    let lastLang = body.getAttribute('lang') || 'en';
+    blocks.forEach((b) => {
+      const lang = detectNotesLang(b.textContent || '') || lastLang;
+      if (b.getAttribute('lang') !== lang) b.setAttribute('lang', lang);
+      lastLang = lang;
+    });
+    if (body.getAttribute('lang') !== lastLang) body.setAttribute('lang', lastLang);
+  }
+  let notesLangTimer = null;
+  function scheduleNotesLangDetection() {
+    clearTimeout(notesLangTimer);
+    // Run after a longer pause than save — language doesn't shift mid-sentence
+    // and the walk has measurable cost on long documents.
+    notesLangTimer = setTimeout(applyNotesLangDetection, 700);
+  }
+
   function scheduleNotesSave() {
     clearTimeout(notesSaveTimer);
     const s = $('#notesSaved');
@@ -10623,6 +10707,41 @@
         saveState();
       });
     }
+    // TOC resize handle — drag vertically to change the table-of-contents
+    // height; double-click to reset to default (~30 vh). Mirrors the
+    // panel-width pattern above.
+    const tocHandle = $('#notesTocResize');
+    const tocEl     = $('#notesToc');
+    if (tocHandle && tocEl) {
+      tocHandle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const startY = e.clientY;
+        const startH = tocEl.getBoundingClientRect().height;
+        tocHandle.classList.add('is-dragging');
+        document.body.classList.add('is-notes-resizing');
+        const onMove = (em) => {
+          const next = Math.round(startH + (em.clientY - startY));
+          state.settings = state.settings || {};
+          state.settings.notesTocHeight = Math.max(36, Math.min(900, next));
+          applyNotesTocHeight();
+        };
+        const onUp = () => {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          tocHandle.classList.remove('is-dragging');
+          document.body.classList.remove('is-notes-resizing');
+          saveState();
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+      tocHandle.addEventListener('dblclick', () => {
+        state.settings = state.settings || {};
+        delete state.settings.notesTocHeight;
+        applyNotesTocHeight();
+        saveState();
+      });
+    }
     // Re-clamp when the window resizes (keeps the panel usable if the user
     // shrinks the viewport while the panel is wide).
     window.addEventListener('resize', () => {
@@ -10674,6 +10793,7 @@
     const body = $('#notesBody');
     body.addEventListener('input', () => {
       scheduleNotesSave();
+      scheduleNotesLangDetection();
       // Update the @/# autocomplete based on what's now under the caret
       const ctx = getMentionContext(body);
       if (ctx) showNotesAutocomplete(ctx);
@@ -10710,6 +10830,26 @@
         e.preventDefault();
         snapshotSelection();
         openQuickAdd('action', {}, (action) => insertActionChip(action));
+      }
+      // Tab / Shift+Tab — indent / outdent inside a list item. Browsers
+      // normally use Tab to move focus; inside a list we want it to
+      // nest. Outside a list, swallow Tab so the editor doesn't lose
+      // focus (matches every other rich-text tool).
+      if (e.key === 'Tab') {
+        const sel = window.getSelection();
+        const node = sel?.anchorNode;
+        if (node) {
+          const inLi = (node.nodeType === 1 ? node : node.parentElement)?.closest('li');
+          if (inLi) {
+            e.preventDefault();
+            document.execCommand(e.shiftKey ? 'outdent' : 'indent');
+            scheduleNotesSave();
+            return;
+          }
+        }
+        // Outside a list — keep Tab as a no-op so focus doesn't escape
+        // (rather than moving focus to the toolbar).
+        e.preventDefault();
       }
     });
     body.addEventListener('click', (e) => {
