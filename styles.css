@@ -4311,8 +4311,21 @@ input[type="date"].reg-inp {
 .reg-row:hover .reg-late-tail { filter: brightness(1.15); }
 
 /* Risks & Opportunities styling */
-.ro-row { display: grid; grid-template-columns: 22px 1.6fr auto auto; align-items: center; gap: 12px; }
+.ro-row { display: grid; grid-template-columns: 22px auto 1.6fr auto auto; align-items: center; gap: 12px; }
 .ro-icon { font-size: 16px; line-height: 1; text-align: center; }
+.ro-ident {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-3);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.ro-row.kind-risk        .ro-ident { color: rgba(248,113,113,.95); background: rgba(248,113,113,.08); }
+.ro-row.kind-opportunity .ro-ident { color: rgba(74,222,128,.95);  background: rgba(74,222,128,.08);  }
 .ro-row.kind-risk .ro-icon { color: var(--bad); }
 .ro-row.kind-opportunity .ro-icon { color: var(--ok); }
 .ro-title { font-weight: 500; }
@@ -4356,6 +4369,22 @@ input[type="date"].reg-inp {
 .mtx-pt-inh.opp         { fill: none; stroke: rgba(74,222,128,.95);  stroke-width: 2; }
 .mtx-pt-res.risk        { fill: rgba(248,113,113,.95); stroke: var(--bg-1); stroke-width: 1.5; }
 .mtx-pt-res.opp         { fill: rgba(74,222,128,.95);  stroke: var(--bg-1); stroke-width: 1.5; }
+/* Identifier label next to each inherent dot on the matrix. Small +
+   monospace so multiple labels in the same cell stay legible, with a
+   light text shadow drawn via stroke so the label is readable over the
+   coloured cell background. */
+.mtx-pt-lbl {
+  font-size: 9px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-weight: 700;
+  pointer-events: none;
+  paint-order: stroke fill;
+  stroke: var(--bg-1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.mtx-pt-lbl.risk { fill: rgba(248,113,113,.95); }
+.mtx-pt-lbl.opp  { fill: rgba(74,222,128,.95);  }
 .mtx-arrow.risk { stroke: rgba(248,113,113,.6); stroke-width: 1.4; }
 .mtx-arrow.opp  { stroke: rgba(74,222,128,.6);  stroke-width: 1.4; }
 
@@ -5756,6 +5785,24 @@ body.is-row-dragging *        { user-select: none !important; }
 .note-chip.done { background: rgba(74,222,128,.15); border-color: rgba(74,222,128,.45); }
 .note-chip.done .chip-mark { color: var(--ok); }
 .note-chip.done b { text-decoration: line-through; opacity: .7; }
+/* Cancelled — distinct from "done" (green) and "not started" (blue).
+   Muted grey background, italic strike-through title, dashed border. */
+.note-chip.cancelled {
+  background: var(--bg-3);
+  border: 1px dashed var(--line-2);
+  color: var(--text-faint);
+  opacity: .75;
+}
+.note-chip.cancelled:hover { background: var(--bg-2); opacity: 1; }
+.note-chip.cancelled .chip-mark { color: var(--text-faint); }
+.note-chip.cancelled b {
+  text-decoration: line-through;
+  text-decoration-color: var(--text-faint);
+  font-style: italic;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.note-chip.cancelled .chip-meta { color: var(--text-faint); opacity: .85; }
 .note-chip.person-chip {
   background: rgba(167,139,250,.15);
   border-color: rgba(167,139,250,.45);

@@ -6198,7 +6198,10 @@
               <button type="button" class="seg-btn ${isOpp ? 'active' : ''}" data-re-kind="opportunity">▽ Opportunity</button>
             </div>
           </div>
-          <div class="field"><label>Title</label><input id="reTitle" value="${escapeHTML(r.title)}" /></div>
+          <div class="qa-row">
+            <div class="field" style="flex: 0 0 140px;"><label>Identifier</label><input id="reIdent" value="${escapeHTML(r.identifier || '')}" placeholder="Auto" title="Short code (e.g. ${escapeHTML(projectInitialsForId(proj?.name))}-${isOpp ? 'O' : 'R'}-1). Editable." /></div>
+            <div class="field" style="flex: 1;"><label>Title</label><input id="reTitle" value="${escapeHTML(r.title)}" /></div>
+          </div>
           <div class="qa-row">
             <div class="field"><label>Inherent P (1-5)</label><input id="rePI" type="number" min="1" max="5" value="${r.inherent.probability}" /></div>
             <div class="field"><label>Inherent I (1-5)</label><input id="reII" type="number" min="1" max="5" value="${r.inherent.impact}" /></div>
@@ -6246,8 +6249,18 @@
     // in-progress edits to a stray click outside the modal is too easy.
 
     overlay.querySelector('#reSave').addEventListener('click', () => {
+      const oldKind = r.kind || 'risk';
       r.kind = kind;
       r.title = document.getElementById('reTitle').value.trim() || r.title;
+      // Identifier — accept the typed value as-is. Trim; if empty, OR
+      // if the user just switched between risk / opportunity, re-derive
+      // a fresh identifier so the R / O prefix stays in sync.
+      const idInput = (document.getElementById('reIdent').value || '').trim();
+      if (idInput) {
+        r.identifier = idInput;
+      } else if (!r.identifier || oldKind !== kind) {
+        r.identifier = generateRiskIdentifier(proj, kind);
+      }
       r.inherent = {
         probability: clamp(parseInt(document.getElementById('rePI').value, 10) || 3, 1, 5),
         impact:      clamp(parseInt(document.getElementById('reII').value, 10) || 3, 1, 5),
@@ -6284,6 +6297,33 @@
   function ensureRiskShape(r) {
     if (!r.inherent) r.inherent = { probability: r.probability || 3, impact: r.impact || 3 };
     if (!r.residual) r.residual = { ...r.inherent };
+  }
+
+  // Build a short prefix from a project's name (acronym of the words,
+  // fall back to the first 3 alphabetic chars of a single word). Used
+  // as the base for risk identifiers.
+  function projectInitialsForId(name) {
+    const words = (name || '').split(/[^a-zA-Z]+/).filter(Boolean);
+    if (!words.length) return 'PRJ';
+    if (words.length === 1) return words[0].slice(0, 3).toUpperCase();
+    return words.map((w) => w[0]).join('').toUpperCase().slice(0, 4);
+  }
+  // Next free identifier for this project + kind, in the form
+  // "<initials>-R-<n>" or "<initials>-O-<n>". Walks the existing risks
+  // to find the highest matching sequence and adds 1. User-edited
+  // free-form identifiers don't participate, so manual overrides
+  // never collide with the auto-generator.
+  function generateRiskIdentifier(project, kind) {
+    const prefix = projectInitialsForId(project?.name) + '-' + (kind === 'opportunity' ? 'O' : 'R') + '-';
+    const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('^' + escaped + '(\\d+)$');
+    let max = 0;
+    (project?.risks || []).forEach((r) => {
+      if (!r.identifier) return;
+      const m = String(r.identifier).match(re);
+      if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+    });
+    return prefix + (max + 1);
   }
 
   function riskMatrixSVG(items) {
@@ -6401,6 +6441,22 @@
       if (moved) {
         svg += `<circle class="mtx-pt mtx-pt-res ${isOpp ? 'opp' : 'risk'}" data-risk-id="${r.id}" data-pt-stage="residual" cx="${xRes.toFixed(1)}" cy="${yRes.toFixed(1)}" r="${resR}"></circle>`;
       }
+      // Identifier label — placed at the inherent dot's polar angle from
+      // the origin, just past the dot's outer edge so it doesn't overlap
+      // the circle. text-anchor is chosen by which side of the origin
+      // the dot sits on so labels read left-to-right naturally.
+      if (r.identifier) {
+        // Use the cell-centre direction from the origin so labels
+        // never overlap the arrow tip pointing toward the residual.
+        const dx = xInh - origX;
+        const dy = yInh - origY;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        const offset = inhR + 5;
+        const lx = xInh + (dx / len) * offset;
+        const ly = yInh + (dy / len) * offset;
+        const anchor = dx >= 0 ? 'start' : 'end';
+        svg += `<text class="mtx-pt-lbl ${isOpp ? 'opp' : 'risk'}" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" dy="3">${escapeHTML(r.identifier)}</text>`;
+      }
       return svg;
     }).join('');
 
@@ -6464,7 +6520,7 @@
       const body = $('#roBody');
       const items = proj.risks
         .filter((r) => roState.kind === 'all' || (r.kind || 'risk') === roState.kind)
-        .filter((r) => matchesSearch(r.title, r.mitigation, personName(r.owner)));
+        .filter((r) => matchesSearch(r.title, r.identifier, r.mitigation, personName(r.owner)));
       if (!items.length) {
         body.innerHTML = `<div class="empty">${
           roState.kind === 'opportunity' ? 'No opportunities logged yet.' :
@@ -6494,6 +6550,7 @@
           <div class="row ro-row kind-${kind === 'opportunity' ? 'opportunity' : 'risk'} sev-${sevCls}" data-risk-id="${r.id}">
             ${ROW_GRIP_HTML}
             <span class="ro-icon" title="${kind}">${icon}</span>
+            ${r.identifier ? `<span class="ro-ident" title="Identifier">${escapeHTML(r.identifier)}</span>` : ''}
             <span class="ro-title">${escapeHTML(r.title)}</span>
             <span class="ro-score">
               ${moved ? `<span class="ro-pre">${inhScore}</span><span class="ro-arrow">→</span><b>${resScore}</b>` : `<b>${inhScore}</b>`}
@@ -9976,10 +10033,15 @@
       const resI = clamp(parseInt($('#qImpR').value, 10) || inhI, 1, 5);
       const isOpp = qaInit.kind === 'opportunity';
       proj.risks = proj.risks || [];
+      const kind = isOpp ? 'opportunity' : 'risk';
       proj.risks.push({
         id: uid(isOpp ? 'o' : 'r'),
-        kind: isOpp ? 'opportunity' : 'risk',
+        kind,
         title,
+        // Auto-assigned short code (e.g. "OSB-R-3"); user can override
+        // in the risk editor. Generated AFTER the kind so the right
+        // R / O prefix is used.
+        identifier: generateRiskIdentifier(proj, kind),
         inherent: { probability: inhP, impact: inhI },
         residual: { probability: resP, impact: resI },
         mitigation: $('#qMit').value || '',
@@ -10698,11 +10760,22 @@
         return;
       }
       chip.classList.remove('chip-stale');
-      const mark = a.status === 'done' ? '✓' : a.status === 'blocked' ? '⨯' : a.status === 'doing' ? '◐' : '○';
+      // Status glyphs:
+      //   done      ✓
+      //   blocked   ⨯
+      //   doing     ◐
+      //   cancelled ⊘   (distinct from "todo" — visually struck-through too)
+      //   todo / *  ○
+      const mark =
+        a.status === 'done'       ? '✓' :
+        a.status === 'blocked'    ? '⨯' :
+        a.status === 'doing'      ? '◐' :
+        a.status === 'cancelled'  ? '⊘' : '○';
       const markEl = chip.querySelector('.chip-mark');
       if (markEl) markEl.textContent = mark;
-      chip.classList.toggle('done', a.status === 'done');
-      chip.classList.toggle('blocked', a.status === 'blocked');
+      chip.classList.toggle('done',      a.status === 'done');
+      chip.classList.toggle('blocked',   a.status === 'blocked');
+      chip.classList.toggle('cancelled', a.status === 'cancelled');
     });
   }
 
@@ -11184,6 +11257,13 @@
         // ensureRiskShape backfills inherent/residual from legacy probability/impact
         if (!r.inherent) r.inherent = { probability: r.probability || 3, impact: r.impact || 3 };
         if (!r.residual) r.residual = { ...r.inherent };
+        // Identifier — short human-readable code (e.g. "OSB-R-1" /
+        // "OSB-O-3") based on the project's initials + R/O + sequence.
+        // Auto-assigned for legacy data on first load; users can
+        // override to any unique string in the editor.
+        if (typeof r.identifier !== 'string' || !r.identifier.trim()) {
+          r.identifier = generateRiskIdentifier(p, r.kind || 'risk');
+        }
       });
 
       p.decisions.forEach((d) => {
