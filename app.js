@@ -2611,6 +2611,7 @@
           <span class="op-row-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
           <div class="op-content">
             <div class="op-title-row">
+              <span class="op-ident" contenteditable="true" data-field="identifier" spellcheck="false" title="Identifier — click to edit (auto-generated from project name, override accepted)">${escapeHTML(op.identifier || '')}</span>
               <div class="op-title" contenteditable="true" data-field="title">${escapeHTML(op.title)}</div>
             </div>
             <div class="op-context-wrap">
@@ -2681,6 +2682,28 @@
           });
           titleEl.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); titleEl.blur(); }
+          });
+        }
+        // Identifier — short code, save on blur. Empty value re-derives
+        // the auto identifier so users can clear-and-regenerate.
+        const identEl = el.querySelector('.op-ident');
+        if (identEl) {
+          identEl.addEventListener('blur', () => {
+            const op = proj.openPoints.find((x) => x.id === id);
+            if (!op) return;
+            const v = identEl.textContent.trim();
+            const next = v || generateOpenPointIdentifier(proj);
+            if (op.identifier !== next) {
+              op.identifier = next;
+              commit('op-identifier');
+            } else if (!v) {
+              // Empty input that resolved to the same identifier — repaint
+              // the cell so the placeholder text shows again.
+              identEl.textContent = op.identifier;
+            }
+          });
+          identEl.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); identEl.blur(); }
           });
         }
         // Context — rich HTML, save on blur
@@ -2864,7 +2887,7 @@
       const v = $('#opInput').value.trim();
       if (!v) return;
       const comp = $('#opQuickComp')?.value || null;
-      proj.openPoints.unshift({ id: uid('op'), title: v, notes: '', component: comp, criticality: 'med', createdAt: todayISO() });
+      proj.openPoints.unshift({ id: uid('op'), identifier: generateOpenPointIdentifier(proj), title: v, notes: '', component: comp, criticality: 'med', createdAt: todayISO() });
       $('#opInput').value = '';
       if ($('#opQuickComp')) $('#opQuickComp').value = '';
       commit('op-add');
@@ -2980,15 +3003,33 @@
           return { op, r, rgb };
         });
         packBubbles(bubbles, W, H, 1.3);
+        const cxC = W / 2, cyC = H / 2;
         const frag = bubbles.map((b) => {
-          const ageDays = _opAgeDays(b.op);
-          const stepRatio = _opStepsRatio(b.op);
-          const tip = `${b.op.title}\nAge: ${ageDays}d\n${stepRatio > 0 ? Math.round(stepRatio*100) + '% steps done' : ''}`;
-          return `<circle class="op-bubble" data-op-id="${escapeHTML(b.op.id)}" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="rgba(${b.rgb}, .55)" stroke="rgb(${b.rgb})" stroke-width="1"><title>${escapeHTML(tip)}</title></circle>`;
+          // Identifier label placed along the polar angle from the cell
+          // centre — so when multiple bubbles share a cell their labels
+          // fan outward instead of stacking on top of one another. The
+          // anchor flips at the x-axis so labels never run off the cell
+          // edge. Monospace + paint-order stroke fill for readability
+          // over coloured backgrounds.
+          let identSvg = '';
+          if (b.op.identifier) {
+            const dx = b.x - cxC, dy = b.y - cyC;
+            const len = Math.sqrt(dx * dx + dy * dy) || 1;
+            const offset = b.r + 4;
+            const lx = Math.max(2, Math.min(W - 2, b.x + (dx / len) * offset));
+            const ly = Math.max(8, Math.min(H - 2, b.y + (dy / len) * offset));
+            const anchor = dx >= 0 ? 'start' : 'end';
+            identSvg = `<text class="op-bubble-ident" x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${anchor}" dy="3">${escapeHTML(b.op.identifier)}</text>`;
+          }
+          return `<g class="op-bubble-g" data-op-id="${escapeHTML(b.op.id)}">` +
+            `<circle class="op-bubble" data-op-id="${escapeHTML(b.op.id)}" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="rgba(${b.rgb}, .55)" stroke="rgb(${b.rgb})" stroke-width="1"></circle>` +
+            identSvg +
+          `</g>`;
         }).join('');
         svg.innerHTML = frag;
       });
       wireBubbleClicks(list);
+      wireOpHoverCards(list);
     }
 
     // ─── Bubbles view: single packed circle pile, importance-sized ────
@@ -3060,26 +3101,32 @@
           <div class="op-bubbles-scroll" id="opBubblesScroll">
             <svg class="op-bubbles-svg" id="opBubblesSvg" viewBox="0 0 ${baseW} ${baseH}" width="${renderW}" height="${renderH}">
               ${bubbles.map((b) => {
-                const ageDays   = _opAgeDays(b.op);
-                const stepText  = (b.op.steps || []).length ? `${(b.op.steps || []).filter((s) => s.done).length}/${(b.op.steps || []).length} steps` : 'no steps';
-                const cmp       = findComponent(proj, b.op.component);
-                const compName  = cmp ? cmp.name : '— no component —';
-                const tip       = `${b.op.title}\n${compName}\nAge: ${ageDays}d · ${stepText}\nCriticality: ${CRITICALITY_LABEL[b.op.criticality || 'med']}\nPriority: ${priorityLevel(b.op.priorityLevel).label}`;
                 let labelSvg = '';
                 if (b.r > 14) {
-                  const fs    = fontFor(b.r);
-                  const lines = wrapLines(b.op, b.r);
-                  // Stack lines vertically centred on the bubble.
-                  const startDy = -((lines.length - 1) * fs * 0.55);
-                  labelSvg = lines.map((ln, i) =>
+                  const fs     = fontFor(b.r);
+                  const lines  = wrapLines(b.op, b.r);
+                  // Identifier renders as a compact monospace caption
+                  // above the title block when the bubble is big enough
+                  // to comfortably fit it. Skip on the smallest sizes so
+                  // text doesn't crowd out the title.
+                  const showIdent = b.op.identifier && b.r > 22;
+                  const identFs  = Math.max(9, Math.round(fs * 0.78));
+                  const identGap = showIdent ? identFs * 1.25 : 0;
+                  const startDy  = -((lines.length - 1) * fs * 0.55) - identGap;
+                  const identSvg = showIdent
+                    ? `<text class="op-bubble-ident-in" x="${b.x.toFixed(1)}" y="${(b.y + startDy - fs * 0.4).toFixed(1)}" text-anchor="middle" font-size="${identFs}">${escapeHTML(b.op.identifier)}</text>`
+                    : '';
+                  labelSvg = identSvg + lines.map((ln, i) =>
                     `<text class="op-bubble-lbl" x="${b.x.toFixed(1)}" y="${(b.y + startDy + i * fs * 1.1 + 4).toFixed(1)}" text-anchor="middle" font-size="${fs}">${escapeHTML(ln)}</text>`
                   ).join('');
+                } else if (b.op.identifier) {
+                  // Tiny bubble: render the identifier just below the
+                  // circle so users can still identify it visually.
+                  labelSvg = `<text class="op-bubble-ident" x="${b.x.toFixed(1)}" y="${(b.y + b.r + 10).toFixed(1)}" text-anchor="middle">${escapeHTML(b.op.identifier)}</text>`;
                 }
                 return `
                   <g class="op-bubble-g" data-op-id="${escapeHTML(b.op.id)}">
-                    <circle class="op-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="rgba(${b.rgb}, .50)" stroke="rgb(${b.rgb})" stroke-width="1.5">
-                      <title>${escapeHTML(tip)}</title>
-                    </circle>
+                    <circle class="op-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="rgba(${b.rgb}, .50)" stroke="rgb(${b.rgb})" stroke-width="1.5"></circle>
                     ${labelSvg}
                   </g>`;
               }).join('')}
@@ -3087,6 +3134,7 @@
           </div>
         </div>`;
       wireBubbleClicks(list);
+      wireOpHoverCards(list);
       // Zoom controls — buttons re-set opFilterState.bubbleZoom and
       // re-render only the bubbles view to keep the packing stable.
       const applyZoom = (z) => {
@@ -3138,6 +3186,74 @@
             }
           }, 30);
         });
+      });
+    }
+
+    // Rich hover card for open-point bubbles. Replaces the basic SVG
+    // <title> tooltip with a styled overlay that shows the identifier,
+    // title, component, criticality, priority, age, step progress, and
+    // a notes snippet. The card is a singleton appended to <body> so
+    // it can escape the cell SVG's clip and follow the cursor.
+    function wireOpHoverCards(scope) {
+      let card = document.getElementById('opHoverCard');
+      if (!card) {
+        card = document.createElement('div');
+        card.id = 'opHoverCard';
+        card.className = 'op-hover-card';
+        card.setAttribute('role', 'tooltip');
+        document.body.appendChild(card);
+      }
+      const hide = () => { card.classList.remove('show'); };
+      const show = (op, e) => {
+        const cmp       = findComponent(proj, op.component);
+        const compName  = cmp ? cmp.name : '— no component —';
+        const compRgb   = cmp ? componentColor(cmp.color).rgb : null;
+        const ageDays   = _opAgeDays(op);
+        const steps     = op.steps || [];
+        const doneCount = steps.filter((s) => s.done).length;
+        const stepsLbl  = steps.length ? `${doneCount}/${steps.length} steps` : 'no steps yet';
+        const stepsPct  = steps.length ? Math.round(doneCount / steps.length * 100) : 0;
+        const critKey   = op.criticality || 'med';
+        const critRgb   = CRITICALITY_RGB[critKey];
+        const prio      = priorityLevel(op.priorityLevel);
+        // Notes excerpt — strip HTML, collapse whitespace, cap at ~180 chars.
+        const noteText  = (op.notes || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        const noteSnip  = noteText.length > 180 ? noteText.slice(0, 178) + '…' : noteText;
+        card.innerHTML = `
+          ${op.identifier ? `<div class="hc-ident">${escapeHTML(op.identifier)}</div>` : ''}
+          <div class="hc-title">${escapeHTML(op.title || '(untitled)')}</div>
+          <div class="hc-chips">
+            ${compName ? `<span class="hc-chip"${compRgb ? ` style="background:rgba(${compRgb},.18);color:rgb(${compRgb});border-color:rgba(${compRgb},.5)"` : ''}>${escapeHTML(compName)}</span>` : ''}
+            <span class="hc-chip" style="background:rgba(${critRgb},.18);color:rgb(${critRgb});border-color:rgba(${critRgb},.5)">${escapeHTML(CRITICALITY_LABEL[critKey])} criticality</span>
+            <span class="hc-chip" style="background:rgba(${prio.rgb},.18);color:rgb(${prio.rgb});border-color:rgba(${prio.rgb},.5)">${escapeHTML(prio.label)} priority</span>
+          </div>
+          <div class="hc-meta">
+            <span title="Age in days">Age ${ageDays}d</span>
+            <span class="hc-sep">·</span>
+            <span title="Resolution step progress">${escapeHTML(stepsLbl)}${steps.length ? ` (${stepsPct}%)` : ''}</span>
+          </div>
+          ${noteSnip ? `<div class="hc-notes">${escapeHTML(noteSnip)}</div>` : ''}
+          <div class="hc-hint">Click to jump to the list row</div>
+        `;
+        card.classList.add('show');
+        position(e);
+      };
+      const position = (e) => {
+        const pad = 12;
+        const rect = card.getBoundingClientRect();
+        const x = Math.min(window.innerWidth - rect.width - pad, e.clientX + 14);
+        const y = Math.min(window.innerHeight - rect.height - pad, e.clientY + 14);
+        card.style.left = Math.max(pad, x) + 'px';
+        card.style.top  = Math.max(pad, y) + 'px';
+      };
+      scope.querySelectorAll('[data-op-id]').forEach((el) => {
+        const id = el.dataset.opId;
+        el.addEventListener('mouseenter', (e) => {
+          const op = (proj.openPoints || []).find((x) => x.id === id);
+          if (op) show(op, e);
+        });
+        el.addEventListener('mousemove', position);
+        el.addEventListener('mouseleave', hide);
       });
     }
 
@@ -6321,6 +6437,20 @@
     (project?.risks || []).forEach((r) => {
       if (!r.identifier) return;
       const m = String(r.identifier).match(re);
+      if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
+    });
+    return prefix + (max + 1);
+  }
+  // Mirror of generateRiskIdentifier for open points: "<initials>-OP-<n>".
+  // Open points have a single kind, so the prefix is fixed.
+  function generateOpenPointIdentifier(project) {
+    const prefix = projectInitialsForId(project?.name) + '-OP-';
+    const escaped = prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('^' + escaped + '(\\d+)$');
+    let max = 0;
+    (project?.openPoints || []).forEach((op) => {
+      if (!op.identifier) return;
+      const m = String(op.identifier).match(re);
       if (m) { const n = parseInt(m[1], 10); if (n > max) max = n; }
     });
     return prefix + (max + 1);
@@ -11357,6 +11487,13 @@
         op.component = op.component || null;
         op.criticality = op.criticality || 'med';
         op.createdAt = op.createdAt || todayISO();
+        // Identifier — short human-readable code (e.g. "OSB-OP-1") based
+        // on the project's initials + sequence. Auto-assigned for legacy
+        // data; users can override to any unique string from the list
+        // card.
+        if (typeof op.identifier !== 'string' || !op.identifier.trim()) {
+          op.identifier = generateOpenPointIdentifier(p);
+        }
         // priorityLevel — added later; default to 'med' for retrocompat
         op.priorityLevel = (op.priorityLevel && PRIORITY_LEVELS.some((p) => p.id === op.priorityLevel)) ? op.priorityLevel : 'med';
         // Resolution steps — added in a later schema version; default to []
