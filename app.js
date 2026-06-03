@@ -9510,7 +9510,7 @@
   // Inline person-creation dialog: a small modal with Name + Role in a
   // single form so the user can fill both at once. Returns a Promise
   // that resolves to the new person's id, or null if the user cancels.
-  function createPersonInlineDialog() {
+  function createPersonInlineDialog(initialName = '') {
     return new Promise((resolve) => {
       const overlay = document.createElement('div');
       overlay.className = 'overlay desc-overlay';
@@ -9524,7 +9524,7 @@
           <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
             <div class="field">
               <label>Name <span class="muted">(required)</span></label>
-              <input id="newPersonName" type="text" autocomplete="off" placeholder="e.g. Carol Davis" />
+              <input id="newPersonName" type="text" autocomplete="off" placeholder="e.g. Carol Davis" value="${escapeHTML(initialName)}" />
             </div>
             <div class="field">
               <label>Role <span class="muted">(optional)</span></label>
@@ -9562,7 +9562,13 @@
         });
         inp.addEventListener('input', () => inp.classList.remove('field-err'));
       });
-      setTimeout(() => nameInp.focus(), 30);
+      setTimeout(() => {
+        // When the name is already filled in (e.g. typed via @ in the
+        // notes), skip ahead to Role so the user can keep typing
+        // without first jumping fields.
+        if (initialName && initialName.trim().length) roleInp.focus();
+        else nameInp.focus();
+      }, 30);
     });
   }
 
@@ -10566,6 +10572,16 @@
       items = state.people
         .filter((p) => p.name.toLowerCase().includes(q))
         .slice(0, 8);
+      // If the typed query doesn't match an existing person, surface a
+      // synthetic "+ Add '<query>' as a new person…" option so the user
+      // can create the person inline (same dialog the Quick Add owner
+      // dropdown uses). Requires at least 1 character so an empty @
+      // doesn't offer to create a blank person.
+      const trimmed = ctx.query.trim();
+      if (trimmed.length > 0) {
+        const exactMatch = items.find((p) => p.name.toLowerCase() === q);
+        if (!exactMatch) items.push({ __newPerson: true, name: trimmed });
+      }
     } else {
       items = state.projects
         .flatMap((proj) => (proj.actions || []).filter((a) => !a.deletedAt).map((a) => ({ ...a, _proj: proj })))
@@ -10591,6 +10607,15 @@
     popup.innerHTML = items.map((it, i) => {
       const sel = i === idx ? 'active' : '';
       if (kind === '@') {
+        if (it.__newPerson) {
+          return `<button type="button" class="ac-item ac-item-new ${sel}" data-ac-idx="${i}" role="option" title="Create a new person and start an action for them">
+            <span class="avatar ac-avatar-new">+</span>
+            <span class="ac-text">
+              <span class="ac-name">Add &ldquo;${escapeHTML(it.name)}&rdquo; as a new person…</span>
+              <span class="ac-meta">Press Enter — opens the add-person form, then a new action</span>
+            </span>
+          </button>`;
+        }
         return `<button type="button" class="ac-item ${sel}" data-ac-idx="${i}" role="option">
           <span class="avatar">${initials(it.name)}</span>
           <span class="ac-text"><span class="ac-name">${escapeHTML(it.name)}</span><span class="ac-meta">${escapeHTML(it.role || '')}</span></span>
@@ -10638,13 +10663,25 @@
     hideNotesAutocomplete();
     if (kind === '@') {
       // New seamless flow: picking a person via @ pops Quick Add for a
-      // brand-new action with that person pre-set as Owner. Replaces the
-      // former + action toolbar button; the action chip is inserted in
-      // the saved-action callback so the note ends up with a live link
-      // to the new action, not just a passive @-mention.
-      openQuickAdd('action', { owner: it.id }, (action) => {
-        if (action) insertActionChip(action);
-      });
+      // brand-new action with that person pre-set as Owner. If the user
+      // typed a name that doesn't match anyone yet ("__newPerson"
+      // synthetic item), first open the inline add-person dialog with
+      // the typed name pre-filled — then continue to Quick Add with the
+      // freshly-created person as Owner. Result: type "@bob" and three
+      // confirmations later you have a new person AND a new action
+      // assigned to them, linked from this note.
+      const openActionFor = (ownerId) => {
+        openQuickAdd('action', { owner: ownerId }, (action) => {
+          if (action) insertActionChip(action);
+        });
+      };
+      if (it.__newPerson) {
+        createPersonInlineDialog(it.name).then((newId) => {
+          if (newId) openActionFor(newId);
+        });
+        return;
+      }
+      openActionFor(it.id);
       return;
     }
     insertActionChip(it);

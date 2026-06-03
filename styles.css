@@ -5809,6 +5809,19 @@ body.is-row-dragging *        { user-select: none !important; }
   color: var(--text-dim);
   font-weight: 700;
 }
+/* "+ Add <name> as a new person…" synthetic item — visually distinct
+   so the user reads it as an action, not as another existing person. */
+.notes-ac .ac-item-new {
+  border-top: 1px dashed var(--line);
+  margin-top: 2px;
+}
+.notes-ac .ac-item-new .ac-avatar-new {
+  background: rgba(110, 168, 255, .14);
+  color: var(--accent);
+  font-size: 14px;
+}
+.notes-ac .ac-item-new .ac-name { color: var(--accent); }
+.notes-ac .ac-item-new .ac-meta { color: var(--text-faint); font-style: italic; }
 .notes-ac .ac-text {
   display: flex;
   flex-direction: column;
