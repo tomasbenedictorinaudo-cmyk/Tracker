@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-03T18:08:12.175Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-03T18:18:37.596Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -6408,15 +6408,13 @@ body.is-row-dragging *        { user-select: none !important; }
           <input type="color" id="ntColorInput" value="#6ea8ff" />
         </label>
         <button data-cmd="removeFormat" title="Clear formatting">✕</button>
-        <span class="sep"></span>
-        <button id="btnNotesAction" class="notes-action-btn" title="Insert action (Cmd/Ctrl+Shift+A)">+ action</button>
       </div>
       <nav class="notes-toc" id="notesToc" aria-label="Notes contents" hidden></nav>
       <div class="notes-toc-resize" id="notesTocResize" title="Drag to resize · double-click to reset" aria-label="Resize table of contents" role="separator" hidden></div>
       <div class="notes-body" id="notesBody" contenteditable="true" spellcheck="true"></div>
       <div class="notes-foot">
         <span id="notesSaved">Saved</span>
-        <span class="hint"><kbd>@</kbd> person · <kbd>#</kbd> action · <kbd>Cmd/Ctrl+Shift+A</kbd> new action</span>
+        <span class="hint"><kbd>@</kbd> new action for someone · <kbd>#</kbd> link existing action · <kbd>Cmd/Ctrl+Shift+A</kbd> new action</span>
       </div>
       <div class="notes-ac" id="notesAutocomplete" hidden role="listbox"></div>
     </aside>
@@ -17042,20 +17040,18 @@ body.is-row-dragging *        { user-select: none !important; }
     scheduleNotesSave();
   }
 
-  function insertPersonChip(person) {
-    restoreSelection();
-    const safe = (s) => String(s).replace(/[<>"&]/g, (c) =>
-      ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c]));
-    const html = ` <span class="note-chip person-chip" contenteditable="false" data-person-id="${person.id}">` +
-      `<span class="chip-mark">@</span><b>${safe(person.name)}</b></span>&nbsp;`;
-    document.execCommand('insertHTML', false, html);
-    scheduleNotesSave();
-  }
-
   /* --- Inline @/# autocomplete inside the meeting-notes editor ---
-   * Typing `@` opens a people picker; typing `#` opens an action picker.
-   * The popup filters as the user types; ArrowUp / ArrowDown navigate,
-   * Enter / Tab insert the chip, Escape dismisses. */
+   * Typing `@` opens a people picker; on selection the Quick Add form
+   * opens for a brand-new action with that person pre-set as Owner
+   * (replacing the old "insert a person mention chip" behaviour).
+   * Typing `#` opens an existing-action picker; on selection an action
+   * chip is inserted that links to the action's drawer.
+   *
+   * Popup filters as the user types; ArrowUp / ArrowDown navigate,
+   * Enter / Tab insert, Escape dismisses. Legacy person-chips in
+   * older notes (saved before this change) still render and stay
+   * click-to-filter-Register thanks to the chip click handler below.
+   */
   let notesAcState = null;
 
   function getMentionContext(body) {
@@ -17157,9 +17153,21 @@ body.is-row-dragging *        { user-select: none !important; }
     sel.removeAllRanges();
     sel.addRange(range);
     savedRange = range.cloneRange();
-    if (notesAcState.kind === '@') insertPersonChip(it);
-    else insertActionChip(it);
+    snapshotSelection();
+    const kind = notesAcState.kind;
     hideNotesAutocomplete();
+    if (kind === '@') {
+      // New seamless flow: picking a person via @ pops Quick Add for a
+      // brand-new action with that person pre-set as Owner. Replaces the
+      // former + action toolbar button; the action chip is inserted in
+      // the saved-action callback so the note ends up with a live link
+      // to the new action, not just a passive @-mention.
+      openQuickAdd('action', { owner: it.id }, (action) => {
+        if (action) insertActionChip(action);
+      });
+      return;
+    }
+    insertActionChip(it);
   }
 
   function refreshNoteChips() {
@@ -17303,14 +17311,6 @@ body.is-row-dragging *        { user-select: none !important; }
       // Keep the swatch from stealing focus from the editor on click
       ntColor.parentElement.addEventListener('mousedown', (e) => { if (e.target === ntColor.parentElement) e.preventDefault(); });
     }
-
-    $('#btnNotesAction').addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      snapshotSelection();
-      openQuickAdd('action', {}, (action) => {
-        insertActionChip(action);
-      });
-    });
 
     const body = $('#notesBody');
     body.addEventListener('input', () => {

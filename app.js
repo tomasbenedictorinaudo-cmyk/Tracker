@@ -10520,20 +10520,18 @@
     scheduleNotesSave();
   }
 
-  function insertPersonChip(person) {
-    restoreSelection();
-    const safe = (s) => String(s).replace(/[<>"&]/g, (c) =>
-      ({ '<': '&lt;', '>': '&gt;', '"': '&quot;', '&': '&amp;' }[c]));
-    const html = ` <span class="note-chip person-chip" contenteditable="false" data-person-id="${person.id}">` +
-      `<span class="chip-mark">@</span><b>${safe(person.name)}</b></span>&nbsp;`;
-    document.execCommand('insertHTML', false, html);
-    scheduleNotesSave();
-  }
-
   /* --- Inline @/# autocomplete inside the meeting-notes editor ---
-   * Typing `@` opens a people picker; typing `#` opens an action picker.
-   * The popup filters as the user types; ArrowUp / ArrowDown navigate,
-   * Enter / Tab insert the chip, Escape dismisses. */
+   * Typing `@` opens a people picker; on selection the Quick Add form
+   * opens for a brand-new action with that person pre-set as Owner
+   * (replacing the old "insert a person mention chip" behaviour).
+   * Typing `#` opens an existing-action picker; on selection an action
+   * chip is inserted that links to the action's drawer.
+   *
+   * Popup filters as the user types; ArrowUp / ArrowDown navigate,
+   * Enter / Tab insert, Escape dismisses. Legacy person-chips in
+   * older notes (saved before this change) still render and stay
+   * click-to-filter-Register thanks to the chip click handler below.
+   */
   let notesAcState = null;
 
   function getMentionContext(body) {
@@ -10635,9 +10633,21 @@
     sel.removeAllRanges();
     sel.addRange(range);
     savedRange = range.cloneRange();
-    if (notesAcState.kind === '@') insertPersonChip(it);
-    else insertActionChip(it);
+    snapshotSelection();
+    const kind = notesAcState.kind;
     hideNotesAutocomplete();
+    if (kind === '@') {
+      // New seamless flow: picking a person via @ pops Quick Add for a
+      // brand-new action with that person pre-set as Owner. Replaces the
+      // former + action toolbar button; the action chip is inserted in
+      // the saved-action callback so the note ends up with a live link
+      // to the new action, not just a passive @-mention.
+      openQuickAdd('action', { owner: it.id }, (action) => {
+        if (action) insertActionChip(action);
+      });
+      return;
+    }
+    insertActionChip(it);
   }
 
   function refreshNoteChips() {
@@ -10781,14 +10791,6 @@
       // Keep the swatch from stealing focus from the editor on click
       ntColor.parentElement.addEventListener('mousedown', (e) => { if (e.target === ntColor.parentElement) e.preventDefault(); });
     }
-
-    $('#btnNotesAction').addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      snapshotSelection();
-      openQuickAdd('action', {}, (action) => {
-        insertActionChip(action);
-      });
-    });
 
     const body = $('#notesBody');
     body.addEventListener('input', () => {
