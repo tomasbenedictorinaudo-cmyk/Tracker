@@ -777,6 +777,67 @@
         { startOff: 120,  endOff: 180,  density: 0.30, statusBias: 'future' }, // Post-CDR (planning)
       ],
     });
+    // Wire a few canonical dependency chains so the Gantt's
+    // critical-path engine has something to render. Pick the longest 5
+    // sequential PM-phase actions per component and chain them in
+    // reverse chronology (later one depends on earlier one). This
+    // produces ~30-50 edges per project without saturating the view.
+    (function seedDeps(actions) {
+      const byComp = {};
+      actions.forEach((a) => {
+        (byComp[a.component] = byComp[a.component] || []).push(a);
+      });
+      Object.values(byComp).forEach((list) => {
+        list.sort((a, b) => (a.due || '').localeCompare(b.due || ''));
+        // Chain every 2nd action in the component → previous one (so we
+        // get a forest of short chains rather than one giant rope).
+        for (let i = 2; i < list.length; i += 2) {
+          list[i].dependsOn = [list[i - 2].id];
+        }
+      });
+    })(orbitActions);
+    // Baseline ~70% of past + present actions so the dashboard shows
+    // realistic CPI / SPI / variance out of the box (without forcing
+    // the user to set a baseline themselves on first run).
+    orbitActions.forEach((a) => {
+      if (Math.random() < 0.7 && a.due) {
+        a.baseline = {
+          due: a.due,
+          startDate: a.startDate || null,
+          commitment: a.commitment,
+          takenAt: a.createdAt,
+        };
+      }
+    });
+    // Log some hours against doing/done actions — sample the commitment
+    // × elapsed-days × random scatter so totals look realistic. Use
+    // sub-second deterministic IDs (uid handles it).
+    orbitActions.forEach((a) => {
+      if (a.status !== 'doing' && a.status !== 'done') return;
+      if (Math.random() < 0.7) {
+        const due = a.due ? new Date(a.due) : null;
+        const start = a.startDate ? new Date(a.startDate) : due;
+        if (!due || !start) return;
+        const dayMsLocal = 86400000;
+        const today = new Date();
+        const elapsed = Math.max(1, Math.min((due - start) / dayMsLocal, (today - start) / dayMsLocal));
+        const plannedHrs = (a.commitment / 100) * 40 * (elapsed / 7);
+        const totalLogged = plannedHrs * (0.7 + Math.random() * 0.6); // 70-130% of plan
+        const entries = Math.max(1, Math.round(elapsed / 5));
+        const perEntry = totalLogged / entries;
+        a.loggedHours = [];
+        for (let i = 0; i < entries; i++) {
+          const at = new Date(start.getTime() + (i / entries) * (due - start));
+          a.loggedHours.push({
+            id: uid('lh'),
+            hours: Math.round(perEntry * 4) / 4,
+            at: fmtISO(at),
+            by: a.owner,
+            note: '',
+          });
+        }
+      }
+    });
 
     /* ===== Project 2: Helios-2 Ground Station Software =====
        Started ~190 days ago, beta in 18 days. */
@@ -829,7 +890,13 @@
     const proj1 = {
       id: 'pr_orbit', name: 'Orbit-7 Satellite Bus',
       description: 'Mid-class earth-observation platform — phase B, PDR closing in.',
-      components: orbitComps.map(({ id, name, color }) => ({ id, name, color })),
+      components: orbitComps.map(({ id, name, color, key }) => ({
+        id, name, color,
+        // Map components to their owning cost-centre so the budgets panel
+        // groups workload correctly. Verification CC owns the Test
+        // component; the rest live under engineering.
+        costCenter: key === 'test' ? 'CC-TEST-ORBIT' : 'CC-ENG-ORBIT',
+      })),
       deliverables: orbitDeliverables,
       milestones: [
         { id: 'm_srr', name: 'System Requirements Review', date: d(-310), status: 'done' },
@@ -838,8 +905,8 @@
         { id: 'm_trr', name: 'Test Readiness Review',      date: d(170),  status: 'todo' },
       ],
       risks: [
-        { id: 'r_supply', kind: 'risk', title: 'Reaction wheel lead time slip',  inherent: { probability: 4, impact: 4 }, residual: { probability: 2, impact: 3 }, mitigation: 'Dual-source supplier engaged.', owner: 'p_arjun' },
-        { id: 'r_mass',   kind: 'risk', title: 'Mass margin trending under 5%',  inherent: { probability: 4, impact: 3 }, residual: { probability: 2, impact: 3 }, mitigation: 'Lightweighting study + panel optimisation.', owner: 'p_jonas' },
+        { id: 'r_supply', kind: 'risk', title: 'Reaction wheel lead time slip',  inherent: { probability: 4, impact: 4 }, residual: { probability: 2, impact: 3 }, mitigation: 'Dual-source supplier engaged.', owner: 'p_arjun', actionId: orbitActions.find((a) => a.component === 'pt_aocs')?.id || null },
+        { id: 'r_mass',   kind: 'risk', title: 'Mass margin trending under 5%',  inherent: { probability: 4, impact: 3 }, residual: { probability: 2, impact: 3 }, mitigation: 'Lightweighting study + panel optimisation.', owner: 'p_jonas', actionId: orbitActions.find((a) => a.component === 'pt_struct')?.id || null },
         { id: 'r_power',  kind: 'risk', title: 'EOL power margin tight',         inherent: { probability: 3, impact: 4 }, residual: { probability: 2, impact: 3 }, mitigation: 'Trade study on cell vendor + duty-cycle review.', owner: 'p_omar' },
         { id: 'r_thermal',kind: 'risk', title: 'Hot-case radiator under-sized',  inherent: { probability: 3, impact: 4 }, residual: { probability: 1, impact: 3 }, mitigation: 'Adding louvres to baseline; thermal balance test scheduled.', owner: 'p_lena' },
         { id: 'r_sw',     kind: 'risk', title: 'FSW timeline at risk',           inherent: { probability: 4, impact: 3 }, residual: { probability: 3, impact: 2 }, mitigation: 'Early integration build, weekly scrum, heritage reuse.', owner: 'p_kira' },
@@ -849,13 +916,20 @@
         { id: 'o_chamber',  kind: 'opportunity', title: 'Earlier TVAC slot at partner facility', inherent: { probability: 2, impact: 3 }, residual: { probability: 3, impact: 4 }, mitigation: 'Partner facility offered Aug slot — could pull in TVAC by 4 weeks.', owner: 'p_nadia' },
       ],
       decisions: [
-        { id: 'dec_bus',    title: 'Down-select to BusFrame v3',   rationale: 'Best mass and thermal envelope after trade study.',    date: d(-220), owner: 'p_sofia' },
-        { id: 'dec_rw',     title: 'Reaction wheel: Vendor Bravo', rationale: 'Lifetime + lead time vs Vendor Alpha.',                date: d(-160), owner: 'p_arjun' },
-        { id: 'dec_battery',title: 'Li-ion 18650 cell — Vendor C', rationale: 'Heritage in similar LEO mission, 15-yr vendor support.', date: d(-95),  owner: 'p_omar' },
-        { id: 'dec_optic',  title: 'Single-aperture optical bench', rationale: 'Mass and integration win vs dual-aperture option.',    date: d(-60),  owner: 'p_marie' },
-        { id: 'dec_pdr',    title: 'PDR slipped 2 weeks',           rationale: 'Customer requested additional FDIR work; risk register updated.', date: d(-12), owner: 'p_sofia' },
+        { id: 'dec_bus',    title: 'Down-select to BusFrame v3',   rationale: 'Best mass and thermal envelope after trade study.',    date: d(-220), owner: 'p_sofia', status: 'in_effect' },
+        { id: 'dec_rw',     title: 'Reaction wheel: Vendor Bravo', rationale: 'Lifetime + lead time vs Vendor Alpha.',                date: d(-160), owner: 'p_arjun', status: 'in_effect', triggerRef: { type: 'risk', id: 'r_supply' } },
+        { id: 'dec_battery',title: 'Li-ion 18650 cell — Vendor C', rationale: 'Heritage in similar LEO mission, 15-yr vendor support.', date: d(-95),  owner: 'p_omar',  status: 'in_effect' },
+        { id: 'dec_optic',  title: 'Single-aperture optical bench', rationale: 'Mass and integration win vs dual-aperture option.',    date: d(-60),  owner: 'p_marie', status: 'in_effect' },
+        { id: 'dec_pdr',    title: 'PDR slipped 2 weeks',           rationale: 'Customer requested additional FDIR work; risk register updated.', date: d(-12), owner: 'p_sofia', status: 'in_effect', triggerRef: 'Customer request' },
       ],
-      changes: [],
+      changes: [
+        { id: 'cr_fdir',    title: 'Add FDIR scope to PDR data pack',     rationale: 'Customer mandated FDIR review at PDR.', description: 'Expand FDIR analysis to include single-point failures of TT&C and AOCS.', analysis: 'Two extra weeks of FSW + verification effort; offset by re-using Mosaic-3 heritage.', status: 'approved', originator: 'p_sofia', originatedDate: d(-22), decisionBy: 'p_sofia', decisionDate: d(-12), priorityLevel: 'high', component: 'pt_pm', impact: { schedule: 14, cost: 28000, scope: 'Adds 2 FSW work-packages.', risk: 'Mitigates r_sw' }, tags: [], comments: [] },
+        { id: 'cr_thrtest', title: 'Pull-in TVAC by 4 weeks',             rationale: 'Partner facility offered earlier slot.', description: 'Move TVAC campaign from week 24 to week 20.', analysis: 'Cuts post-CDR margin to 2 weeks. Worth it if r_test materialises.', status: 'under_review', originator: 'p_nadia', originatedDate: d(-8), decisionBy: null, decisionDate: null, priorityLevel: 'med', component: 'pt_test', impact: { schedule: -28, cost: 12000, scope: 'No scope change.', risk: 'Reduces TVAC availability risk.' }, tags: [], comments: [] },
+        { id: 'cr_cell',    title: 'Switch Li-ion vendor on batch order', rationale: 'Volume discount opportunity.', description: 'Combine PO with sister mission for 12% reduction.', analysis: 'Slight requalification cost; net positive over the buy.', status: 'proposed', originator: 'p_omar', originatedDate: d(-3), decisionBy: null, decisionDate: null, priorityLevel: 'low', component: 'pt_power', impact: { schedule: 0, cost: -45000, scope: 'No scope change.', risk: 'Late vendor switch risk.' }, tags: [], comments: [] },
+      ],
+      // Cost-centre codes — bare strings, matching the schema the rest
+      // of the app expects (getCostCentres / state.budgets keys).
+      costCenters: ['CC-ENG-ORBIT', 'CC-TEST-ORBIT'],
       meetings: [
         { id: 'mtg_standup', kind: 'weekly', title: 'Eng standup',     dayOfWeek: 1, startDate: d(-365), time: '09:30' },
         { id: 'mtg_pmrev',   kind: 'weekly', title: 'PM weekly review', dayOfWeek: 5, startDate: d(-365), time: '15:00' },
@@ -911,12 +985,47 @@
       actions: falconActions,
     };
 
+    // Seed weekly budgets for the Orbit-7 cost centres so the budgets
+    // panel + Dashboard CPI / SPI tile have something to render out of
+    // the box. ~26 weeks back + 78 forward (matching the default 2-year
+    // window). Engineering CC has a heavier load (eng phase running);
+    // verification CC is flat zero until ~week 14 then ramps for TVAC.
+    const budgets = {};
+    (function seedBudgets() {
+      const today = new Date(); today.setHours(0,0,0,0);
+      let monday = new Date(today);
+      while (monday.getDay() !== 1) monday = new Date(monday.getTime() - 86400000);
+      monday = new Date(monday.getTime() - 26 * 7 * 86400000);
+      const eng  = {}; const test = {};
+      for (let w = 0; w < 104; w++) {
+        const start = new Date(monday.getTime() + w * 7 * 86400000);
+        const iso = fmtISO(start);
+        const phase = w - 26; // weeks from today
+        // Engineering: high during PDR push (phases past-now), drops
+        // post-CDR.
+        let engH = 320;
+        if (phase < -16) engH = 280;
+        else if (phase < 4) engH = 380;
+        else if (phase < 18) engH = 360;
+        else if (phase < 30) engH = 280;
+        else engH = 220;
+        // Verification: minimal until TVAC ramp at week ~14, peak at 16-22.
+        let testH = 0;
+        if (phase >= 12 && phase < 22) testH = 240;
+        else if (phase >= 22 && phase < 28) testH = 160;
+        eng[iso]  = engH;
+        test[iso] = testH;
+      }
+      budgets['CC-ENG-ORBIT']  = eng;
+      budgets['CC-TEST-ORBIT'] = test;
+    })();
     return {
       people,
       projects: [proj1, proj2, proj3],
       currentProjectId: proj1.id,
       currentView: 'board',
       settings: { theme: 'dark', holidayCountries: [] },
+      budgets,
     };
   }
 
@@ -1026,6 +1135,114 @@
     if (diff < 0) return 'late';
     if (diff <= 3) return 'soon';
     return 'ok';
+  }
+
+  /* ─────────────────── Actuals / Baseline / EVM helpers ───────────────────
+   * The Earned-Value engine reads three numbers per action:
+   *   - planned hours  (PH)  = (commitment / 100) × HOURS_PER_WEEK × weeks
+   *                            of the action's [startDate, due] window
+   *   - actual hours   (AH)  = Σ loggedHours[].hours
+   *   - % complete     (PC)  = status-derived (todo=0, doing=50,
+   *                            blocked=50, done=100, cancelled=0).
+   *                            "doing" with logged hours upgrades to
+   *                            min(100, AH / PH × 100) when PH is set.
+   * From these we derive: PV (planned cost so far), EV (earned cost),
+   * AC (actual cost), CPI = EV/AC, SPI = EV/PV, EAC = BAC/CPI,
+   * ETC = EAC - AC. Rates come from people.hourlyRate (default 100).
+   * All windows are clamped to today for PV (you can only have
+   * "planned" what should have been done by now). */
+
+  // Sum of logged hours for one action (cheap, no defaulting).
+  function totalLoggedHours(a) {
+    if (!a || !Array.isArray(a.loggedHours)) return 0;
+    let s = 0;
+    for (const h of a.loggedHours) s += (typeof h.hours === 'number' ? h.hours : 0);
+    return s;
+  }
+  // Working-week length in hours; used everywhere we convert
+  // commitment % → hours.
+  // (HOURS_PER_WEEK is already defined globally — keep that as canonical.)
+  function actionWindowWeeks(a) {
+    if (!a || !a.due) return 0;
+    const due = parseDate(a.due);
+    const start = a.startDate ? parseDate(a.startDate) :
+      new Date(due.getTime() - 2 * dayMs);
+    const days = Math.max(1, Math.round((due - start) / dayMs) + 1);
+    return days / 7;
+  }
+  // Total planned hours over the action's full [startDate, due] window
+  // (the BAC, "budget at completion", expressed in hours).
+  function plannedHoursTotal(a) {
+    if (!a) return 0;
+    const cmt = (typeof a.commitment === 'number') ? a.commitment : 100;
+    return (cmt / 100) * HOURS_PER_WEEK * actionWindowWeeks(a);
+  }
+  // Hours that SHOULD have been planned by today — used for PV. Clamps to
+  // total once today is past the due date.
+  function plannedHoursToDate(a) {
+    if (!a || !a.due) return 0;
+    const total = plannedHoursTotal(a);
+    if (!total) return 0;
+    const due = parseDate(a.due);
+    const start = a.startDate ? parseDate(a.startDate) :
+      new Date(due.getTime() - 2 * dayMs);
+    const today = new Date(); today.setHours(0,0,0,0);
+    if (today <= start) return 0;
+    if (today >= due) return total;
+    const fullDays = Math.max(1, (due - start) / dayMs);
+    const doneDays = (today - start) / dayMs;
+    return total * (doneDays / fullDays);
+  }
+  // Status-derived progress %, with actuals refinement for "doing".
+  function percentComplete(a) {
+    if (!a) return 0;
+    if (a.status === 'done') return 100;
+    if (a.status === 'cancelled' || a.status === 'todo') return 0;
+    // doing / blocked → 50% baseline, refined by actuals if we have
+    // both planned hours and logged hours.
+    const ph = plannedHoursTotal(a);
+    const ah = totalLoggedHours(a);
+    if (ph > 0 && ah > 0) return Math.max(0, Math.min(100, Math.round((ah / ph) * 100)));
+    return 50;
+  }
+  // Hourly rate of an action's owner, defaulting to 100 when unknown so
+  // EVM is still meaningful when seed data is sparse.
+  function ownerRate(a) {
+    const p = a?.owner ? peopleMap().get(a.owner) : null;
+    return (p && typeof p.hourlyRate === 'number' && p.hourlyRate > 0) ? p.hourlyRate : 100;
+  }
+  // EVM bundle for a single action OR an iterable of actions. Returns
+  // {pv, ev, ac, cpi, spi, eac, etc, bac} all in currency (€). For an
+  // iterable, each metric is summed (CPI / SPI then derived from the
+  // totals — not averaged — which is the canonical PMBOK behaviour).
+  // (Named with the "Actions" suffix because there's a separate
+  // budget-centric evmFor(cc, weeks, mode) lower in the file.)
+  function evmForActions(actionOrList) {
+    const list = Array.isArray(actionOrList) ? actionOrList : [actionOrList];
+    let pv = 0, ev = 0, ac = 0, bac = 0;
+    for (const a of list) {
+      if (!a || a.deletedAt) continue;
+      const rate = ownerRate(a);
+      const phTotal  = plannedHoursTotal(a);
+      const phToDate = plannedHoursToDate(a);
+      const ah = totalLoggedHours(a);
+      const pc = percentComplete(a) / 100;
+      bac += phTotal  * rate;
+      pv  += phToDate * rate;
+      ev  += phTotal  * pc * rate;
+      ac  += ah       * rate;
+    }
+    const cpi = ac > 0 ? ev / ac : null;
+    const spi = pv > 0 ? ev / pv : null;
+    const eac = (cpi && cpi > 0) ? bac / cpi : null;
+    const etc = eac != null ? Math.max(0, eac - ac) : null;
+    return { pv, ev, ac, bac, cpi, spi, eac, etc };
+  }
+  // Days behind / ahead of baseline. Positive = late vs baseline,
+  // negative = early. Null if no baseline or no due date.
+  function baselineSlipDays(a) {
+    if (!a?.baseline?.due || !a.due) return null;
+    return dayDiff(a.baseline.due, a.due) * -1;
   }
   // Apply a set of topbar filters and optionally navigate to a different view.
   // Pass undefined to leave a filter unchanged; pass '' to clear it.
@@ -1397,6 +1614,13 @@
       const items = (proj.actions || [])
         .filter((a) => a.status === s.id && actionMatchesFilters(a))
         .sort((a, b) => (a.priority || 0) - (b.priority || 0));
+      // Hide the "cancelled" column when empty — it's a terminal status
+      // explicitly set by the user (no one drops into it as a working
+      // step), so an empty Cancelled column just wastes a whole column.
+      // Other statuses stay visible even when empty so they remain valid
+      // drop targets and the board's layout doesn't reflow on every
+      // drag-and-drop. Re-appears as soon as a card is cancelled.
+      if (s.id === 'cancelled' && !items.length) return;
       const col = document.createElement('div');
       col.className = 'column';
       col.dataset.status = s.id;
@@ -2457,6 +2681,7 @@
             <button class="seg-btn ${opFilterState.view === 'matrix'  ? 'active' : ''}" data-op-view="matrix" title="4×4 criticality × priority matrix — bubbles sized by age" role="tab">▦ Matrix</button>
             <button class="seg-btn ${opFilterState.view === 'bubbles' ? 'active' : ''}" data-op-view="bubbles" title="Packed bubbles — sized by composite importance, coloured by component" role="tab">◯ Bubbles</button>
           </div>
+          <button class="ghost" id="btnOpCSV" title="Download open points as CSV">↓ CSV</button>
         </div>
       </div>
       <div class="op-quick">
@@ -2654,8 +2879,8 @@
             <div class="op-meta">
               <span class="op-origin" title="Auto-set when this open point was originated">Originated ${fmtFull(op.createdAt)}</span>
               ${stepTotal ? `<span class="op-meta-steps ${stepsAllDone ? 'ok' : ''}" title="Resolution steps">✓ ${stepDone}/${stepTotal} steps</span>` : ''}
-              <button type="button" class="op-level-chip op-crit-chip ${critQuiet ? 'is-default' : ''}" data-kind="criticality" title="Click to set criticality (severity if not addressed)" style="${critChipStyle}">${critLabel}</button>
-              <button type="button" class="op-level-chip prio-chip prio-${prio.id} ${prioQuiet ? 'is-default' : ''}" data-kind="priority" title="Click to set priority (urgency to act)" style="${prioChipStyle}">${prio.label}</button>
+              <button type="button" class="op-level-chip op-crit-chip ${critQuiet ? 'is-default' : ''}" data-kind="criticality" title="Click to set criticality (severity if not addressed)" style="${critChipStyle}"><span class="chip-axis">Sev</span> ${critLabel}</button>
+              <button type="button" class="op-level-chip prio-chip prio-${prio.id} ${prioQuiet ? 'is-default' : ''}" data-kind="priority" title="Click to set priority (urgency to act)" style="${prioChipStyle}"><span class="chip-axis">Pri</span> ${prio.label}</button>
               ${cmp ? `<span class="component-chip" style="background:rgba(${c.rgb},.2);color:rgb(${c.rgb})">${escapeHTML(cmp.name)}</span>` : ''}
             </div>
           </div>
@@ -2896,6 +3121,20 @@
     $('#opAdd').addEventListener('click', addPoint);
     $('#opInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); addPoint(); }
+    });
+    $('#btnOpCSV')?.addEventListener('click', () => {
+      const rows = (proj.openPoints || []).filter(matchesFilters);
+      exportCSV(`open-points-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, rows, [
+        { header: 'Identifier',    value: 'identifier' },
+        { header: 'Title',         value: 'title' },
+        { header: 'Component',     value: (op) => findComponent(proj, op.component)?.name || '' },
+        { header: 'Criticality',   value: (op) => CRITICALITY_LABEL[op.criticality] || op.criticality || '' },
+        { header: 'Priority',      value: (op) => priorityLevel(op.priorityLevel).label },
+        { header: 'Created',       value: 'createdAt' },
+        { header: 'Steps done',    value: (op) => (op.steps || []).filter((s) => s.done).length },
+        { header: 'Steps total',   value: (op) => (op.steps || []).length },
+        { header: 'Notes (plain)', value: (op) => (op.notes || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() },
+      ]);
     });
 
     // Filter / sort wiring
@@ -3374,6 +3613,7 @@
           <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters. Click the row checkbox or shift-click rows to select multiple, then use the bulk toolbar.</div>
         </div>
         <div class="page-actions">
+          <button class="ghost" id="btnRegCSV" title="Download the currently visible rows as a CSV file">↓ CSV</button>
           <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${(proj.actions || []).filter((a) => a.deletedAt).length ? ` <span class="badge-count">${(proj.actions || []).filter((a) => a.deletedAt).length}</span>` : ''}</button>
           <button class="ghost" id="btnArchiveDone" title="Move all currently visible done actions to Archive">⌫ Archive done</button>
           <button class="ghost" id="btnAddAction">+ Action</button>
@@ -3693,8 +3933,17 @@
               ${PRIORITY_LEVELS.map((p) => `<option value="${p.id}" ${p.id === (a.priorityLevel || 'med') ? 'selected' : ''}>${p.label}</option>`).join('')}
             </select>
           </div>
-          <div class="reg-cell">
+          <div class="reg-cell due-cell">
             <input type="date" class="reg-inp ${dueCls}" data-field="due" value="${a.due || ''}" />
+            ${(() => {
+              const slip = baselineSlipDays(a);
+              if (slip == null) return '';
+              const cls = slip > 0 ? 'warn' : slip < 0 ? 'ok' : 'muted';
+              const sign = slip > 0 ? '+' : '';
+              const lbl = slip === 0 ? '0d' : `${sign}${slip}d`;
+              const title = `Schedule variance vs baseline (${a.baseline.due || 'no date'}): ${slip > 0 ? slip + ' day' + (slip === 1 ? '' : 's') + ' late' : slip < 0 ? Math.abs(slip) + ' day' + (slip === -1 ? '' : 's') + ' early' : 'on baseline'}`;
+              return `<span class="reg-var ${cls}" title="${escapeHTML(title)}">${lbl}</span>`;
+            })()}
           </div>
           <div class="reg-cell">
             <input type="date" class="reg-inp ${a.predictedCompletion ? 'overridden' : 'derived'}" data-field="predictedCompletion" value="${predictedCompletion(a)}" title="${a.predictedCompletion ? 'Custom predicted date — click 𝕩 to clear' : 'Defaults to due date'}" />
@@ -3927,6 +4176,44 @@
     $('#btnOpenArchive').addEventListener('click', () => {
       state.currentView = 'archive';
       saveState(); render();
+    });
+
+    // CSV export — currently visible (filter-respecting) rows.
+    $('#btnRegCSV')?.addEventListener('click', () => {
+      const acts = (proj.actions || []).filter(actionMatchesFilters);
+      const stack = regState.sortStack || [];
+      const sorted = stack.length ? acts.slice().sort((a, b) => {
+        for (const s of stack) {
+          const av = regSortValue(a, s.col, proj);
+          const bv = regSortValue(b, s.col, proj);
+          if (av < bv) return s.dir === 'asc' ? -1 : 1;
+          if (av > bv) return s.dir === 'asc' ?  1 : -1;
+        }
+        return 0;
+      }) : acts;
+      exportCSV(`register-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, sorted, [
+        { header: 'ID',                value: 'id' },
+        { header: 'Title',             value: 'title' },
+        { header: 'Component',         value: (a) => findComponent(proj, a.component)?.name || '' },
+        { header: 'Owner',             value: (a) => personName(a.owner) },
+        { header: 'Status',            value: (a) => (STATUSES.find((s) => s.id === a.status) || {}).name || a.status },
+        { header: 'Priority',          value: (a) => priorityLevel(a.priorityLevel).label },
+        { header: 'Commitment %',      value: 'commitment' },
+        { header: 'Start',             value: 'startDate' },
+        { header: 'Due',               value: 'due' },
+        { header: 'Predicted',         value: (a) => predictedCompletion(a) },
+        { header: 'Originator',        value: (a) => personName(a.originator) },
+        { header: 'Originator date',   value: (a) => a.originatorDate || a.createdAt || '' },
+        { header: 'Baseline due',      value: (a) => a.baseline?.due || '' },
+        { header: 'Variance days',     value: (a) => baselineSlipDays(a) ?? '' },
+        { header: 'Logged hours',      value: (a) => totalLoggedHours(a).toFixed(2) },
+        { header: 'Planned hours',     value: (a) => plannedHoursTotal(a).toFixed(2) },
+        { header: '% Complete',        value: (a) => percentComplete(a) },
+        { header: 'Tags',              value: (a) => (a.tags || []).map((tid) => (proj.tags || []).find((t) => t.id === tid)?.name || '').filter(Boolean).join('; ') },
+        { header: 'Depends on',        value: (a) => (a.dependsOn || []).join('; ') },
+        { header: 'Created',           value: 'createdAt' },
+        { header: 'Updated',           value: 'updatedAt' },
+      ]);
     });
 
     // Bulk select / bulk-actions wiring. The selection is module-scoped
@@ -5078,6 +5365,9 @@
           <div class="page-title">${escapeHTML(proj.name)} — Dashboard</div>
           <div class="page-sub">Health summary based on current data</div>
         </div>
+        <div class="page-actions">
+          <button class="ghost" id="btnProjBaseline" title="Freeze the current plan as a baseline for every live action — drives SPI and the schedule-variance column in the Register.">📌 Set project baseline</button>
+        </div>
       </div>
       ${decisionKpisHTML(decisionKpis)}
       <div class="dashboard">
@@ -5115,6 +5405,16 @@
           <div class="panel-title">Status mix</div>
           <div id="statusMix"></div>
         </div>
+
+        <div class="panel evm-panel">
+          <div class="panel-title">Earned-value rollup <span class="legend">action-level · uses baselines + logged hours · independent of cost-centre budgets</span></div>
+          <div id="evmRollup"></div>
+        </div>
+
+        <div class="panel risk-heat-panel">
+          <div class="panel-title">Portfolio risk heatmap <span class="legend">5×5 residual risk · cells aggregate matching items across projects · click a cell to filter the register</span></div>
+          <div id="riskHeat"></div>
+        </div>
       </div>
 
       <div class="dashboard-section-break">
@@ -5145,6 +5445,31 @@
     // Stale-action rows in the decision-KPI panel → open the drawer for that action
     $$('.dkpi-list-row[data-action-id]', view).forEach((el) => {
       el.addEventListener('click', () => openDrawer(el.dataset.actionId));
+    });
+
+    // Project-wide baseline command — freezes the plan for every live action.
+    // Uses the action-level helpers so it Just Works without cost-centre setup.
+    $('#btnProjBaseline')?.addEventListener('click', () => {
+      const targetProjects = curProjectIsMerged() ? state.projects : [proj];
+      const live = targetProjects.flatMap((p) => (p.actions || []).filter((a) => !a.deletedAt && !isClosedStatus(a.status)));
+      const already = live.filter((a) => a.baseline).length;
+      const fresh   = live.length - already;
+      const summary = already
+        ? `Baseline ${live.length} live actions? ${already} already have a baseline (will be re-set).`
+        : `Baseline ${live.length} live actions?`;
+      if (!confirm(summary + '\nThe current due / start / commitment will be frozen as each action\'s baseline.')) return;
+      const today = todayISO();
+      live.forEach((a) => {
+        a.baseline = {
+          due: a.due || null,
+          startDate: a.startDate || null,
+          commitment: (typeof a.commitment === 'number') ? a.commitment : 100,
+          takenAt: today,
+        };
+        a.history.push({ at: today, what: 'Baseline taken (project-wide)' });
+      });
+      commit('baseline-project');
+      toast(`Baseline set on ${live.length} action${live.length === 1 ? '' : 's'}${already ? ` (${fresh} new, ${already} re-set)` : ''}`);
     });
 
     // Dashboard KPI clicks → navigate to Register pre-filtered.
@@ -5207,6 +5532,185 @@
         <div class="bar-track"><div class="bar-fill" style="width:${s.pct}%"></div></div>
         <div class="bar-val">${s.n}</div>
       </div>`).join('');
+
+    // ── Portfolio risk heatmap ─────────────────────────────────────────
+    const heatEl = $('#riskHeat');
+    if (heatEl) {
+      // Collect every risk + opp across the projects in scope, tagged with
+      // their owning project so the user can see provenance on hover and
+      // drill back into the source.
+      const scopeProjs = curProjectIsMerged()
+        ? state.projects.filter((p) => !p.archived)
+        : [proj];
+      const riskItems = scopeProjs.flatMap((p) => (p.risks || []).map((r) => ({ r, proj: p })));
+      // Build a 5×5 cell index keyed by `${p}-${i}` of residual scores
+      // (1-5 each axis). Cells store the matching items so the cell click
+      // can drill in.
+      const cells = new Map();
+      riskItems.forEach(({ r, proj: pr }) => {
+        ensureRiskShape(r);
+        const res = getResidual(r);
+        const p = Math.max(1, Math.min(5, res.probability || 0));
+        const i = Math.max(1, Math.min(5, res.impact || 0));
+        const key = `${p}-${i}`;
+        if (!cells.has(key)) cells.set(key, []);
+        cells.get(key).push({ r, proj: pr });
+      });
+      // Project breakdown — per-project residual exposure (sum of scores).
+      const perProject = scopeProjs.map((p) => {
+        const items = (p.risks || []).map((r) => ({ r, score: (getResidual(r).probability || 0) * (getResidual(r).impact || 0) }));
+        const tot = items.reduce((s, x) => s + x.score, 0);
+        const high = items.filter((x) => x.score >= 12).length;
+        const opp = (p.risks || []).filter((r) => (r.kind || 'risk') === 'opportunity').length;
+        return { p, tot, high, count: items.length, opp };
+      }).sort((a, b) => b.tot - a.tot);
+      // Build the SVG matrix: P (x) low→high, I (y) low→high. Colour cells
+      // by total residual score within the cell. Critical zone (P×I ≥ 12)
+      // shaded amber, severe (≥ 16) red. Empty cells render as faint.
+      const W = 360, H = 220, padL = 36, padB = 30, padT = 8, padR = 10;
+      const innerW = W - padL - padR;
+      const innerH = H - padT - padB;
+      const cellW = innerW / 5;
+      const cellH = innerH / 5;
+      let svg = `<svg class="risk-heat-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+      // Axis labels
+      svg += `<text class="rh-axis" x="${padL + innerW/2}" y="${H - 6}" text-anchor="middle">Probability →</text>`;
+      svg += `<text class="rh-axis" transform="translate(10, ${padT + innerH/2}) rotate(-90)" text-anchor="middle">Impact →</text>`;
+      for (let p = 1; p <= 5; p++) {
+        const x = padL + (p - 1) * cellW;
+        svg += `<text class="rh-tick" x="${x + cellW/2}" y="${H - padB + 14}" text-anchor="middle">${p}</text>`;
+        for (let i = 1; i <= 5; i++) {
+          const y = padT + (5 - i) * cellH; // higher impact at top
+          const cell = cells.get(`${p}-${i}`) || [];
+          const totScore = cell.reduce((s, x) => s + (getResidual(x.r).probability || 0) * (getResidual(x.r).impact || 0), 0);
+          const baseScore = p * i;
+          // Cell tint = base risk severity. Heat overlay = density of items
+          // in this cell (sum of scores).
+          const zoneCls = baseScore >= 15 ? 'rh-severe' : baseScore >= 9 ? 'rh-warn' : baseScore >= 4 ? 'rh-mid' : 'rh-low';
+          const opacity = Math.min(.8, .15 + totScore * 0.02);
+          svg += `<rect class="rh-cell ${zoneCls}" data-p="${p}" data-i="${i}" x="${x}" y="${y}" width="${cellW - 1}" height="${cellH - 1}" rx="3" style="opacity:${opacity.toFixed(2)};"></rect>`;
+          if (cell.length > 0) {
+            svg += `<text class="rh-cell-num" x="${x + cellW/2}" y="${y + cellH/2 + 4}" text-anchor="middle">${cell.length}</text>`;
+          }
+          if (p === 1) {
+            svg += `<text class="rh-tick" x="${padL - 6}" y="${y + cellH/2 + 3}" text-anchor="end">${i}</text>`;
+          }
+        }
+      }
+      svg += `</svg>`;
+      // Top-3 highest-residual risks across the portfolio
+      const sortedRisks = riskItems
+        .map(({ r, proj: pr }) => ({ r, proj: pr, score: (getResidual(r).probability || 0) * (getResidual(r).impact || 0) }))
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5);
+      heatEl.innerHTML = `
+        <div class="rh-wrap">
+          ${svg}
+          <div class="rh-side">
+            <div class="rh-side-title">Top residual exposure</div>
+            ${sortedRisks.length ? sortedRisks.map(({ r, proj: pr, score }) => `
+              <div class="rh-top-row clickable" data-open-risk="${escapeHTML(r.id)}" data-jump-proj="${escapeHTML(pr.id)}" title="${escapeHTML(r.title)} (${escapeHTML(pr.name)})">
+                <span class="rh-top-score sev-${score >= 12 ? 'high' : score >= 6 ? 'mid' : 'low'}">${score}</span>
+                <span class="rh-top-title">${escapeHTML(r.title.length > 38 ? r.title.slice(0, 36) + '…' : r.title)}</span>
+                <span class="rh-top-proj">${escapeHTML(pr.name)}</span>
+              </div>`).join('') : '<div class="rh-empty muted">No residual exposure logged yet.</div>'}
+            ${perProject.length > 1 ? `
+              <div class="rh-side-title rh-side-title-2">By project</div>
+              ${perProject.map(({ p, tot, high, count, opp }) => `
+                <div class="rh-proj-row clickable" data-jump-proj="${escapeHTML(p.id)}" title="${escapeHTML(p.name)}: ${count} risks/opps, total residual ${tot}, ${high} high-severity">
+                  <span class="rh-proj-name">${escapeHTML(p.name.length > 24 ? p.name.slice(0, 22) + '…' : p.name)}</span>
+                  <span class="rh-proj-bar"><span class="rh-proj-bar-fill ${high > 0 ? 'bad' : 'ok'}" style="width:${Math.min(100, tot * 1.5)}%"></span></span>
+                  <span class="rh-proj-tot">${tot}</span>
+                </div>`).join('')}
+            ` : ''}
+          </div>
+        </div>`;
+      // Cell click → filter Risks view by residual cell (or just jump there).
+      heatEl.querySelectorAll('.rh-cell').forEach((rect) => {
+        rect.addEventListener('click', () => {
+          state.currentView = 'risks';
+          saveState(); render();
+        });
+      });
+      heatEl.querySelectorAll('[data-open-risk]').forEach((el) => {
+        el.addEventListener('click', () => {
+          const projId = el.dataset.jumpProj;
+          if (projId && projId !== state.currentProjectId) {
+            state.currentProjectId = projId;
+          }
+          state.currentView = 'risks';
+          saveState(); render();
+          setTimeout(() => openRiskEditor(el.dataset.openRisk), 80);
+        });
+      });
+      heatEl.querySelectorAll('.rh-proj-row[data-jump-proj]').forEach((el) => {
+        el.addEventListener('click', () => {
+          state.currentProjectId = el.dataset.jumpProj;
+          state.currentView = 'risks';
+          saveState(); render();
+        });
+      });
+    }
+
+    // ── Earned-value rollup ────────────────────────────────────────────
+    const evmEl = $('#evmRollup');
+    if (evmEl) {
+      // Scope = live (non-archived, non-cancelled) actions in either the
+      // current project or all projects when the user is in merged mode.
+      const scope = curProjectIsMerged() ? state.projects : [proj];
+      const liveActs = scope.flatMap((p) => (p.actions || [])
+        .filter((a) => !a.deletedAt && a.status !== 'cancelled'));
+      const evm = evmForActions(liveActs);
+      const baselined = liveActs.filter((a) => a.baseline).length;
+      const withActuals = liveActs.filter((a) => totalLoggedHours(a) > 0).length;
+      const coverage = liveActs.length;
+      const fmt$ = (n) => '€' + Math.round(n).toLocaleString();
+      const fmtPct = (n) => (n == null ? '—' : (n * 100).toFixed(0) + '%');
+      const cpiCls = evm.cpi == null ? 'muted' : evm.cpi >= 1 ? 'ok' : evm.cpi >= .85 ? 'warn' : 'bad';
+      const spiCls = evm.spi == null ? 'muted' : evm.spi >= 1 ? 'ok' : evm.spi >= .85 ? 'warn' : 'bad';
+      const sv  = evm.ev - evm.pv;
+      const cv  = evm.ev - evm.ac;
+      const vac = (evm.eac != null) ? evm.bac - evm.eac : null;
+      const hasAny = evm.bac > 0;
+      // Coverage strip — tells the PM what fraction of actions feed the rollup.
+      const coverageBaselinePct = coverage ? Math.round((baselined / coverage) * 100) : 0;
+      const coverageActualsPct  = coverage ? Math.round((withActuals / coverage) * 100) : 0;
+      const coverageColor = (pct) => pct >= 70 ? 'ok' : pct >= 30 ? 'warn' : 'bad';
+      if (!hasAny) {
+        evmEl.innerHTML = `
+          <div class="evm-empty">
+            <div class="evm-empty-title">No EVM data yet.</div>
+            <div class="evm-empty-sub">Take a project baseline (button at the top of this page) and log a few hours against actions to populate.</div>
+            <div class="evm-coverage">
+              <span class="evm-cov-pill ${coverageColor(coverageBaselinePct)}">Baseline: ${baselined}/${coverage} (${coverageBaselinePct}%)</span>
+              <span class="evm-cov-pill ${coverageColor(coverageActualsPct)}">Actuals: ${withActuals}/${coverage} (${coverageActualsPct}%)</span>
+            </div>
+          </div>`;
+      } else {
+        evmEl.innerHTML = `
+          <div class="evm-grid">
+            <div class="evm-cell"><span class="evm-lbl" title="Budget at Completion = total planned cost across baselined actions">BAC</span><b>${fmt$(evm.bac)}</b></div>
+            <div class="evm-cell"><span class="evm-lbl" title="Planned Value = budgeted value of work that should be done by today">PV</span><b>${fmt$(evm.pv)}</b></div>
+            <div class="evm-cell"><span class="evm-lbl" title="Earned Value = budgeted value of work actually completed">EV</span><b>${fmt$(evm.ev)}</b></div>
+            <div class="evm-cell"><span class="evm-lbl" title="Actual Cost = sum of logged hours × hourly rate">AC</span><b>${fmt$(evm.ac)}</b></div>
+            <div class="evm-cell evm-cell-index"><span class="evm-lbl" title="Cost Performance Index = EV ÷ AC. > 1 means you're getting more value per € spent than budgeted.">CPI</span><b class="${cpiCls}">${evm.cpi == null ? '—' : evm.cpi.toFixed(2)}</b><span class="evm-sub">${evm.cpi == null ? 'no actuals' : evm.cpi >= 1 ? 'under budget' : 'over budget'}</span></div>
+            <div class="evm-cell evm-cell-index"><span class="evm-lbl" title="Schedule Performance Index = EV ÷ PV. > 1 means ahead of schedule.">SPI</span><b class="${spiCls}">${evm.spi == null ? '—' : evm.spi.toFixed(2)}</b><span class="evm-sub">${evm.spi == null ? 'no progress' : evm.spi >= 1 ? 'on schedule' : 'behind'}</span></div>
+            <div class="evm-cell"><span class="evm-lbl" title="Estimate at Completion = BAC ÷ CPI">EAC</span><b>${evm.eac == null ? '—' : fmt$(evm.eac)}</b></div>
+            <div class="evm-cell"><span class="evm-lbl" title="Estimate to Complete = EAC − AC">ETC</span><b>${evm.etc == null ? '—' : fmt$(evm.etc)}</b></div>
+          </div>
+          <div class="evm-deltas">
+            <span class="evm-delta ${cv >= 0 ? 'ok' : 'bad'}" title="Cost Variance: EV − AC. Positive = under budget.">CV ${cv >= 0 ? '+' : ''}${fmt$(cv)}</span>
+            <span class="evm-delta ${sv >= 0 ? 'ok' : 'bad'}" title="Schedule Variance: EV − PV. Positive = ahead of schedule.">SV ${sv >= 0 ? '+' : ''}${fmt$(sv)}</span>
+            ${vac != null ? `<span class="evm-delta ${vac >= 0 ? 'ok' : 'bad'}" title="Variance at Completion: BAC − EAC. Positive = expected to land under budget.">VAC ${vac >= 0 ? '+' : ''}${fmt$(vac)}</span>` : ''}
+          </div>
+          <div class="evm-coverage">
+            <span class="evm-cov-pill ${coverageColor(coverageBaselinePct)}">Baseline: ${baselined}/${coverage} (${coverageBaselinePct}%)</span>
+            <span class="evm-cov-pill ${coverageColor(coverageActualsPct)}">Actuals: ${withActuals}/${coverage} (${coverageActualsPct}%)</span>
+            ${coverageBaselinePct < 50 || coverageActualsPct < 50 ? '<span class="evm-cov-hint">Low coverage — rollup may not be representative.</span>' : ''}
+          </div>`;
+      }
+    }
   }
 
   /* ----------------------------- Review ------------------------------ */
@@ -6293,7 +6797,7 @@
     });
   }
 
-  function openRiskEditor(riskId) {
+  function openRiskEditor(riskId, opts = {}) {
     const proj = curProject();
     const r = (proj.risks || []).find((x) => x.id === riskId);
     if (!r) return;
@@ -6344,7 +6848,17 @@
         </div>
       </div>`;
     document.body.appendChild(overlay);
-    setTimeout(() => document.getElementById('reTitle').focus(), 30);
+    setTimeout(() => {
+      const tgt = opts.focusLink ? document.getElementById('reActionLink') : document.getElementById('reTitle');
+      tgt?.focus();
+      if (opts.focusLink) {
+        // Scroll the picker into view + give it a brief halo so users
+        // landing from a "+ link action" click see exactly where to act.
+        tgt?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        tgt?.classList.add('field-flash');
+        setTimeout(() => tgt?.classList.remove('field-flash'), 1400);
+      }
+    }, 30);
 
     let kind = isOpp ? 'opportunity' : 'risk';
     overlay.querySelectorAll('.seg-btn[data-re-kind]').forEach((b) => {
@@ -6639,6 +7153,7 @@
             <button class="seg-btn ${roState.kind === 'risk' ? 'active' : ''}" data-kind="risk">Risks</button>
             <button class="seg-btn ${roState.kind === 'opportunity' ? 'active' : ''}" data-kind="opportunity">Opportunities</button>
           </div>
+          <button class="ghost" id="btnRiskCSV" title="Download risks &amp; opportunities as CSV">↓ CSV</button>
           <button class="ghost" id="btnAddRisk">+ Risk</button>
           <button class="ghost" id="btnAddOpp">+ Opportunity</button>
         </div>
@@ -6676,6 +7191,32 @@
         const icon = kind === 'opportunity' ? '▽' : '△';
         const responseLbl = kind === 'opportunity' ? 'Capture' : 'Mitigation';
         const linkedAction = r.actionId ? state.projects.flatMap((p) => p.actions || []).find((a) => a.id === r.actionId) : null;
+        // Mitigation status chip — colour-keyed to the linked action's
+        // state so the PM can see at a glance whether the mitigation is
+        // actually moving (done = green, doing = blue, todo = grey,
+        // blocked / overdue = red). Missing link shows a discreet
+        // "+ link" affordance that opens the editor focused on the
+        // picker so users can wire it in one click.
+        let mitChip = '';
+        if (linkedAction) {
+          const isLate = linkedAction.due && linkedAction.status !== 'done' && dayDiff(linkedAction.due, todayISO()) < 0;
+          const sCls = isLate ? 'late'
+            : linkedAction.status === 'done'   ? 'done'
+            : linkedAction.status === 'blocked'? 'blocked'
+            : linkedAction.status === 'doing'  ? 'doing'
+            : 'todo';
+          const sIcon = isLate ? '⏰'
+            : linkedAction.status === 'done'   ? '✓'
+            : linkedAction.status === 'blocked'? '⨯'
+            : linkedAction.status === 'doing'  ? '◐'
+            : '○';
+          mitChip = `<span class="ro-mit-link ${sCls} clickable" data-open-action="${linkedAction.id}" title="${kind === 'opportunity' ? 'Capture action' : 'Mitigation action'}: ${escapeHTML(linkedAction.title)} (${escapeHTML(linkedAction.status)})">${sIcon} ${escapeHTML(linkedAction.title.length > 26 ? linkedAction.title.slice(0, 24) + '…' : linkedAction.title)}</span>`;
+        } else if (resScore >= 6 || kind === 'opportunity') {
+          // Only surface the "+ link" affordance when it actually matters —
+          // i.e. residual is non-trivial or this is an opportunity (always
+          // needs a capture plan). Quiet "0 risk" rows don't get noise.
+          mitChip = `<span class="ro-mit-add clickable" data-link-add="${r.id}" title="Link a ${kind === 'opportunity' ? 'capture' : 'mitigation'} action — opens the editor">+ link action</span>`;
+        }
         return `
           <div class="row ro-row kind-${kind === 'opportunity' ? 'opportunity' : 'risk'} sev-${sevCls}" data-risk-id="${r.id}">
             ${ROW_GRIP_HTML}
@@ -6687,7 +7228,7 @@
             </span>
             <span class="row-meta">
               <span class="ro-resp" title="${responseLbl}">${escapeHTML(r.mitigation || '—')}</span>
-              ${linkedAction ? `<span class="ro-link clickable" data-open-action="${linkedAction.id}">↗ ${escapeHTML(linkedAction.title)}</span>` : ''}
+              ${mitChip}
               <span class="ro-owner">${escapeHTML(personName(r.owner))}</span>
             </span>
           </div>`;
@@ -6703,9 +7244,21 @@
           commitName: 'risks-reorder',
         });
       }
-      // Click linked action → drawer
-      $$('.ro-link[data-open-action]', body).forEach((el) =>
-        el.addEventListener('click', () => openDrawer(el.dataset.openAction)));
+      // Click linked action chip → open the action drawer.
+      // Includes both the legacy .ro-link affordance (kept for compat
+      // with reports) and the new .ro-mit-link colour-coded pill.
+      $$('.ro-link[data-open-action], .ro-mit-link[data-open-action]', body).forEach((el) =>
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openDrawer(el.dataset.openAction);
+        }));
+      // "+ link action" → open the risk editor focused on the picker
+      // (handled inside openRiskEditor via the `focusLink` option).
+      $$('.ro-mit-add[data-link-add]', body).forEach((el) =>
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          openRiskEditor(el.dataset.linkAdd, { focusLink: true });
+        }));
       // Right-click on a risk/opportunity row → context menu (Edit / Delete)
       $$('.ro-row[data-risk-id]', body).forEach((row) => {
         row.addEventListener('contextmenu', (e) => {
@@ -6746,6 +7299,25 @@
     });
     $('#btnAddRisk').addEventListener('click', () => openQuickAdd('risk', { kind: 'risk' }));
     $('#btnAddOpp').addEventListener('click', () => openQuickAdd('risk', { kind: 'opportunity' }));
+    $('#btnRiskCSV')?.addEventListener('click', () => {
+      const rows = proj.risks
+        .filter((r) => roState.kind === 'all' || (r.kind || 'risk') === roState.kind)
+        .filter((r) => matchesSearch(r.title, r.identifier, r.mitigation, personName(r.owner)));
+      exportCSV(`risks-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, rows, [
+        { header: 'Identifier',         value: 'identifier' },
+        { header: 'Kind',               value: (r) => r.kind || 'risk' },
+        { header: 'Title',              value: 'title' },
+        { header: 'Owner',              value: (r) => personName(r.owner) },
+        { header: 'Inherent probability', value: (r) => getInherent(r).probability },
+        { header: 'Inherent impact',      value: (r) => getInherent(r).impact },
+        { header: 'Inherent score',       value: (r) => { const i = getInherent(r); return i.probability * i.impact; } },
+        { header: 'Residual probability', value: (r) => getResidual(r).probability },
+        { header: 'Residual impact',      value: (r) => getResidual(r).impact },
+        { header: 'Residual score',       value: (r) => { const i = getResidual(r); return i.probability * i.impact; } },
+        { header: 'Mitigation / Capture', value: 'mitigation' },
+        { header: 'Linked action',        value: (r) => r.actionId || '' },
+      ]);
+    });
     draw();
   }
 
@@ -6756,7 +7328,10 @@
     view.innerHTML = `
       <div class="page-head">
         <div><div class="page-title">Decisions</div><div class="page-sub">Capture key choices and their rationale.</div></div>
-        <div class="page-actions"><button class="ghost" id="btnAddDec">+ Decision</button></div>
+        <div class="page-actions">
+          <button class="ghost" id="btnDecCSV" title="Download decision log as CSV">↓ CSV</button>
+          <button class="ghost" id="btnAddDec">+ Decision</button>
+        </div>
       </div>
       <div class="row-list" id="decList"></div>`;
     root.appendChild(view);
@@ -6784,12 +7359,47 @@
         const compChip = cmp
           ? `<span class="row-comp" style="background:rgba(${c.rgb},.18);color:rgb(${c.rgb});border:1px solid rgba(${c.rgb},.55);">${escapeHTML(cmp.name)}</span>`
           : '';
+        const status = d.status || 'in_effect';
+        const statusLbl = status === 'open' ? 'OPEN' : status === 'superseded' ? 'SUPERSEDED' : 'IN EFFECT';
+        const statusCls = status === 'open' ? 'open' : status === 'superseded' ? 'superseded' : 'in-effect';
+        // Trigger chip — link to the entity that caused this decision.
+        let triggerChip = '';
+        if (d.triggerRef && typeof d.triggerRef === 'object' && d.triggerRef.type && d.triggerRef.id) {
+          const tref = d.triggerRef;
+          let lbl = null, attr = '';
+          if (tref.type === 'risk') {
+            const r = (proj.risks || []).find((x) => x.id === tref.id);
+            if (r) { lbl = (r.identifier || r.title || 'Risk'); attr = `data-open-risk="${escapeHTML(r.id)}"`; }
+          } else if (tref.type === 'cr') {
+            const c2 = (proj.changes || []).find((x) => x.id === tref.id);
+            if (c2) { lbl = (c2.title || 'CR'); attr = `data-open-cr="${escapeHTML(c2.id)}"`; }
+          } else if (tref.type === 'action') {
+            const a = (proj.actions || []).find((x) => x.id === tref.id);
+            if (a) { lbl = (a.title || 'Action'); attr = `data-open-action="${escapeHTML(a.id)}"`; }
+          }
+          if (lbl) triggerChip = `<span class="dec-trigger ${tref.type} clickable" ${attr} title="Triggered by ${escapeHTML(tref.type)}">↳ ${escapeHTML(lbl.length > 36 ? lbl.slice(0, 34) + '…' : lbl)}</span>`;
+        } else if (typeof d.triggerRef === 'string' && d.triggerRef.trim()) {
+          triggerChip = `<span class="dec-trigger external" title="Trigger">↳ ${escapeHTML(d.triggerRef)}</span>`;
+        }
+        // Rationale preview — 1-2 line snippet inline. Falls back to em-dash
+        // when not provided so the row layout stays consistent.
+        const rationaleSnip = d.rationale && d.rationale.length > 120
+          ? d.rationale.slice(0, 118).replace(/\s+\S*$/, '') + '…'
+          : (d.rationale || '');
         return `
-        <div class="row" data-decision-id="${d.id}">
+        <div class="row dec-row dec-${statusCls}" data-decision-id="${d.id}">
           ${ROW_GRIP_HTML}
-          <span>⬡ ${escapeHTML(d.title)}</span>
-          ${compChip}
-          <span class="row-meta">${escapeHTML(personName(d.owner))} • ${d.date || ''}</span>
+          <div class="dec-main">
+            <div class="dec-head">
+              <span class="dec-icon">⬡</span>
+              <span class="dec-title">${escapeHTML(d.title)}</span>
+              <span class="dec-status-pill status-${statusCls}" title="Decision status">${statusLbl}</span>
+              ${compChip}
+              ${triggerChip}
+            </div>
+            ${rationaleSnip ? `<div class="dec-rat">${escapeHTML(rationaleSnip)}</div>` : ''}
+          </div>
+          <span class="row-meta dec-meta">${escapeHTML(personName(d.owner))} • ${d.date || ''}</span>
         </div>`;
       }).join('');
       wireListReorder(list, {
@@ -6818,8 +7428,33 @@
         });
         row.addEventListener('dblclick', () => openDecisionEditor(row.dataset.decisionId));
       });
+      // Trigger chip clicks — jump to the linked entity. stopPropagation
+      // so the click doesn't bubble to the row (which would also try to
+      // do something useful).
+      $$('.dec-trigger[data-open-action]', list).forEach((el) =>
+        el.addEventListener('click', (e) => { e.stopPropagation(); openDrawer(el.dataset.openAction); }));
+      $$('.dec-trigger[data-open-risk]', list).forEach((el) =>
+        el.addEventListener('click', (e) => { e.stopPropagation(); openRiskEditor(el.dataset.openRisk); }));
+      $$('.dec-trigger[data-open-cr]', list).forEach((el) =>
+        el.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const c = (proj.changes || []).find((x) => x.id === el.dataset.openCr);
+          if (c) openChangeRequestEditor(c);
+        }));
     }
     $('#btnAddDec').addEventListener('click', () => openQuickAdd('decision'));
+    $('#btnDecCSV')?.addEventListener('click', () => {
+      exportCSV(`decisions-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, filteredDecisions, [
+        { header: 'ID',         value: 'id' },
+        { header: 'Title',      value: 'title' },
+        { header: 'Rationale',  value: 'rationale' },
+        { header: 'Owner',      value: (d) => personName(d.owner) },
+        { header: 'Date',       value: 'date' },
+        { header: 'Component',  value: (d) => findComponent(proj, d.component)?.name || '' },
+        { header: 'Status',     value: (d) => d.status || '' },
+        { header: 'Trigger',    value: (d) => d.triggerRef || '' },
+      ]);
+    });
   }
 
   function openDecisionEditor(decisionId) {
@@ -6849,6 +7484,34 @@
               ${(proj.components || []).map((cmp) => `<option value="${cmp.id}" ${cmp.id === d.component ? 'selected' : ''}>${escapeHTML(cmp.name)}</option>`).join('')}
             </select>
           </div>
+          <div class="qa-row">
+            <div class="field"><label>Status</label>
+              <select id="deStatus">
+                <option value="open"        ${d.status === 'open'        ? 'selected' : ''}>Open</option>
+                <option value="in_effect"   ${(d.status || 'in_effect') === 'in_effect' ? 'selected' : ''}>In effect</option>
+                <option value="superseded"  ${d.status === 'superseded'  ? 'selected' : ''}>Superseded</option>
+              </select>
+            </div>
+            <div class="field"><label>Triggered by <span class="muted">(optional)</span></label>
+              <select id="deTriggerType">
+                <option value="">—</option>
+                <option value="risk"     ${d.triggerRef?.type === 'risk'     ? 'selected' : ''}>Risk / opportunity</option>
+                <option value="cr"       ${d.triggerRef?.type === 'cr'       ? 'selected' : ''}>Change request</option>
+                <option value="action"   ${d.triggerRef?.type === 'action'   ? 'selected' : ''}>Action</option>
+                <option value="external" ${typeof d.triggerRef === 'string'  ? 'selected' : ''}>External (free text)</option>
+              </select>
+            </div>
+          </div>
+          <div class="field" id="deTriggerWrap" style="${d.triggerRef ? '' : 'display:none;'}">
+            <label>Trigger target</label>
+            <select id="deTriggerRef" style="${typeof d.triggerRef === 'string' ? 'display:none;' : ''}">
+              <option value="">—</option>
+              ${(d.triggerRef?.type === 'risk' || !d.triggerRef ? (proj.risks || []) : []).map((r) => `<option value="${r.id}" ${d.triggerRef?.id === r.id ? 'selected' : ''}>${escapeHTML((r.identifier ? r.identifier + ' — ' : '') + r.title)}</option>`).join('')}
+              ${(d.triggerRef?.type === 'cr' ? (proj.changes || []) : []).map((c) => `<option value="${c.id}" ${d.triggerRef?.id === c.id ? 'selected' : ''}>${escapeHTML(c.title)}</option>`).join('')}
+              ${(d.triggerRef?.type === 'action' ? (proj.actions || []) : []).map((a) => `<option value="${a.id}" ${d.triggerRef?.id === a.id ? 'selected' : ''}>${escapeHTML(a.title)}</option>`).join('')}
+            </select>
+            <input type="text" id="deTriggerText" placeholder="e.g. customer request, board direction…" value="${typeof d.triggerRef === 'string' ? escapeHTML(d.triggerRef) : ''}" style="${typeof d.triggerRef === 'string' ? '' : 'display:none;'}" />
+          </div>
         </div>
         <div class="desc-foot">
           <button class="ghost" id="deCancel">Cancel</button>
@@ -6867,12 +7530,48 @@
     // Hook the inline person-create flow on the Owner dropdown so a new
     // person can be added without leaving the editor.
     overlay.querySelectorAll('select[data-person-select]').forEach(wirePersonSelectInline);
+    // Trigger picker: switching type re-populates the target dropdown so
+    // it always shows the right entity list (or swaps in a free-text input
+    // for "external").
+    const repaintTriggerOptions = () => {
+      const tt = document.getElementById('deTriggerType').value;
+      const wrap = document.getElementById('deTriggerWrap');
+      const sel  = document.getElementById('deTriggerRef');
+      const txt  = document.getElementById('deTriggerText');
+      if (!tt) { wrap.style.display = 'none'; return; }
+      wrap.style.display = '';
+      if (tt === 'external') {
+        sel.style.display = 'none'; txt.style.display = '';
+        return;
+      }
+      txt.style.display = 'none'; sel.style.display = '';
+      let opts = [];
+      if (tt === 'risk')   opts = (proj.risks || []).map((r) => ({ id: r.id, label: (r.identifier ? r.identifier + ' — ' : '') + r.title }));
+      if (tt === 'cr')     opts = (proj.changes || []).map((c) => ({ id: c.id, label: c.title }));
+      if (tt === 'action') opts = (proj.actions || []).filter((a) => !a.deletedAt).map((a) => ({ id: a.id, label: a.title }));
+      const cur = (d.triggerRef && typeof d.triggerRef === 'object') ? d.triggerRef.id : '';
+      sel.innerHTML = '<option value="">—</option>' + opts.map((o) =>
+        `<option value="${escapeHTML(o.id)}" ${o.id === cur ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('');
+    };
+    document.getElementById('deTriggerType').addEventListener('change', repaintTriggerOptions);
+
     overlay.querySelector('#deSave').addEventListener('click', () => {
       d.title = document.getElementById('deTitle').value.trim() || d.title;
       d.rationale = document.getElementById('deRat').value;
       d.owner = document.getElementById('deOwner').value;
       d.date = document.getElementById('deDate').value || d.date;
       d.component = document.getElementById('deComponent').value || null;
+      d.status = document.getElementById('deStatus').value || 'in_effect';
+      const tt = document.getElementById('deTriggerType').value;
+      if (!tt) {
+        d.triggerRef = null;
+      } else if (tt === 'external') {
+        const txt = document.getElementById('deTriggerText').value.trim();
+        d.triggerRef = txt || null;
+      } else {
+        const id = document.getElementById('deTriggerRef').value;
+        d.triggerRef = id ? { type: tt, id } : null;
+      }
       stampEdit(d, null, 'edit');
       commit('decision-edit');
       close();
@@ -6972,6 +7671,7 @@
             <button class="seg-btn ${crFilterState.status === 'all' ? 'active' : ''}" data-cr-filter="all">All</button>
             ${CR_STATUSES.map((s) => `<button class="seg-btn ${crFilterState.status === s.id ? 'active' : ''}" data-cr-filter="${s.id}">${s.label}</button>`).join('')}
           </div>
+          <button class="ghost" id="btnCRCSV" title="Download change requests as CSV">↓ CSV</button>
           <button class="ghost" id="btnAddCR">+ Change request</button>
         </div>
       </div>
@@ -7202,6 +7902,31 @@
     $('#btnAddCR').addEventListener('click', () => {
       if (curProjectIsMerged()) { toast('Pick a single project to add items.'); return; }
       openChangeRequestEditor(newChangeRequestDraft());
+    });
+    $('#btnCRCSV')?.addEventListener('click', () => {
+      const rows = (proj.changes || []).filter((c) =>
+        (crFilterState.status === 'all' || c.status === crFilterState.status) &&
+        matchesSearch(c.title, c.rationale, c.description, c.analysis)
+      );
+      exportCSV(`change-requests-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, rows, [
+        { header: 'ID',                  value: 'id' },
+        { header: 'Title',               value: 'title' },
+        { header: 'Status',              value: (c) => (CR_STATUSES.find((s) => s.id === c.status) || {}).label || c.status },
+        { header: 'Priority',            value: (c) => priorityLevel(c.priorityLevel).label },
+        { header: 'Originator',          value: (c) => personName(c.originator) },
+        { header: 'Originated',          value: 'originatedDate' },
+        { header: 'Decision by',         value: (c) => personName(c.decisionBy) },
+        { header: 'Decision date',       value: 'decisionDate' },
+        { header: 'Component',           value: (c) => findComponent(proj, c.component)?.name || '' },
+        { header: 'Impact: schedule (d)', value: (c) => c.impact?.schedule ?? '' },
+        { header: 'Impact: cost (€)',     value: (c) => c.impact?.cost ?? '' },
+        { header: 'Impact: scope',        value: (c) => c.impact?.scope || '' },
+        { header: 'Impact: risk',         value: (c) => c.impact?.risk || '' },
+        { header: 'Rationale',           value: 'rationale' },
+        { header: 'Description',         value: 'description' },
+        { header: 'Analysis',            value: 'analysis' },
+        { header: 'Link',                value: 'linkUrl' },
+      ]);
     });
     draw();
   }
@@ -9060,7 +9785,10 @@
     view.innerHTML = `
       <div class="page-head">
         <div><div class="page-title">People</div><div class="page-sub">${state.people.length} members • capacity in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year) • workload across all projects, projected over the next 12 weeks</div></div>
-        <div class="page-actions"><button class="ghost" id="btnNewPerson">+ Person</button></div>
+        <div class="page-actions">
+          <button class="ghost" id="btnPeopleCSV" title="Download the roster + current load as CSV">↓ CSV</button>
+          <button class="ghost" id="btnNewPerson">+ Person</button>
+        </div>
       </div>
       <div class="panel">
         <div class="panel-title">
@@ -9074,10 +9802,12 @@
         <div id="peopleWl">
           ${wl.filter(({ p }) => matchesSearch(p.name, p.role)).map(({ p, open, series, peakWeek }) => {
             const cap = p.capacity || 100;
-            // open is action count (headcount); compute current commitment % across active actions
-            const openCmt = state.projects.flatMap((pr) => pr.actions || [])
-              .filter((a) => a.owner === p.id && a.status !== 'done' && !a.deletedAt)
-              .reduce((s, a) => s + ((typeof a.commitment === 'number') ? a.commitment : 100), 0);
+            // CONCURRENT commitment, not summed across all open actions:
+            // weeklyLoad[0] is the current week's overlapping commitment.
+            // Previously this summed every open action regardless of when
+            // its [startDate, due] window fell, producing absurd figures
+            // (20 actions × 100% = 2000%) when a person had a long backlog.
+            const openCmt = series[0]?.count ?? 0;
             const pct = clamp(Math.round((openCmt / cap) * 100), 0, 200);
             const cls = pct > 100 ? 'over' : pct > 80 ? 'warn' : 'ok';
             const peakCls = peakWeek.count > cap ? 'over' : peakWeek.count > cap * 0.8 ? 'warn' : 'ok';
@@ -9105,6 +9835,21 @@
       </div>`;
     root.appendChild(view);
     $('#btnNewPerson').addEventListener('click', () => openQuickAdd('person'));
+    $('#btnPeopleCSV')?.addEventListener('click', () => {
+      // One row per person with current load + peak across the 12-week horizon.
+      const rows = wl.filter(({ p }) => matchesSearch(p.name, p.role));
+      exportCSV(`people-${todayISO()}.csv`, rows, [
+        { header: 'ID',            value: ({ p }) => p.id },
+        { header: 'Name',          value: ({ p }) => p.name },
+        { header: 'Role',          value: ({ p }) => p.role || '' },
+        { header: 'Capacity %',    value: ({ p }) => p.capacity || 100 },
+        { header: 'Hourly rate',   value: ({ p }) => p.hourlyRate || '' },
+        { header: 'Open actions',  value: ({ open }) => open },
+        { header: 'Current load %', value: ({ series }) => series[0]?.count ?? 0 },
+        { header: 'Peak load %',   value: ({ peakWeek }) => peakWeek?.count ?? 0 },
+        { header: 'Peak week',     value: ({ peakWeek }) => peakWeek?.weekStart ? fmtISO(peakWeek.weekStart) : '' },
+      ]);
+    });
     wireListReorder(view.querySelector('#peopleWl'), {
       rowSelector: '.person-row[data-owner-id]',
       idAttr: 'ownerId',
@@ -9167,7 +9912,9 @@
     const series = weeklyLoad(p.id, 12);
     const cap = p.capacity || 100;
     const peakWeek = series.reduce((mx, s) => s.count > mx.count ? s : mx, series[0] || { count: 0 });
-    const openCmt = open.reduce((s, { a }) => s + ((typeof a.commitment === 'number') ? a.commitment : 100), 0);
+    // Concurrent commitment for the current week (see renderPeople bar
+    // comment) — summing all open actions over-counts non-overlapping ones.
+    const openCmt = series[0]?.count ?? 0;
     const pct = clamp(Math.round((openCmt / cap) * 100), 0, 200);
     const cls = pct > 100 ? 'over' : pct > 80 ? 'warn' : 'ok';
 
@@ -9326,6 +10073,10 @@
       </div>
       <div class="field"><label>Tags</label>
         <div class="tags-input" id="dTagsWrap"></div>
+      </div>
+      <div class="field">
+        <label>Effort tracking <span class="muted">— actuals feed CPI / EAC on the Dashboard</span></label>
+        <div class="effort-track" id="dEffort"></div>
       </div>
       <div class="field"><label>Notes / justification</label><textarea id="dNotes">${escapeHTML(a.notes || '')}</textarea></div>
       <div class="field"><label>Comments</label>
@@ -9595,6 +10346,126 @@
       });
     }
     renderCommentsUI();
+
+    // ── Effort tracking widget — actuals + baseline ──────────────────
+    // Rendered inline so the user can log time and freeze a baseline
+    // without leaving the drawer. Mutations commit immediately (separate
+    // from the main Save) so log-time-then-cancel doesn't lose data.
+    function renderEffortUI() {
+      const el = $('#dEffort'); if (!el) return;
+      const ah  = totalLoggedHours(a);
+      const ph  = plannedHoursTotal(a);
+      const evm = evmForActions(a);
+      const rate = ownerRate(a);
+      const bl  = a.baseline;
+      const slip = baselineSlipDays(a); // +late vs baseline
+      const ahPct = ph > 0 ? Math.min(200, Math.round((ah / ph) * 100)) : 0;
+      el.innerHTML = `
+        <div class="effort-grid">
+          <div class="effort-cell"><span class="effort-lbl">Logged</span><b>${ah.toFixed(1)} h</b><span class="effort-sub">@ €${rate}/h = €${Math.round(evm.ac).toLocaleString()}</span></div>
+          <div class="effort-cell"><span class="effort-lbl">Planned (BAC)</span><b>${ph.toFixed(1)} h</b><span class="effort-sub">€${Math.round(evm.bac).toLocaleString()}</span></div>
+          <div class="effort-cell"><span class="effort-lbl">CPI</span><b class="${evm.cpi == null ? 'muted' : evm.cpi >= 1 ? 'ok' : 'warn'}">${evm.cpi == null ? '—' : evm.cpi.toFixed(2)}</b><span class="effort-sub">${evm.cpi == null ? 'no actuals' : evm.cpi >= 1 ? 'under budget' : 'over budget'}</span></div>
+          <div class="effort-cell"><span class="effort-lbl">SPI</span><b class="${evm.spi == null ? 'muted' : evm.spi >= 1 ? 'ok' : 'warn'}">${evm.spi == null ? '—' : evm.spi.toFixed(2)}</b><span class="effort-sub">${evm.spi == null ? 'no progress yet' : evm.spi >= 1 ? 'on schedule' : 'behind schedule'}</span></div>
+        </div>
+        <div class="effort-bar-wrap" title="Logged vs planned">
+          <div class="effort-bar"><div class="effort-bar-fill ${ahPct > 100 ? 'over' : ahPct > 80 ? 'warn' : ''}" style="width:${Math.min(100, ahPct)}%"></div></div>
+          <span class="effort-bar-val">${ahPct}%</span>
+        </div>
+        <div class="effort-quick" data-role="quick">
+          <span class="effort-lbl">Log time</span>
+          <button type="button" class="ghost" data-log="0.5">+½h</button>
+          <button type="button" class="ghost" data-log="1">+1h</button>
+          <button type="button" class="ghost" data-log="2">+2h</button>
+          <button type="button" class="ghost" data-log="4">+4h</button>
+          <button type="button" class="ghost" data-log="8">+8h</button>
+          <input type="number" class="effort-custom" min="0.1" max="40" step=".25" placeholder="custom" />
+          <button type="button" class="ghost" data-log="custom">Log</button>
+        </div>
+        ${(a.loggedHours || []).length ? `
+          <div class="effort-entries">
+            ${a.loggedHours.slice().sort((x,y) => (y.at||'').localeCompare(x.at||'')).slice(0, 6).map((h) => `
+              <div class="effort-entry" data-entry="${escapeHTML(h.id)}">
+                <span class="effort-entry-h"><b>${(h.hours || 0).toFixed(2)}h</b></span>
+                <span class="effort-entry-by">${escapeHTML(personName(h.by))}</span>
+                <span class="effort-entry-at muted">${escapeHTML(h.at || '')}</span>
+                ${h.note ? `<span class="effort-entry-note">${escapeHTML(h.note)}</span>` : ''}
+                <button type="button" class="effort-entry-x" title="Delete entry">×</button>
+              </div>`).join('')}
+            ${a.loggedHours.length > 6 ? `<div class="effort-more muted">+${a.loggedHours.length - 6} earlier entries</div>` : ''}
+          </div>` : ''}
+        <div class="effort-baseline">
+          ${bl ? `
+            <span class="effort-lbl">Baseline taken ${escapeHTML(bl.takenAt)}</span>
+            <span class="effort-baseline-vals">
+              <span title="Baseline due date">due ${escapeHTML(bl.due || '—')}</span>
+              ${slip != null ? `<span class="${slip > 0 ? 'warn' : slip < 0 ? 'ok' : 'muted'}" title="Variance vs baseline due">${slip > 0 ? '+' : ''}${slip}d</span>` : ''}
+              <span title="Baseline commitment">@${bl.commitment}%</span>
+            </span>
+            <button type="button" class="ghost" data-baseline="rebase">Re-baseline</button>
+            <button type="button" class="ghost" data-baseline="clear">Clear</button>
+          ` : `
+            <span class="effort-lbl muted">No baseline yet — freeze the plan to enable schedule variance + SPI.</span>
+            <button type="button" class="ghost" data-baseline="take">Take baseline</button>
+          `}
+        </div>`;
+      // Log-time clicks
+      el.querySelectorAll('[data-log]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          let hrs;
+          if (btn.dataset.log === 'custom') {
+            const custom = el.querySelector('.effort-custom');
+            hrs = parseFloat(custom?.value || '0');
+            if (custom) custom.value = '';
+          } else {
+            hrs = parseFloat(btn.dataset.log);
+          }
+          if (!hrs || hrs <= 0 || hrs > 40) return;
+          a.loggedHours.push({ id: uid('lh'), hours: hrs, at: todayISO(), by: a.owner || null, note: '' });
+          a.updatedAt = todayISO();
+          a.history.push({ at: todayISO(), what: `Logged ${hrs}h (${ah.toFixed(1)}h → ${(ah + hrs).toFixed(1)}h)` });
+          commit('time-log');
+          renderEffortUI();
+        });
+      });
+      // Delete entry
+      el.querySelectorAll('.effort-entry-x').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.closest('.effort-entry')?.dataset.entry;
+          if (!id) return;
+          const e = a.loggedHours.find((x) => x.id === id);
+          if (!e) return;
+          if (!confirm(`Remove the ${e.hours}h entry from ${e.at}?`)) return;
+          a.loggedHours = a.loggedHours.filter((x) => x.id !== id);
+          a.updatedAt = todayISO();
+          commit('time-log-delete');
+          renderEffortUI();
+        });
+      });
+      // Baseline controls
+      el.querySelectorAll('[data-baseline]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const kind = btn.dataset.baseline;
+          if (kind === 'take' || kind === 'rebase') {
+            a.baseline = {
+              due: a.due || null,
+              startDate: a.startDate || null,
+              commitment: (typeof a.commitment === 'number') ? a.commitment : 100,
+              takenAt: todayISO(),
+            };
+            a.history.push({ at: todayISO(), what: kind === 'take' ? 'Baseline taken' : `Baseline re-set (due ${a.baseline.due || '—'})` });
+            commit('baseline-set');
+            toast('Baseline saved');
+          } else if (kind === 'clear') {
+            if (!confirm('Clear baseline? Variance and SPI will no longer be computed for this action.')) return;
+            a.baseline = null;
+            a.history.push({ at: todayISO(), what: 'Baseline cleared' });
+            commit('baseline-clear');
+          }
+          renderEffortUI();
+        });
+      });
+    }
+    renderEffortUI();
 
     $('#dSave').addEventListener('click', () => {
       const oldStatus = a.status;
@@ -11329,6 +12200,31 @@
         a.dependsOn = Array.isArray(a.dependsOn) ? a.dependsOn : [];
         a.tags      = Array.isArray(a.tags) ? a.tags : [];
         a.comments  = Array.isArray(a.comments) ? a.comments : [];
+        // Actuals — list of time entries against this action. Each entry
+        // is { id, hours, at (ISO date), by (personId|null), note? }.
+        // Sum of hours feeds CPI and the variance display in the Register.
+        a.loggedHours = Array.isArray(a.loggedHours) ? a.loggedHours : [];
+        a.loggedHours.forEach((h) => {
+          h.id = h.id || uid('lh');
+          h.hours = (typeof h.hours === 'number' && h.hours > 0) ? h.hours : 0;
+          h.at = h.at || todayISO();
+          h.by = h.by || null;
+          h.note = typeof h.note === 'string' ? h.note : '';
+        });
+        // Baseline — snapshot of the action's plan at a fixed point in
+        // time (typically taken once at kickoff). Drives SPI, CPI, and
+        // variance-to-baseline reporting. Null until the user freezes
+        // a baseline; mutating the action after that does not change
+        // the baseline. Shape: { due, startDate, commitment, takenAt }
+        // OR null. Re-baselining replaces the whole object.
+        if (a.baseline && typeof a.baseline === 'object') {
+          a.baseline.due        = a.baseline.due        || null;
+          a.baseline.startDate  = a.baseline.startDate  || null;
+          a.baseline.commitment = (typeof a.baseline.commitment === 'number') ? a.baseline.commitment : 100;
+          a.baseline.takenAt    = a.baseline.takenAt    || todayISO();
+        } else {
+          a.baseline = null;
+        }
         a.comments.forEach((c) => {
           c.id  = c.id  || uid('cm');
           c.by  = c.by  || null;
@@ -11405,6 +12301,18 @@
         // Optional component link, mirrors the action / deliverable /
         // milestone / change-request schemas. null = no allocation.
         if (d.component === undefined) d.component = null;
+        // Status — open (newly recorded), in-effect (active basis for
+        // current work), or superseded (replaced by a later decision).
+        // Defaults to in-effect for legacy decisions so old logs keep
+        // their "this is what was decided" reading.
+        const validStatuses = ['open', 'in_effect', 'superseded'];
+        if (!validStatuses.includes(d.status)) d.status = 'in_effect';
+        // Trigger reference — what caused this decision. Optional
+        // free-form string OR a structured object {type: 'risk'|'cr'|'action',
+        // id: '<entity-id>'}. Free-form covers external triggers
+        // ("customer request", "board direction"); structured covers
+        // links to in-tool entities.
+        if (d.triggerRef === undefined) d.triggerRef = null;
       });
 
       p.changes.forEach((c) => {
@@ -11602,6 +12510,37 @@
       __summary: summarizeState(state),
       ...state,
     };
+  }
+
+  // Generic CSV export. `columns` is an array of { header, value }
+  // where `value` is either a string field name on each row, or a
+  // function (row) => any. Numbers serialise unquoted, everything
+  // else as a CSV-escaped string. Uses CRLF line endings + UTF-8 BOM
+  // so Excel/Numbers open it without prompting for encoding.
+  function exportCSV(filename, rows, columns) {
+    const esc = (v) => {
+      if (v == null) return '';
+      if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+      const s = String(v);
+      if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    };
+    const lines = [];
+    lines.push(columns.map((c) => esc(c.header)).join(','));
+    rows.forEach((r) => {
+      lines.push(columns.map((c) => {
+        const v = typeof c.value === 'function' ? c.value(r) : r?.[c.value];
+        return esc(v);
+      }).join(','));
+    });
+    const csv = '﻿' + lines.join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`Exported ${rows.length} row${rows.length === 1 ? '' : 's'} → ${filename}`);
   }
 
   function exportJSON() {
