@@ -3279,22 +3279,28 @@
       }
     }
 
-    // ── Axes + decorations ────────────────────────────────────────────
-    // svgFrag = plot layer (bubbles, heat rings, today line, grid, zone
-    // labels) — scrolls when zoomed in.
-    // svgAxesFrag = sticky layer (Y/X axis lines + labels + titles) —
-    // wrapped in groups whose transforms track scrollLeft/scrollTop so
-    // they stay anchored to the viewport edges. Appended LAST to render
-    // on top of bubbles that scroll under the axis gutters.
-    let svgFrag = '';
-    let svgAxesFrag = '';
+    // ── Three SVG layers ──────────────────────────────────────────────
+    //   svgDecorFrag  — canvas-anchored decorations (heat fill, heat
+    //                   rings, zone labels). Never panned — they label
+    //                   the chart's panel corners, not data positions.
+    //   svgFrag       — data-bound plot content (bubbles, today line,
+    //                   grid lines, importance bands). Wrapped in
+    //                   #cloudPlotPan, which gets a live SVG transform
+    //                   during a pan drag.
+    //   svgAxesFrag   — axes (lines, ticks, titles). Always at fixed
+    //                   pixel positions on the panel.
+    let svgDecorFrag = '';
+    let svgFrag      = '';
+    let svgAxesFrag  = '';
     // (Viewport zoom: no SVG scaling, so no inline <style> block needed —
     // axes always render at their CSS-declared base size.)
     // Shared clip path so heat rings can be rendered as full circles
     // (centred at origin) and naturally clipped to the chart area —
     // avoids manual arc-direction maths and keeps the geometry honest
     // when the canvas is resized.
-    svgFrag += `<defs>
+    // Defs lead the decor layer so the clip-path + gradients are
+    // available before the heat fill / rings reference them.
+    svgDecorFrag += `<defs>
       <clipPath id="cl-chart-clip">
         <rect x="${padL}" y="${padT}" width="${innerW}" height="${innerH}" rx="2"/>
       </clipPath>
@@ -3312,14 +3318,21 @@
       // Heat backdrop — radial red gradient anchored at the firefight
       // origin (bottom-left). Gives the danger zone a quiet visual
       // temperature so the eye lands there before reading any bubble.
-      // ── PLOT CONTENT (scrolls with bubbles when zoomed) ─────────────
-      svgFrag += `<rect class="cl-heat-fill" x="${padL}" y="${padT}" width="${innerW}" height="${innerH}" fill="url(#cl-heat-grad-a)" clip-path="url(#cl-chart-clip)" />`;
+      // ── CANVAS-ANCHORED DECOR (heat fill + rings + zone labels) ─────
+      // These label the chart panel's CORNERS, not data positions, so
+      // they must stay still during pan. Routed to svgDecorFrag which
+      // sits OUTSIDE the pan group.
+      svgDecorFrag += `<rect class="cl-heat-fill" x="${padL}" y="${padT}" width="${innerW}" height="${innerH}" fill="url(#cl-heat-grad-a)" clip-path="url(#cl-chart-clip)" />`;
       const originX = padL;
       const originY = padT + innerH;
       const diag = Math.sqrt(innerW * innerW + innerH * innerH);
       [diag * 0.22, diag * 0.42, diag * 0.62].forEach((r, i) => {
-        svgFrag += `<circle class="cl-heat-ring cl-heat-ring-${i}" cx="${originX}" cy="${originY}" r="${r.toFixed(1)}" clip-path="url(#cl-chart-clip)"></circle>`;
+        svgDecorFrag += `<circle class="cl-heat-ring cl-heat-ring-${i}" cx="${originX}" cy="${originY}" r="${r.toFixed(1)}" clip-path="url(#cl-chart-clip)"></circle>`;
       });
+      svgDecorFrag += `<text class="cl-zone fire" x="${padL + 12}" y="${padT + innerH - 12}">🔥 firefight zone</text>`;
+      svgDecorFrag += `<text class="cl-zone safe" x="${padL + innerW - 12}" y="${padT + 16}" text-anchor="end">safe zone ✓</text>`;
+
+      // ── DATA-BOUND PLOT CONTENT (today line, grid, bubbles) ─────────
       // Today vertical reference line — renders only when today (xRaw=0)
       // is inside the current viewport.
       if (0 >= xMinV && 0 <= xMaxV) {
@@ -3334,9 +3347,6 @@
         const y = dataToPx(xMinV, p).y;
         svgFrag += `<line class="cl-grid" x1="${padL}" y1="${y}" x2="${padL + innerW}" y2="${y}"></line>`;
       }
-      // Zone labels (corners of the chart panel itself)
-      svgFrag += `<text class="cl-zone fire" x="${padL + 12}" y="${padT + innerH - 12}">🔥 firefight zone</text>`;
-      svgFrag += `<text class="cl-zone safe" x="${padL + innerW - 12}" y="${padT + 16}" text-anchor="end">safe zone ✓</text>`;
 
       // ── Y AXIS (sticky to viewport left) ────────────────────────────
       svgAxesFrag += `<g class="cl-y-axis" id="cloudYAxis">`;
@@ -3509,12 +3519,19 @@
       </g>`;
     });
 
-    // Plot content wrapped in #cloudPlotPan so pan-with-drag can apply a
-    // live SVG transform during the drag without re-running render() per
-    // mousemove. On mouseup the viewport fractions are committed and a
-    // normal re-render replaces the transform. Axes are OUTSIDE the
-    // pan group so they stay anchored.
-    SVG.innerHTML = `<g id="cloudPlotPan">${svgFrag}</g>${svgAxesFrag}`;
+    // Three-layer SVG assembly:
+    //   svgDecorFrag — canvas-anchored (heat fill, rings, zone labels).
+    //                  Outside pan group so it never moves with drag.
+    //   svgFrag      — data-bound plot content (today line, grid,
+    //                  bubbles). Wrapped in #cloudPlotPan, which the
+    //                  pan handler translates live.
+    //   svgAxesFrag  — axes, also outside pan, always anchored.
+    //
+    // Defs (clip-path, gradients) extracted from svgFrag's prefix and
+    // emitted first so they're available to all three layers.
+    SVG.innerHTML = svgDecorFrag
+      + `<g id="cloudPlotPan">${svgFrag}</g>`
+      + svgAxesFrag;
     $('#cloudStat').textContent = `${allActions.length} action${allActions.length === 1 ? '' : 's'} · ${_cloudState.preset === 'A' ? 'Urgency × Progress' : 'Owner × Importance'}${_cloudState.focusMode ? ` · top ${focusN} highlighted` : ''}`;
     // Patch the button's N now that we've computed it from the
     // critical-zone count.
@@ -3630,6 +3647,10 @@
       positionHover(e);
     };
     SVG.addEventListener('mousemove', (e) => {
+      // Suppress hover-card lookups during a drag — they fire on every
+      // mousemove, do DOM closest() + searches, and visibly add lag to
+      // the pan transform updates.
+      if (dragState) { hideHover(); return; }
       const g = e.target.closest('.cl-bubble-g');
       if (!g) { hideHover(); return; }
       const id = g.dataset.actionId;
@@ -3766,8 +3787,15 @@
       if (px < padL || px > padL + innerW || py < padT || py > padT + innerH) return;
       const isZoomBox = e.shiftKey;
       dragState = { mode: isZoomBox ? 'zoom' : 'pan', startX: px, startY: py, curX: px, curY: py };
-      // Pan-mode cursor cue
-      if (!isZoomBox) SVG.style.cursor = 'grabbing';
+      if (!isZoomBox) {
+        SVG.style.cursor = 'grabbing';
+        // Hint the browser to promote #cloudPlotPan to its own
+        // compositor layer so transform updates are paint-free.
+        // (Removed on mouseup / mouseleave so the hint isn't kept
+        // around when not needed.)
+        const pan = document.getElementById('cloudPlotPan');
+        if (pan) pan.style.willChange = 'transform';
+      }
       e.preventDefault();
     });
     SVG.addEventListener('mousemove', (e) => {
@@ -3805,6 +3833,8 @@
       const r = document.getElementById('cloudZoomRect');
       if (r) r.remove();
       SVG.style.cursor = '';
+      const pan = document.getElementById('cloudPlotPan');
+      if (pan) pan.style.willChange = '';
       if (!dragState) return;
       const ds = dragState;
       dragState = null;
@@ -3863,7 +3893,10 @@
       const r = document.getElementById('cloudZoomRect');
       if (r) r.remove();
       const pan = document.getElementById('cloudPlotPan');
-      if (pan && dragState?.mode === 'pan') pan.removeAttribute('transform');
+      if (pan && dragState?.mode === 'pan') {
+        pan.removeAttribute('transform');
+        pan.style.willChange = '';
+      }
       SVG.style.cursor = '';
       dragState = null;
     });
