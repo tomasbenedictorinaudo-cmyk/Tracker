@@ -2714,19 +2714,38 @@
 
   // Hash-stable colour for a string id (used for owners + projects so
   // their chip / bubble / ring colours stay consistent across renders).
+  //
+  // 10-colour categorical palette designed for at-a-glance separation:
+  //   - Hues spaced widely on the colour wheel (~36° apart).
+  //   - Avoids amber and pure red ranges — those are reserved for the
+  //     risk-attached and overdue edge colours, so categorical chips
+  //     don't visually compete with the orthogonal edge signals.
+  //   - Tuned for readability on the dark theme (medium saturation,
+  //     ~55-65% lightness range).
   function cloudHashColor(id) {
     let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+    // Palette designed so EVERY pair of adjacent slots reads as a
+    // different hue family — the hash maps owners/projects to nearby
+    // indices in many real datasets (4-person team → indices 3/6/7/8
+    // for the seeded ids), so adjacent slots producing close-by hues
+    // would still be confusable at a glance.
+    //
+    // Strategy: alternate between cool, warm, and neutral hue families
+    // every other slot, and keep two similar hues at least 3 indices
+    // apart. Muted rose dropped — too close to the overdue red used
+    // on edges. Slate replaced with a pinker lilac to avoid two
+    // dim-grey neighbours.
     const pal = [
-      '245,193,80',   // amber
-      '110,168,255',  // sky-blue
-      '168,140,255',  // violet
-      '72,206,200',   // teal
-      '244,131,89',   // orange
-      '74,222,128',   // green
-      '231,123,166',  // pink
-      '180,180,200',  // grey
-      '252,165,165',  // salmon
-      '147,197,253',  // light-blue
+      '99,160,255',    // 1. sky blue        (cool)
+      '194,99,168',    // 2. magenta         (warm)
+      '101,194,73',    // 3. grass green     (cool)
+      '129,99,194',    // 4. violet-purple   (cool-warm bridge)
+      '79,194,176',    // 5. teal            (cool)
+      '180,140,90',    // 6. tan             (warm-neutral)
+      '99,194,194',    // 7. cyan            (cool — 3 away from teal so unlikely to collide)
+      '156,117,95',    // 8. brown           (warm-neutral)
+      '210,150,210',   // 9. lilac           (warm — distinct from purple in slot 4)
+      '150,170,80',    // 10. olive          (warm-neutral)
     ];
     return pal[Math.abs(h) % pal.length];
   }
@@ -3365,34 +3384,52 @@
     }
 
     // ── Bubbles ────────────────────────────────────────────────────────
+    // Edge colouring replaces the old risk / overdue halos. Every
+    // bubble's stroke encodes its status signal — neutral for the
+    // baseline, amber for risk-attached, red for overdue. Overdue
+    // wins when both apply (the more time-sensitive signal). The
+    // fill encodes the user's chosen colour-by dimension. This keeps
+    // each bubble compact and visually separable from its neighbours
+    // — far cleaner than three concentric halo rings.
+    //
+    // Two halos still render: the project ring (informational, only
+    // in __all__ mode) and the selection ring (UI affordance). The
+    // selection ring is drawn last so it always sits on top.
     placed.forEach((b) => {
       const sel = _cloudState.selection.has(b.id);
       const focusDim = _cloudState.focusMode && !focusIds.has(b.id) && !sel;
-      // Halo rings — outer ring = project (always in merged mode),
-      // overdue glow, risk-link orange, blocked dashed.
       let halos = '';
       if (curProjectIsMerged()) {
         const ring = projectRing(b.proj);
         halos += `<circle class="cl-ring cl-ring-proj" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${(b.r + 3).toFixed(1)}" stroke="${ring}"></circle>`;
       }
-      if (b.hasRisk) {
-        halos += `<circle class="cl-ring cl-ring-risk" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${(b.r + 6).toFixed(1)}"></circle>`;
-      }
-      if (b.isLate) {
-        halos += `<circle class="cl-ring cl-ring-late" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${(b.r + 9).toFixed(1)}"></circle>`;
-      }
-      // Selection halo always on top
       if (sel) {
-        halos += `<circle class="cl-ring cl-ring-sel" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${(b.r + 12).toFixed(1)}"></circle>`;
+        halos += `<circle class="cl-ring cl-ring-sel" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${(b.r + 6).toFixed(1)}"></circle>`;
+      }
+      // Edge encoding — overdue > risk-attached > neutral.
+      let strokeColor;
+      let strokeWidth;
+      let strokeClass = '';
+      if (b.isLate) {
+        strokeColor = 'rgb(248,113,121)';
+        strokeWidth = 2.5;
+        strokeClass = ' is-late';
+      } else if (b.hasRisk) {
+        strokeColor = 'rgb(245,193,80)';
+        strokeWidth = 2.2;
+        strokeClass = ' is-risk';
+      } else {
+        strokeColor = 'rgba(255,255,255,.5)';
+        strokeWidth = 1;
       }
       // Inline identifier — only shown when bubble is big enough to host it.
       const showIdent = b.r >= 11;
       const ident = showIdent && (b.a.identifier || (b.a.title || '').match(/[A-Z]{2,}-\d+/)?.[0])
         ? `<text class="cl-bubble-ident" x="${b.x.toFixed(1)}" y="${(b.y + 3).toFixed(1)}" text-anchor="middle">${escapeHTML(b.a.identifier || '')}</text>`
         : '';
-      svgFrag += `<g class="cl-bubble-g ${sel ? 'is-sel' : ''} ${focusDim ? 'is-dim' : ''} ${b.isBlocked ? 'is-blocked' : ''}" data-action-id="${escapeHTML(b.id)}" data-proj-id="${escapeHTML(b.proj.id)}">
+      svgFrag += `<g class="cl-bubble-g${sel ? ' is-sel' : ''}${focusDim ? ' is-dim' : ''}${strokeClass}" data-action-id="${escapeHTML(b.id)}" data-proj-id="${escapeHTML(b.proj.id)}">
         ${halos}
-        <circle class="cl-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="${b.palette.fill}" stroke="${b.palette.stroke}" stroke-width="${b.isBlocked ? 1.5 : 1}"></circle>
+        <circle class="cl-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="${b.palette.fill}" stroke="${strokeColor}" stroke-width="${strokeWidth}"></circle>
         ${ident}
       </g>`;
     });
@@ -3419,7 +3456,7 @@
           c.setAttribute('class', 'cl-ring cl-ring-sel');
           c.setAttribute('cx', ref.x.toFixed(1));
           c.setAttribute('cy', ref.y.toFixed(1));
-          c.setAttribute('r',  (ref.r + 12).toFixed(1));
+          c.setAttribute('r',  (ref.r + 6).toFixed(1));
           g.insertBefore(c, g.querySelector('.cl-bubble'));
         } else if (!sel && existing) {
           existing.remove();

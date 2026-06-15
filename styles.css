@@ -3431,12 +3431,14 @@ body.is-card-dragging * { cursor: grabbing !important; }
   pointer-events: none;
 }
 .cl-ring-proj { stroke-width: 1; opacity: .6; }
-.cl-ring-risk { stroke: rgba(245,193,80,.85); stroke-dasharray: 2 3; }
-.cl-ring-late { stroke: rgba(248,113,121,.9); stroke-width: 2; animation: cl-pulse-late 1.6s ease-in-out infinite; }
 .cl-ring-sel  { stroke: rgb(110,168,255); stroke-width: 2; }
+/* Risk-attached + overdue signals now ride the bubble's stroke (not
+   a separate halo ring). Pulse the overdue stroke gently to draw the
+   eye without animating a whole extra circle. */
+.cl-bubble-g.is-late .cl-bubble { animation: cl-pulse-late 1.6s ease-in-out infinite; }
 @keyframes cl-pulse-late {
-  0%, 100% { opacity: .55; }
-  50%      { opacity: 1; }
+  0%, 100% { opacity: 1;  }
+  50%      { opacity: .65; }
 }
 
 .cl-bubble-ident {
@@ -3487,8 +3489,11 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .cl-leg-dot.s-doing   { background: rgba(110,168,255,.6); border: 1px solid rgb(110,168,255); }
 .cl-leg-dot.s-blocked { background: rgba(248,113,121,.6); border: 1px solid rgb(248,113,121); }
 .cl-leg-ring { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid; background: transparent; }
-.cl-leg-risk { border-color: rgba(245,193,80,.85); border-style: dashed; }
-.cl-leg-late { border-color: rgba(248,113,121,.9); }
+/* Decoration chip swatches now mirror the bubble edge encoding —
+   solid coloured rings since the signal lives on the bubble's own
+   stroke. */
+.cl-leg-risk { border-color: rgba(245,193,80,.95); border-width: 2px; }
+.cl-leg-late { border-color: rgba(248,113,121,.95); border-width: 2px; }
 .cl-leg-proj { border-color: rgba(110,168,255,.85); border-style: dotted; }
 .cl-leg-spacer { flex: 1; }
 .cl-leg-stat  { font-style: italic; }
