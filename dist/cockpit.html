@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-15T09:55:54.627Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-15T11:04:54.961Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3380,6 +3380,37 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .cl-zone.fire { fill: rgba(248,113,121,.7); }
 .cl-zone.safe { fill: rgba(74,222,128,.55); }
+
+/* Concentric heat rings drawn from the canvas origin (firefight
+   epicenter in Preset A · overload epicenter in Preset B). Three rings
+   give the eye a radial ranking of "how noteworthy is this bubble" —
+   inner ring = critical, middle = watch, outer = monitor. The fill
+   gradient under the inner ring adds a quiet thermal cue without
+   competing with the bubbles themselves. */
+.cl-heat-fill { pointer-events: none; }
+.cl-heat-ring {
+  fill: none;
+  stroke: rgba(248,113,121,.55);
+  stroke-width: .9;
+  stroke-dasharray: 2 4;
+  pointer-events: none;
+}
+.cl-heat-ring-0 { stroke: rgba(248,113,121,.65); stroke-dasharray: 1 0; stroke-width: 1.2; }
+.cl-heat-ring-1 { stroke: rgba(245,193,80,.5); }
+.cl-heat-ring-2 { stroke: rgba(148,163,184,.4); }
+.cl-heat-lbl {
+  font-size: 10px;
+  font-weight: 600;
+  font-style: italic;
+  pointer-events: none;
+  paint-order: stroke fill;
+  stroke: var(--bg-1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.cl-heat-lbl-0 { fill: rgba(248,113,121,.95); }
+.cl-heat-lbl-1 { fill: rgba(245,193,80,.85); }
+.cl-heat-lbl-2 { fill: rgba(148,163,184,.7); }
 
 .cl-bubble-g { cursor: pointer; transition: opacity .15s ease, transform .15s ease; }
 .cl-bubble-g:hover .cl-bubble { filter: brightness(1.25); stroke-width: 2; }
@@ -10469,7 +10500,55 @@ body.is-row-dragging *        { user-select: none !important; }
 
     // ── Axes + decorations ────────────────────────────────────────────
     let svgFrag = '';
+    // Shared clip path so heat rings can be rendered as full circles
+    // (centred at origin) and naturally clipped to the chart area —
+    // avoids manual arc-direction maths and keeps the geometry honest
+    // when the canvas is resized.
+    svgFrag += `<defs>
+      <clipPath id="cl-chart-clip">
+        <rect x="${padL}" y="${padT}" width="${innerW}" height="${innerH}" rx="2"/>
+      </clipPath>
+      <radialGradient id="cl-heat-grad-a" cx="0%" cy="100%" r="60%" fx="0%" fy="100%">
+        <stop offset="0%"   stop-color="rgba(248,113,121,.22)"/>
+        <stop offset="55%"  stop-color="rgba(248,113,121,.06)"/>
+        <stop offset="100%" stop-color="rgba(248,113,121,0)"/>
+      </radialGradient>
+      <linearGradient id="cl-heat-grad-b" x1="0%" y1="0%" x2="0%" y2="100%">
+        <stop offset="0%"   stop-color="rgba(248,113,121,.18)"/>
+        <stop offset="70%"  stop-color="rgba(248,113,121,0)"/>
+      </linearGradient>
+    </defs>`;
     if (_cloudState.preset === 'A') {
+      // Heat backdrop — radial red gradient anchored at the firefight
+      // origin (bottom-left). Gives the danger zone a quiet visual
+      // temperature so the eye lands there before reading any bubble.
+      svgFrag += `<rect class="cl-heat-fill" x="${padL}" y="${padT}" width="${innerW}" height="${innerH}" fill="url(#cl-heat-grad-a)" clip-path="url(#cl-chart-clip)" />`;
+      // Concentric heat rings from origin (0,0 in chart space =
+      // bottom-left corner, i.e. "most overdue, 0% complete"). The
+      // bubble closest to that origin is the most noteworthy by
+      // construction; rings give the eye a radial ranking the same way
+      // a target's bullseye does. Three rings divide the canvas into
+      // critical / watch / monitor bands; everything outside the
+      // outermost ring is the "safe" half.
+      const originX = padL;
+      const originY = padT + innerH;
+      const diag = Math.sqrt(innerW * innerW + innerH * innerH);
+      const rings = [
+        { r: diag * 0.22, label: '🔥 critical' },
+        { r: diag * 0.42, label: '⚠ watch' },
+        { r: diag * 0.62, label: '👁 monitor' },
+      ];
+      rings.forEach(({ r, label }, i) => {
+        svgFrag += `<circle class="cl-heat-ring cl-heat-ring-${i}" cx="${originX}" cy="${originY}" r="${r.toFixed(1)}" clip-path="url(#cl-chart-clip)"></circle>`;
+        // Label sits along the 45° tangent — kept inside the chart by
+        // clamping if it would overflow the right/top edges.
+        const angle = Math.PI / 4;
+        let lx = originX + r * Math.cos(angle);
+        let ly = originY - r * Math.sin(angle);
+        if (lx > padL + innerW - 60) lx = padL + innerW - 60;
+        if (ly < padT + 22) ly = padT + 22;
+        svgFrag += `<text class="cl-heat-lbl cl-heat-lbl-${i}" x="${(lx + 2).toFixed(1)}" y="${(ly - 4).toFixed(1)}">${label}</text>`;
+      });
       // Y axis = % complete
       svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
       svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
@@ -10508,6 +10587,29 @@ body.is-row-dragging *        { user-select: none !important; }
       svgFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Days to due (negative = overdue) →</text>`;
       svgFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">% Complete →</text>`;
     } else {
+      // Preset B — concentric rings from top-left origin (the
+      // overload epicenter: most-loaded owner × highest importance).
+      // Same metaphor as Preset A: distance from origin = relief.
+      // A subtle linear gradient at the top of the canvas reinforces
+      // the "high importance" reading even without the rings.
+      svgFrag += `<rect class="cl-heat-fill" x="${padL}" y="${padT}" width="${innerW}" height="${innerH}" fill="url(#cl-heat-grad-b)" clip-path="url(#cl-chart-clip)" />`;
+      const originX = padL;
+      const originY = padT;
+      const diag = Math.sqrt(innerW * innerW + innerH * innerH);
+      const rings = [
+        { r: diag * 0.22, label: '🔥 critical' },
+        { r: diag * 0.42, label: '⚠ watch' },
+        { r: diag * 0.62, label: '👁 monitor' },
+      ];
+      rings.forEach(({ r, label }, i) => {
+        svgFrag += `<circle class="cl-heat-ring cl-heat-ring-${i}" cx="${originX}" cy="${originY}" r="${r.toFixed(1)}" clip-path="url(#cl-chart-clip)"></circle>`;
+        const angle = Math.PI / 4;
+        let lx = originX + r * Math.cos(angle);
+        let ly = originY + r * Math.sin(angle); // +sin because origin is top, label sits below
+        if (lx > padL + innerW - 60) lx = padL + innerW - 60;
+        if (ly > padT + innerH - 8) ly = padT + innerH - 8;
+        svgFrag += `<text class="cl-heat-lbl cl-heat-lbl-${i}" x="${(lx + 2).toFixed(1)}" y="${(ly + 12).toFixed(1)}">${label}</text>`;
+      });
       // Preset B axes
       svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
       svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;

@@ -3372,6 +3372,37 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .cl-zone.fire { fill: rgba(248,113,121,.7); }
 .cl-zone.safe { fill: rgba(74,222,128,.55); }
 
+/* Concentric heat rings drawn from the canvas origin (firefight
+   epicenter in Preset A · overload epicenter in Preset B). Three rings
+   give the eye a radial ranking of "how noteworthy is this bubble" —
+   inner ring = critical, middle = watch, outer = monitor. The fill
+   gradient under the inner ring adds a quiet thermal cue without
+   competing with the bubbles themselves. */
+.cl-heat-fill { pointer-events: none; }
+.cl-heat-ring {
+  fill: none;
+  stroke: rgba(248,113,121,.55);
+  stroke-width: .9;
+  stroke-dasharray: 2 4;
+  pointer-events: none;
+}
+.cl-heat-ring-0 { stroke: rgba(248,113,121,.65); stroke-dasharray: 1 0; stroke-width: 1.2; }
+.cl-heat-ring-1 { stroke: rgba(245,193,80,.5); }
+.cl-heat-ring-2 { stroke: rgba(148,163,184,.4); }
+.cl-heat-lbl {
+  font-size: 10px;
+  font-weight: 600;
+  font-style: italic;
+  pointer-events: none;
+  paint-order: stroke fill;
+  stroke: var(--bg-1);
+  stroke-width: 3px;
+  stroke-linejoin: round;
+}
+.cl-heat-lbl-0 { fill: rgba(248,113,121,.95); }
+.cl-heat-lbl-1 { fill: rgba(245,193,80,.85); }
+.cl-heat-lbl-2 { fill: rgba(148,163,184,.7); }
+
 .cl-bubble-g { cursor: pointer; transition: opacity .15s ease, transform .15s ease; }
 .cl-bubble-g:hover .cl-bubble { filter: brightness(1.25); stroke-width: 2; }
 .cl-bubble-g.is-dim { opacity: .25; filter: saturate(.4); }
