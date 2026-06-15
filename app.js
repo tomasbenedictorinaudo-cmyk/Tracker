@@ -2786,7 +2786,7 @@
             <button class="seg-btn ${_cloudState.preset === 'A' ? 'active' : ''}" data-cloud-preset="A" title="X = days-to-due · Y = % complete · bubble size = composite importance">A · Urgency × Progress</button>
             <button class="seg-btn ${_cloudState.preset === 'B' ? 'active' : ''}" data-cloud-preset="B" title="X = owner (sorted by load) · Y = composite importance · bubble size = commitment %">B · Owner × Importance</button>
           </div>
-          <button class="ghost ${_cloudState.focusMode ? 'is-on' : ''}" id="cloudFocus" title="Highlight the ${_cloudState.focusN} bubbles closest to this preset's origin (firefight epicenter in A · overload epicenter in B). Toggle the preset to rerank.">★ Focus top ${_cloudState.focusN}</button>
+          <button class="ghost ${_cloudState.focusMode ? 'is-on' : ''}" id="cloudFocus" title="Highlight the ${_cloudState.focusN} most noteworthy bubbles for the current preset. Preset A ranks by distance from the firefight origin (matches the inner heat ring). Preset B ranks by composite importance (matches the critical horizontal band).">★ Focus top ${_cloudState.focusN}</button>
           <button class="ghost" id="cloudCSV" title="Download the cloud's currently-visible actions as CSV">↓ CSV</button>
         </div>
       </div>
@@ -3005,23 +3005,33 @@
       });
     })();
 
-    // Focus mode ranking — N bubbles closest to the preset's origin
-    // in canvas coordinates. Origin is bottom-left in Preset A
-    // (firefight epicenter: most-overdue × 0% complete) and top-left
-    // in Preset B (overload epicenter: most-loaded owner × highest
-    // importance). This makes "top N noteworthy" self-consistent with
-    // the concentric heat rings — the inner ring literally contains
-    // the focused set — and crucially it makes the focused set
-    // PRESET-SPECIFIC so toggling A ↔ B reranks the noteworthy items.
+    // Focus mode ranking — preset-specific so each lens surfaces what
+    // its own geometry calls noteworthy.
+    //
+    //   Preset A — N bubbles CLOSEST TO BOTTOM-LEFT in canvas coords
+    //              (firefight epicenter: most-overdue × 0% complete).
+    //              Self-consistent with the concentric heat rings —
+    //              the inner ring literally contains the focused set.
+    //
+    //   Preset B — N HIGHEST-IMPORTANCE bubbles, ignoring the X axis
+    //              entirely. X is categorical (owner slot) so distance
+    //              along it is meaningless; the chart's signal is
+    //              purely vertical. The horizontal critical band
+    //              contains the focused set by construction.
     const focusIds = new Set();
     if (_cloudState.focusMode) {
-      const oX = padL;
-      const oY = _cloudState.preset === 'A' ? (padT + innerH) : padT;
-      placed.slice().sort((a, b) => {
-        const da = (a.x - oX) * (a.x - oX) + (a.y - oY) * (a.y - oY);
-        const db = (b.x - oX) * (b.x - oX) + (b.y - oY) * (b.y - oY);
-        return da - db;
-      }).slice(0, _cloudState.focusN).forEach((p) => focusIds.add(p.id));
+      if (_cloudState.preset === 'A') {
+        const oX = padL;
+        const oY = padT + innerH;
+        placed.slice().sort((a, b) => {
+          const da = (a.x - oX) * (a.x - oX) + (a.y - oY) * (a.y - oY);
+          const db = (b.x - oX) * (b.x - oX) + (b.y - oY) * (b.y - oY);
+          return da - db;
+        }).slice(0, _cloudState.focusN).forEach((p) => focusIds.add(p.id));
+      } else {
+        placed.slice().sort((a, b) => b.importance - a.importance)
+          .slice(0, _cloudState.focusN).forEach((p) => focusIds.add(p.id));
+      }
     }
 
     // ── Axes + decorations ────────────────────────────────────────────
@@ -3113,28 +3123,40 @@
       svgFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Days to due (negative = overdue) →</text>`;
       svgFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">% Complete →</text>`;
     } else {
-      // Preset B — concentric rings from top-left origin (the
-      // overload epicenter: most-loaded owner × highest importance).
-      // Same metaphor as Preset A: distance from origin = relief.
-      // A subtle linear gradient at the top of the canvas reinforces
-      // the "high importance" reading even without the rings.
-      svgFrag += `<rect class="cl-heat-fill" x="${padL}" y="${padT}" width="${innerW}" height="${innerH}" fill="url(#cl-heat-grad-b)" clip-path="url(#cl-chart-clip)" />`;
-      const originX = padL;
-      const originY = padT;
-      const diag = Math.sqrt(innerW * innerW + innerH * innerH);
-      const rings = [
-        { r: diag * 0.22, label: '🔥 critical' },
-        { r: diag * 0.42, label: '⚠ watch' },
-        { r: diag * 0.62, label: '👁 monitor' },
+      // Preset B — horizontal importance bands (NOT concentric rings).
+      //
+      // Why bands, not rings: in Preset B the X axis is CATEGORICAL
+      // (owner slots) and Y is continuous importance. A radial metric
+      // from any corner mixes incompatible units — a high-importance
+      // action on the rightmost owner would penalised vs a mid-
+      // importance action on the leftmost owner just for being on the
+      // right. The chart's actual signal is purely vertical: importance.
+      // Three horizontal bands let the same vocabulary (critical /
+      // watch / monitor) describe the right geometry.
+      //
+      // Thresholds align to the existing Y-grid (1/2/5/10/20). If the
+      // dataset's maxComp is small, thresholds scale down proportionally
+      // so the bands stay meaningful on small projects.
+      const impToY = (v) =>
+        padT + (1 - Math.log2(1 + v) / Math.log2(1 + maxComp)) * innerH;
+      // Proportional thresholds so the three bands are always visible
+      // regardless of dataset size. Absolute thresholds (e.g. ≥10) were
+      // tempting because they align with the Y-grid ticks, but they
+      // collapse the critical band to zero height as soon as the
+      // dataset's max barely exceeds the threshold.
+      const bandSpec = [
+        { lo: maxComp * 0.75, hi: Infinity,       label: '🔥 critical', cls: 'cl-band-0' },
+        { lo: maxComp * 0.50, hi: maxComp * 0.75, label: '⚠ watch',    cls: 'cl-band-1' },
+        { lo: maxComp * 0.25, hi: maxComp * 0.50, label: '👁 monitor',  cls: 'cl-band-2' },
       ];
-      rings.forEach(({ r, label }, i) => {
-        svgFrag += `<circle class="cl-heat-ring cl-heat-ring-${i}" cx="${originX}" cy="${originY}" r="${r.toFixed(1)}" clip-path="url(#cl-chart-clip)"></circle>`;
-        const angle = Math.PI / 4;
-        let lx = originX + r * Math.cos(angle);
-        let ly = originY + r * Math.sin(angle); // +sin because origin is top, label sits below
-        if (lx > padL + innerW - 60) lx = padL + innerW - 60;
-        if (ly > padT + innerH - 8) ly = padT + innerH - 8;
-        svgFrag += `<text class="cl-heat-lbl cl-heat-lbl-${i}" x="${(lx + 2).toFixed(1)}" y="${(ly + 12).toFixed(1)}">${label}</text>`;
+      bandSpec.forEach(({ lo, hi, label, cls }) => {
+        const yTop = isFinite(hi) ? impToY(hi) : padT;
+        const yBot = impToY(lo);
+        const h = Math.max(0, yBot - yTop);
+        if (h < 4) return;
+        svgFrag += `<rect class="cl-band ${cls}" x="${padL}" y="${yTop.toFixed(1)}" width="${innerW}" height="${h.toFixed(1)}" clip-path="url(#cl-chart-clip)"></rect>`;
+        // Label snug to the right edge inside its band.
+        svgFrag += `<text class="cl-band-lbl cl-heat-lbl ${cls === 'cl-band-0' ? 'cl-heat-lbl-0' : cls === 'cl-band-1' ? 'cl-heat-lbl-1' : 'cl-heat-lbl-2'}" x="${(padL + innerW - 6).toFixed(1)}" y="${(yTop + 14).toFixed(1)}" text-anchor="end">${label}</text>`;
       });
       // Preset B axes
       svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;

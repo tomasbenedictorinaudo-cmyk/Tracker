@@ -3403,6 +3403,22 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .cl-heat-lbl-1 { fill: rgba(245,193,80,.85); }
 .cl-heat-lbl-2 { fill: rgba(148,163,184,.7); }
 
+/* Horizontal importance bands — used in Preset B INSTEAD of concentric
+   rings because X is categorical (owner slot), so the chart's signal
+   is purely vertical. Three soft-tinted bands stack into critical
+   (top) / watch / monitor (bottom) tiers, matching the vocabulary of
+   the Preset A radial rings while using geometry that actually fits
+   this axis pair. */
+.cl-band { pointer-events: none; }
+.cl-band-0 { fill: rgba(248,113,121,.08); }
+.cl-band-1 { fill: rgba(245,193,80,.07);  }
+.cl-band-2 { fill: rgba(148,163,184,.05); }
+.cl-band-lbl {
+  font-size: 10px;
+  font-style: italic;
+  font-weight: 600;
+}
+
 .cl-bubble-g { cursor: pointer; transition: opacity .15s ease, transform .15s ease; }
 .cl-bubble-g:hover .cl-bubble { filter: brightness(1.25); stroke-width: 2; }
 .cl-bubble-g.is-dim { opacity: .25; filter: saturate(.4); }
