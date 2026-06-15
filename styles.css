@@ -3304,18 +3304,24 @@ body.is-card-dragging * { cursor: grabbing !important; }
   overflow: hidden;
 }
 .cloud-canvas-scroll {
-  /* Scrollable viewport for the chart — when the user zooms in, the
-     SVG renders at base × zoom and overflows; the wrapper scrolls
-     horizontally and vertically. Mirrors .op-bubbles-scroll. */
-  overflow: auto;
+  /* Viewport-zoom: the SVG stays at panel size, never overflows.
+     The wrapper just provides the visible bounding box. */
+  overflow: hidden;
   background: var(--bg-1);
   border-radius: var(--radius-sm);
-  /* Cap the visible area so vertical scroll triggers when zoomed in.
-     min/max keep the unzoomed default sensible on small / large
-     laptop screens. */
   max-height: calc(100vh - 280px);
   min-height: 420px;
-  scrollbar-width: thin;
+  position: relative;
+}
+
+/* Drag-select zoom rectangle — drawn over the SVG while the user
+   drags from the chart background to define a new viewport. */
+.cl-zoom-rect {
+  fill: rgba(110,168,255,.12);
+  stroke: rgba(110,168,255,.85);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
 }
 .cloud-svg { display: block; }
 /* Inline zoom group in the page actions — matches the budgets / open

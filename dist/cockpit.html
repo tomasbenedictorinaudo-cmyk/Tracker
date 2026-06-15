@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-15T19:53:28.677Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-15T20:06:24.723Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3313,18 +3313,24 @@ body.is-card-dragging * { cursor: grabbing !important; }
   overflow: hidden;
 }
 .cloud-canvas-scroll {
-  /* Scrollable viewport for the chart — when the user zooms in, the
-     SVG renders at base × zoom and overflows; the wrapper scrolls
-     horizontally and vertically. Mirrors .op-bubbles-scroll. */
-  overflow: auto;
+  /* Viewport-zoom: the SVG stays at panel size, never overflows.
+     The wrapper just provides the visible bounding box. */
+  overflow: hidden;
   background: var(--bg-1);
   border-radius: var(--radius-sm);
-  /* Cap the visible area so vertical scroll triggers when zoomed in.
-     min/max keep the unzoomed default sensible on small / large
-     laptop screens. */
   max-height: calc(100vh - 280px);
   min-height: 420px;
-  scrollbar-width: thin;
+  position: relative;
+}
+
+/* Drag-select zoom rectangle — drawn over the SVG while the user
+   drags from the chart background to define a new viewport. */
+.cl-zoom-rect {
+  fill: rgba(110,168,255,.12);
+  stroke: rgba(110,168,255,.85);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  pointer-events: none;
 }
 .cloud-svg { display: block; }
 /* Inline zoom group in the page actions — matches the budgets / open
@@ -10331,7 +10337,12 @@ body.is-row-dragging *        { user-select: none !important; }
     preset: 'A',                 // 'A' = urgency × progress, 'B' = owner × importance
     selection: new Set(),        // action ids — persists across preset toggles
     focusMode: false,
-    zoom: 1,                     // 0.4 .. 3 — mirrors the Open Points bubble zoom pattern
+    // Viewport zoom — fractional bounds [0..1] of the full data range.
+    // Initial = full range (zoomed out). Preset-agnostic: a fraction
+    // of 0 to 1 maps to "show everything" in either preset. The canvas
+    // never scales, bubbles never resize — only the visible data range
+    // changes, and the axis tick labels regenerate to match.
+    viewport: { xMinFrac: 0, xMaxFrac: 1, yMinFrac: 0, yMaxFrac: 1 },
     riskLinkedOnly: false,       // cloud-local filter toggled via the legend
     priorityFilter: '',          // cloud-local filter set by clicking a Priority legend chip
     colorBy: 'status',           // 'status' | 'owner' | 'component' | 'priority' | 'project'
@@ -10707,11 +10718,10 @@ body.is-row-dragging *        { user-select: none !important; }
     renderLegend();
 
     // ── Layout ─────────────────────────────────────────────────────────
-    // Base canvas dimensions = the chart's intrinsic coordinate system.
-    // The SVG's viewBox stays fixed at base size so all positions and
-    // ring radii remain stable across zoom levels — zoom only scales
-    // the rendered width/height (and the wrapper scrolls). Mirrors the
-    // Open Points bubble-view zoom pattern.
+    // Viewport zoom: canvas dimensions are fixed at the panel size.
+    // Zoom changes the VISIBLE DATA RANGE, not the canvas. Bubble
+    // sizes never change; axis pixel positions never move; only the
+    // axis tick labels regenerate when the viewport changes.
     const SVG = $('#cloudSvg');
     const scroller = $('#cloudScroll');
     const W = Math.max(720, scroller.clientWidth || 1200);
@@ -10719,12 +10729,17 @@ body.is-row-dragging *        { user-select: none !important; }
     const padL = 48, padR = 24, padT = 14, padB = 36;
     const innerW = W - padL - padR;
     const innerH = H - padT - padB;
-    const zoom = Math.max(0.4, Math.min(3, _cloudState.zoom || 1));
-    const renderW = Math.round(W * zoom);
-    const renderH = Math.round(H * zoom);
     SVG.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    SVG.setAttribute('width', renderW);
-    SVG.setAttribute('height', renderH);
+    SVG.setAttribute('width', W);
+    SVG.setAttribute('height', H);
+
+    // Current viewport (fractional bounds 0..1 of the preset's full
+    // data range). Clamped here in case stale state escapes.
+    const vp = _cloudState.viewport;
+    vp.xMinFrac = Math.max(0, Math.min(1, vp.xMinFrac));
+    vp.xMaxFrac = Math.max(vp.xMinFrac + 0.01, Math.min(1, vp.xMaxFrac));
+    vp.yMinFrac = Math.max(0, Math.min(1, vp.yMinFrac));
+    vp.yMaxFrac = Math.max(vp.yMinFrac + 0.01, Math.min(1, vp.yMaxFrac));
 
     // Bubble radius scale — sqrt of composite importance, anchored
     // between 5 and 18 px. Identical across presets so an action's
@@ -10765,57 +10780,72 @@ body.is-row-dragging *        { user-select: none !important; }
     });
     const ownerIdx = new Map(owners.map((p, i) => [p.id, i]));
 
+    // Full data range per preset — viewport fractions [0..1] map into
+    // these ranges. Stored so axis-tick rendering can use them too.
+    let fullXMin, fullXMax, fullYMin, fullYMax;
+    if (_cloudState.preset === 'A') {
+      fullXMin = -6.6; fullXMax = 7.5;       // sym-log days, +7.5 is the no-date lane
+      fullYMin = 0;    fullYMax = 100;       // % complete
+    } else {
+      fullXMin = 0;    fullXMax = Math.max(1, owners.length); // owner slot indices + unassigned
+      fullYMin = 0;    fullYMax = Math.log2(1 + maxComp);     // log composite importance
+    }
+    // Visible viewport in DATA coords (computed from fractions).
+    const xMinV = fullXMin + vp.xMinFrac * (fullXMax - fullXMin);
+    const xMaxV = fullXMin + vp.xMaxFrac * (fullXMax - fullXMin);
+    const yMinV = fullYMin + vp.yMinFrac * (fullYMax - fullYMin);
+    const yMaxV = fullYMin + vp.yMaxFrac * (fullYMax - fullYMin);
+    // Map data → pixel through the current viewport.
+    const dataToPx = (xRaw, yRaw) => ({
+      x: padL + ((xRaw - xMinV) / (xMaxV - xMinV)) * innerW,
+      y: padT + (1 - (yRaw - yMinV) / (yMaxV - yMinV)) * innerH,
+    });
     const placed = allActions.map(({ a, proj: p }, i) => {
       const r = radiusForComp(compositeScores[i]);
       const palette = bubbleColorEncoding(a, p);
       const dtd = actionDaysToDue(a);
       const pct = percentComplete(a);
-      let xRaw, yRaw, xMin, xMax, yMin, yMax;
+      let xRaw, yRaw;
       if (_cloudState.preset === 'A') {
-        // X: sym-log days-to-due, clamped to ±90 for layout (extremes still
-        // shown but pinned to the edge). Items without a due date go in
-        // their own lane at the far right past the +90-day mark.
         if (dtd == null) {
-          xRaw = 7.5; // beyond +90's sym-log of ~6.5
-          xMin = -6.6; xMax = 7.5;
+          xRaw = 7.5; // no-date lane (right of +90 sym-log)
         } else {
-          xMin = -6.6; xMax = 7.5;
           xRaw = Math.max(-6.6, Math.min(6.6, symLog(dtd)));
         }
         yRaw = pct;
-        yMin = 0; yMax = 100;
       } else {
-        // Preset B
-        xMin = 0; xMax = Math.max(1, owners.length - 1);
         xRaw = ownerIdx.has(a.owner) ? ownerIdx.get(a.owner) : owners.length;
-        if (xRaw === owners.length) { xMax = Math.max(1, owners.length); } // unassigned lane
-        // Y: composite importance sym-log so the bottom band stays readable.
-        const imp = compositeScores[i];
-        yRaw = Math.log2(1 + imp);
-        yMin = 0;
-        yMax = Math.log2(1 + maxComp);
+        yRaw = Math.log2(1 + compositeScores[i]);
       }
-      const x = padL + ((xRaw - xMin) / (xMax - xMin)) * innerW;
-      const y = padT + (1 - (yRaw - yMin) / (yMax - yMin)) * innerH;
+      const px = dataToPx(xRaw, yRaw);
+      // Mark whether this bubble's data position is INSIDE the current
+      // viewport. Out-of-viewport bubbles still render but get pinned
+      // to a chart edge with reduced opacity — visual hint that the
+      // user has zoomed past them.
+      const inView = xRaw >= xMinV && xRaw <= xMaxV && yRaw >= yMinV && yRaw <= yMaxV;
       return {
-        id: a.id, a, proj: p, x, y, r, palette,
+        id: a.id, a, proj: p,
+        xRaw, yRaw,
+        x: px.x, y: px.y, r, palette,
         importance: compositeScores[i],
         hasRisk: ctx.riskLinks.has(a.id),
         isLate: a.status !== 'done' && a.due && dayDiff(a.due, todayISO()) < 0,
         isBlocked: a.status === 'blocked',
         commitment: (typeof a.commitment === 'number') ? a.commitment : 100,
+        inView,
       };
     });
 
-    // Light collision resolution — small repulsion preserving global
-    // position so the scatter stays interpretable but bubbles don't
-    // overlap. 30 iterations is plenty for ~250 nodes.
+    // Light collision resolution among IN-VIEWPORT bubbles only —
+    // out-of-viewport bubbles are clipped or pinned to edges, so they
+    // shouldn't affect the in-view layout.
     (function relax() {
+      const inView = placed.filter((p) => p.inView);
       for (let iter = 0; iter < 30; iter++) {
         let moved = false;
-        for (let i = 0; i < placed.length; i++) {
-          for (let j = i + 1; j < placed.length; j++) {
-            const a = placed[i], b = placed[j];
+        for (let i = 0; i < inView.length; i++) {
+          for (let j = i + 1; j < inView.length; j++) {
+            const a = inView[i], b = inView[j];
             const dx = b.x - a.x, dy = b.y - a.y;
             const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
             const min = a.r + b.r + 1.5;
@@ -10830,8 +10860,8 @@ body.is-row-dragging *        { user-select: none !important; }
         }
         if (!moved) break;
       }
-      // Clamp into viewport so over-pushed bubbles don't drift off-canvas.
-      placed.forEach((p) => {
+      // Clamp in-viewport bubbles into the chart area.
+      inView.forEach((p) => {
         p.x = Math.max(padL + p.r + 1, Math.min(W - padR - p.r - 1, p.x));
         p.y = Math.max(padT + p.r + 1, Math.min(H - padB - p.r - 1, p.y));
       });
@@ -10896,26 +10926,8 @@ body.is-row-dragging *        { user-select: none !important; }
     // on top of bubbles that scroll under the axis gutters.
     let svgFrag = '';
     let svgAxesFrag = '';
-    // When the user zooms in/out, the SVG renders at base × zoom
-    // pixels (so the wrapper scrolls). Without compensation every
-    // element scales — axis labels become huge or tiny depending on
-    // zoom. To keep axes / ticks / titles readable, we inject a
-    // <style> block inside the SVG that re-declares those classes
-    // with font-size and stroke-width multiplied by 1/zoom. The
-    // CSS is scoped to this SVG only, so the rest of the app is
-    // unaffected. Bubbles, heat rings, and bubble identifier labels
-    // are NOT in this list — they're the plot content and should
-    // scale with zoom.
-    const iz = 1 / zoom;
-    svgFrag += `<style>
-      .cl-axis        { stroke-width: ${(1 * iz).toFixed(3)}px; }
-      .cl-grid        { stroke-width: ${(0.5 * iz).toFixed(3)}px; }
-      .cl-today       { stroke-width: ${(1.5 * iz).toFixed(3)}px; }
-      .cl-tick        { font-size: ${(10.5 * iz).toFixed(2)}px; }
-      .cl-today-lbl   { font-size: ${(10 * iz).toFixed(2)}px; }
-      .cl-axis-title  { font-size: ${(11 * iz).toFixed(2)}px; }
-      .cl-zone        { font-size: ${(11 * iz).toFixed(2)}px; stroke-width: ${(3 * iz).toFixed(3)}px; }
-    </style>`;
+    // (Viewport zoom: no SVG scaling, so no inline <style> block needed —
+    // axes always render at their CSS-declared base size.)
     // Shared clip path so heat rings can be rendered as full circles
     // (centred at origin) and naturally clipped to the chart area —
     // avoids manual arc-direction maths and keeps the geometry honest
@@ -10946,19 +10958,21 @@ body.is-row-dragging *        { user-select: none !important; }
       [diag * 0.22, diag * 0.42, diag * 0.62].forEach((r, i) => {
         svgFrag += `<circle class="cl-heat-ring cl-heat-ring-${i}" cx="${originX}" cy="${originY}" r="${r.toFixed(1)}" clip-path="url(#cl-chart-clip)"></circle>`;
       });
-      // Today vertical reference line (X = sym-log 0 = 0 raw). Stays
-      // in plot content — its X position is the real "today" in data
-      // coords; making it sticky would point at the wrong date.
-      const todayX = padL + ((0 - -6.6) / (7.5 - -6.6)) * innerW;
-      svgFrag += `<line class="cl-today" x1="${todayX}" y1="${padT}" x2="${todayX}" y2="${padT + innerH}"></line>`;
-      svgFrag += `<text class="cl-today-lbl" x="${todayX + 3}" y="${padT + 12}">today</text>`;
-      // Y grid lines (stay in plot — they tie to the data, not to the
-      // sticky labels)
-      for (let p = 0; p <= 100; p += 25) {
-        const y = padT + (1 - p / 100) * innerH;
+      // Today vertical reference line — renders only when today (xRaw=0)
+      // is inside the current viewport.
+      if (0 >= xMinV && 0 <= xMaxV) {
+        const todayPx = dataToPx(0, yMaxV).x;
+        svgFrag += `<line class="cl-today" x1="${todayPx}" y1="${padT}" x2="${todayPx}" y2="${padT + innerH}"></line>`;
+        svgFrag += `<text class="cl-today-lbl" x="${todayPx + 3}" y="${padT + 12}">today</text>`;
+      }
+      // Y grid lines at the visible % marks (multiples of 25; if the
+      // viewport's Y span is small, fall through to 10 / 5 / 1).
+      const yStep = (yMaxV - yMinV) >= 50 ? 25 : (yMaxV - yMinV) >= 20 ? 10 : (yMaxV - yMinV) >= 8 ? 5 : 1;
+      for (let p = Math.ceil(yMinV / yStep) * yStep; p <= yMaxV; p += yStep) {
+        const y = dataToPx(xMinV, p).y;
         svgFrag += `<line class="cl-grid" x1="${padL}" y1="${y}" x2="${padL + innerW}" y2="${y}"></line>`;
       }
-      // Zone labels (stay in plot — they label specific chart corners)
+      // Zone labels (corners of the chart panel itself)
       svgFrag += `<text class="cl-zone fire" x="${padL + 12}" y="${padT + innerH - 12}">🔥 firefight zone</text>`;
       svgFrag += `<text class="cl-zone safe" x="${padL + innerW - 12}" y="${padT + 16}" text-anchor="end">safe zone ✓</text>`;
 
@@ -10968,25 +10982,32 @@ body.is-row-dragging *        { user-select: none !important; }
       // under the axis area doesn't bleed through the labels.
       svgAxesFrag += `<rect class="cl-axis-bg" x="0" y="0" width="${padL - 0.5}" height="${H}" />`;
       svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
-      for (let p = 0; p <= 100; p += 25) {
-        const y = padT + (1 - p / 100) * innerH;
+      for (let p = Math.ceil(yMinV / yStep) * yStep; p <= yMaxV; p += yStep) {
+        const y = dataToPx(xMinV, p).y;
         svgAxesFrag += `<text class="cl-tick" x="${padL - 6}" y="${y + 3}" text-anchor="end">${p}%</text>`;
       }
       svgAxesFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">% Complete →</text>`;
       svgAxesFrag += `</g>`;
 
-      // ── X AXIS (sticky to viewport bottom) ──────────────────────────
+      // ── X AXIS — renders ticks for whichever days are in the viewport
       svgAxesFrag += `<g class="cl-x-axis" id="cloudXAxis">`;
       svgAxesFrag += `<rect class="cl-axis-bg" x="0" y="${padT + innerH + 0.5}" width="${W}" height="${H - padT - innerH}" />`;
       svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
-      [{ d: -30, lbl: 'overdue 30d' }, { d: -7, lbl: '-7d' }, { d: 7, lbl: '+7d' },
-       { d: 30, lbl: '+30d' }, { d: 90, lbl: '+90d' }].forEach(({ d, lbl }) => {
+      // Show only tick candidates that fall within the visible X span.
+      [{ d: -90, lbl: 'overdue 90d' }, { d: -30, lbl: 'overdue 30d' }, { d: -7, lbl: '-7d' },
+       { d: 0,   lbl: 'today' },        { d: 7, lbl: '+7d' },          { d: 30, lbl: '+30d' },
+       { d: 90,  lbl: '+90d' }].forEach(({ d, lbl }) => {
         const xRaw = symLog(d);
-        const x = padL + ((xRaw - -6.6) / (7.5 - -6.6)) * innerW;
+        if (xRaw < xMinV || xRaw > xMaxV) return;
+        const x = dataToPx(xRaw, yMinV).x;
         svgAxesFrag += `<text class="cl-tick" x="${x}" y="${padT + innerH + 16}" text-anchor="middle">${lbl}</text>`;
       });
-      const ndX = padL + ((7.5 - -6.6) / (7.5 - -6.6)) * innerW;
-      svgAxesFrag += `<text class="cl-tick muted" x="${ndX - 6}" y="${padT + innerH + 16}" text-anchor="end">no date</text>`;
+      // No-date lane label — only if the no-date slot (xRaw = 7.5) falls
+      // in the viewport.
+      if (7.5 >= xMinV && 7.5 <= xMaxV) {
+        const ndX = dataToPx(7.5, yMinV).x;
+        svgAxesFrag += `<text class="cl-tick muted" x="${ndX - 6}" y="${padT + innerH + 16}" text-anchor="end">no date</text>`;
+      }
       svgAxesFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Days to due (negative = overdue) →</text>`;
       svgAxesFrag += `</g>`;
     } else {
@@ -11017,22 +11038,28 @@ body.is-row-dragging *        { user-select: none !important; }
         { lo: maxComp * 0.25, hi: maxComp * 0.50, label: '👁 monitor',  cls: 'cl-band-2' },
       ];
       bandSpec.forEach(({ lo, hi, label, cls }) => {
-        const yTop = isFinite(hi) ? impToY(hi) : padT;
-        const yBot = impToY(lo);
+        // Bands in viewport (data) space. impToY is the LEGACY mapper
+        // that uses the full Y range; convert to viewport-aware y via
+        // dataToPx with the log-importance value.
+        const yTop = isFinite(hi) ? dataToPx(0, Math.log2(1 + hi)).y : padT;
+        const yBot = dataToPx(0, Math.log2(1 + lo)).y;
         const h = Math.max(0, yBot - yTop);
         if (h < 4) return;
         svgFrag += `<rect class="cl-band ${cls}" x="${padL}" y="${yTop.toFixed(1)}" width="${innerW}" height="${h.toFixed(1)}" clip-path="url(#cl-chart-clip)"></rect>`;
       });
-      // Grid lines (vertical owner lanes + horizontal importance ticks)
-      // stay in plot content — they tie to data positions.
-      const ownerSpan = Math.max(1, owners.length - 1);
+      // Owner-lane grid lines — only render lanes whose index lies in
+      // the X viewport.
       owners.forEach((p, i) => {
-        const x = padL + (i / Math.max(ownerSpan, 1)) * innerW;
+        if (i < xMinV || i > xMaxV) return;
+        const x = dataToPx(i, yMinV).x;
         svgFrag += `<line class="cl-grid" x1="${x}" y1="${padT}" x2="${x}" y2="${padT + innerH}"></line>`;
       });
+      // Importance horizontal grid lines — only marks in the Y viewport.
       [1, 2, 5, 10, 20].forEach((imp) => {
         if (imp > maxComp) return;
-        const y = padT + (1 - Math.log2(1 + imp) / Math.log2(1 + maxComp)) * innerH;
+        const yRaw = Math.log2(1 + imp);
+        if (yRaw < yMinV || yRaw > yMaxV) return;
+        const y = dataToPx(xMinV, yRaw).y;
         svgFrag += `<line class="cl-grid" x1="${padL}" y1="${y}" x2="${padL + innerW}" y2="${y}"></line>`;
       });
 
@@ -11042,18 +11069,21 @@ body.is-row-dragging *        { user-select: none !important; }
       svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
       [1, 2, 5, 10, 20].forEach((imp) => {
         if (imp > maxComp) return;
-        const y = padT + (1 - Math.log2(1 + imp) / Math.log2(1 + maxComp)) * innerH;
+        const yRaw = Math.log2(1 + imp);
+        if (yRaw < yMinV || yRaw > yMaxV) return;
+        const y = dataToPx(xMinV, yRaw).y;
         svgAxesFrag += `<text class="cl-tick" x="${padL - 6}" y="${y + 3}" text-anchor="end">${imp}</text>`;
       });
       svgAxesFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">Composite importance →</text>`;
       svgAxesFrag += `</g>`;
 
-      // ── X AXIS (sticky to viewport bottom) ──────────────────────────
+      // ── X AXIS — owner ticks filtered to visible lanes
       svgAxesFrag += `<g class="cl-x-axis" id="cloudXAxis">`;
       svgAxesFrag += `<rect class="cl-axis-bg" x="0" y="${padT + innerH + 0.5}" width="${W}" height="${H - padT - innerH}" />`;
       svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
       owners.forEach((p, i) => {
-        const x = padL + (i / Math.max(ownerSpan, 1)) * innerW;
+        if (i < xMinV || i > xMaxV) return;
+        const x = dataToPx(i, yMinV).x;
         const initials = (p.name || '').split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
         svgAxesFrag += `<text class="cl-tick" x="${x}" y="${padT + innerH + 14}" text-anchor="middle" title="${escapeHTML(p.name)}">${escapeHTML(initials)}</text>`;
         svgAxesFrag += `<text class="cl-tick muted" x="${x}" y="${padT + innerH + 26}" text-anchor="middle">${p._load || 0}</text>`;
@@ -11075,6 +11105,10 @@ body.is-row-dragging *        { user-select: none !important; }
     // in __all__ mode) and the selection ring (UI affordance). The
     // selection ring is drawn last so it always sits on top.
     placed.forEach((b) => {
+      // Out-of-viewport bubbles aren't drawn — they're outside the
+      // visible data range after the user zoomed in. The user can
+      // zoom out to see them again.
+      if (!b.inView) return;
       const sel = _cloudState.selection.has(b.id);
       const focusDim = _cloudState.focusMode && !focusIds.has(b.id) && !sel;
       let halos = '';
@@ -11250,111 +11284,170 @@ body.is-row-dragging *        { user-select: none !important; }
       _cloudState.focusMode = !_cloudState.focusMode;
       render();
     });
-    // ── Zoom controls ─────────────────────────────────────────────────
-    // Setting zoom does not re-relax the layout; it just rescales the
-    // rendered pixel size. The viewBox is constant, so all positions /
-    // halos / labels stay correct. Wheel-zoom only when Ctrl/⌘ is held
-    // so plain wheel still scrolls inside the canvas.
-    const applyZoom = (z, anchor) => {
-      const clamped = Math.max(0.4, Math.min(3, z));
-      _cloudState.zoom = clamped;
-      const sv = $('#cloudSvg');
-      const sc = $('#cloudScroll');
-      if (!sv || !sc) return;
-      // Anchor zoom to a cursor point so zooming feels stable (the
-      // point under the cursor stays under the cursor).
-      const oldW = sv.clientWidth || sv.getBoundingClientRect().width;
-      const oldH = sv.clientHeight || sv.getBoundingClientRect().height;
-      const newW = Math.round(W * clamped);
-      const newH = Math.round(H * clamped);
-      sv.setAttribute('width', newW);
-      sv.setAttribute('height', newH);
-      // Patch the inline <style> block inside the SVG so axis labels +
-      // grid + tick stroke widths re-scale to keep their rendered
-      // pixel size constant across the new zoom level. The style block
-      // was set at render time using a stale zoom factor; this update
-      // is cheaper than a full re-render and keeps the axes readable
-      // at every step.
-      const izN = 1 / clamped;
-      const styleEl = sv.querySelector('style');
-      if (styleEl) {
-        styleEl.textContent = `
-          .cl-axis        { stroke-width: ${(1 * izN).toFixed(3)}px; }
-          .cl-grid        { stroke-width: ${(0.5 * izN).toFixed(3)}px; }
-          .cl-today       { stroke-width: ${(1.5 * izN).toFixed(3)}px; }
-          .cl-tick        { font-size: ${(10.5 * izN).toFixed(2)}px; }
-          .cl-today-lbl   { font-size: ${(10 * izN).toFixed(2)}px; }
-          .cl-axis-title  { font-size: ${(11 * izN).toFixed(2)}px; }
-          .cl-zone        { font-size: ${(11 * izN).toFixed(2)}px; stroke-width: ${(3 * izN).toFixed(3)}px; }
-        `;
-      }
-      $('#cloudZoomVal').textContent = Math.round(clamped * 100) + '%';
-      if (anchor && oldW && newW) {
-        const sx = (sc.scrollLeft + anchor.x) / oldW;
-        const sy = (sc.scrollTop  + anchor.y) / oldH;
-        sc.scrollLeft = sx * newW - anchor.x;
-        sc.scrollTop  = sy * newH - anchor.y;
-      }
-      // Sticky axes: re-apply translates so the axis groups end up at
-      // the new scrollLeft / scrollTop after the zoom step.
-      updateStickyAxes();
+    // ── Viewport-zoom controls ────────────────────────────────────────
+    // Zoom changes the visible data RANGE (a.k.a. viewport). The canvas
+    // stays at its panel size, bubbles never resize, axes never move —
+    // only their tick labels regenerate. The user can:
+    //   • drag a box inside the chart to zoom to that box
+    //   • click +/- buttons to zoom in/out around the centre
+    //   • Ctrl/⌘ + wheel to zoom in/out anchored on the cursor
+    //   • ⤢ Reset to return to the full data range
+    //   • keyboard Ctrl/⌘ + +/-/0 mirroring the buttons
+
+    // Compute the zoom percentage label from the viewport's X span
+    // (a useful 1-number summary; if x span = full, that's 100%).
+    const refreshZoomLbl = () => {
+      const xSpan = _cloudState.viewport.xMaxFrac - _cloudState.viewport.xMinFrac;
+      const ySpan = _cloudState.viewport.yMaxFrac - _cloudState.viewport.yMinFrac;
+      // Effective zoom relative to full = sqrt(area inverse). Clean 1-number summary.
+      const effZoom = 1 / Math.sqrt(xSpan * ySpan);
+      $('#cloudZoomVal').textContent = Math.round(effZoom * 100) + '%';
     };
-    // Sticky axes — Y/X axis groups translate so the labels stay at
-    // the viewport edges when the user scrolls inside the zoomed
-    // canvas. RAF-throttled to keep things smooth at zoom 3×.
-    const updateStickyAxes = () => {
-      const sc = $('#cloudScroll');
-      if (!sc) return;
-      const z = _cloudState.zoom || 1;
-      const tx = sc.scrollLeft / z;
-      const ty = sc.scrollTop  / z;
-      const yAx = document.getElementById('cloudYAxis');
-      const xAx = document.getElementById('cloudXAxis');
-      if (yAx) yAx.setAttribute('transform', `translate(${tx.toFixed(1)}, 0)`);
-      if (xAx) xAx.setAttribute('transform', `translate(0, ${ty.toFixed(1)})`);
+    refreshZoomLbl();
+
+    // Zoom out/in by a factor (e.g. 0.7 → zoom in, 1.4 → zoom out).
+    // Optional cursor anchor (in viewBox / pixel coords) so the data
+    // point under the cursor stays under the cursor.
+    const zoomByFactor = (factor, anchor) => {
+      const vp = _cloudState.viewport;
+      // Anchor expressed as fractions of the chart area; default = centre.
+      let ax = 0.5, ay = 0.5;
+      if (anchor) {
+        ax = Math.max(0, Math.min(1, (anchor.x - padL) / innerW));
+        ay = Math.max(0, Math.min(1, (anchor.y - padT) / innerH));
+      }
+      const xSpan = (vp.xMaxFrac - vp.xMinFrac) * factor;
+      const ySpan = (vp.yMaxFrac - vp.yMinFrac) * factor;
+      // Anchor fraction in data space = vp.xMin + ax * span
+      const ancX = vp.xMinFrac + ax * (vp.xMaxFrac - vp.xMinFrac);
+      const ancY = vp.yMinFrac + (1 - ay) * (vp.yMaxFrac - vp.yMinFrac); // inverted: y=0 is top of chart
+      let xMin = ancX - ax * xSpan;
+      let xMax = xMin + xSpan;
+      let yMin = ancY - (1 - ay) * ySpan;
+      let yMax = yMin + ySpan;
+      // Clamp into [0, 1] preserving span when possible.
+      if (xMin < 0) { xMax -= xMin; xMin = 0; }
+      if (xMax > 1) { xMin -= (xMax - 1); xMax = 1; xMin = Math.max(0, xMin); }
+      if (yMin < 0) { yMax -= yMin; yMin = 0; }
+      if (yMax > 1) { yMin -= (yMax - 1); yMax = 1; yMin = Math.max(0, yMin); }
+      // Enforce minimum visible span so we can't zoom in past 30× from full.
+      const MIN_SPAN = 0.03;
+      if (xMax - xMin < MIN_SPAN) {
+        const mid = (xMin + xMax) / 2; xMin = mid - MIN_SPAN/2; xMax = mid + MIN_SPAN/2;
+      }
+      if (yMax - yMin < MIN_SPAN) {
+        const mid = (yMin + yMax) / 2; yMin = mid - MIN_SPAN/2; yMax = mid + MIN_SPAN/2;
+      }
+      vp.xMinFrac = xMin; vp.xMaxFrac = xMax;
+      vp.yMinFrac = yMin; vp.yMaxFrac = yMax;
+      render();
     };
-    // Direct (non-RAF) listener — modern browsers handle ~hundreds of
-    // setAttribute calls per second comfortably. Was RAF-throttled but
-    // headless previews and some scroll-driven environments don't fire
-    // RAF in time, so go direct.
-    $('#cloudScroll').addEventListener('scroll', updateStickyAxes, { passive: true });
-    // Zoom step bumped 0.20 → 0.25 for buttons, 0.15 → 0.20 for wheel.
-    // Going from Fit (~1.0) to 1.5× now takes 2 clicks instead of 3.
-    $('#cloudZoomOut').addEventListener('click', () => applyZoom(_cloudState.zoom - 0.25));
-    $('#cloudZoomIn') .addEventListener('click', () => applyZoom(_cloudState.zoom + 0.25));
-    $('#cloudZoomFit').addEventListener('click', () => {
-      const sc = $('#cloudScroll');
-      if (!sc) return;
-      applyZoom(sc.clientWidth / W);
-    });
-    // Ctrl/⌘ + wheel inside the scroller zooms; plain wheel scrolls.
-    $('#cloudScroll').addEventListener('wheel', (e) => {
+    // Reset to full range.
+    const zoomReset = () => {
+      _cloudState.viewport = { xMinFrac: 0, xMaxFrac: 1, yMinFrac: 0, yMaxFrac: 1 };
+      render();
+    };
+
+    $('#cloudZoomOut').addEventListener('click', () => zoomByFactor(1.4));
+    $('#cloudZoomIn') .addEventListener('click', () => zoomByFactor(0.7));
+    $('#cloudZoomFit').addEventListener('click', zoomReset);
+
+    // Ctrl/⌘ + wheel = zoom at cursor; plain wheel ignored.
+    SVG.addEventListener('wheel', (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
-      const step = e.deltaY < 0 ? 0.2 : -0.2;
-      const rect = $('#cloudScroll').getBoundingClientRect();
-      applyZoom(_cloudState.zoom + step, { x: e.clientX - rect.x, y: e.clientY - rect.y });
+      const rect = SVG.getBoundingClientRect();
+      const anchor = { x: e.clientX - rect.x, y: e.clientY - rect.y };
+      zoomByFactor(e.deltaY < 0 ? 0.85 : 1.18, anchor);
     }, { passive: false });
-    // Keyboard shortcuts: Ctrl/⌘ + +/- to zoom, 0 to fit.
+
+    // Keyboard shortcuts: Ctrl/⌘ + +/- to zoom in/out around centre, 0 to reset.
     const cloudKeyHandler = (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       if (e.target?.closest('input, textarea, [contenteditable]')) return;
       if (e.key === '=' || e.key === '+') {
-        e.preventDefault(); applyZoom(_cloudState.zoom + 0.25);
+        e.preventDefault(); zoomByFactor(0.7);
       } else if (e.key === '-' || e.key === '_') {
-        e.preventDefault(); applyZoom(_cloudState.zoom - 0.25);
+        e.preventDefault(); zoomByFactor(1.4);
       } else if (e.key === '0') {
-        e.preventDefault();
-        const sc = $('#cloudScroll');
-        if (sc) applyZoom(sc.clientWidth / W);
+        e.preventDefault(); zoomReset();
       }
     };
     document.addEventListener('keydown', cloudKeyHandler);
-    // Drop the listener when the view is replaced — the next render
-    // re-attaches a fresh one. Prevents handler leakage across views.
     view.__cloudCleanup = () => document.removeEventListener('keydown', cloudKeyHandler);
-    // First paint: align sticky axes with the initial scroll (0,0).
-    updateStickyAxes();
+
+    // ── Drag-select to zoom to a box ──────────────────────────────────
+    // Mouse-down on the chart background (NOT on a bubble) starts a
+    // drag; the user pulls a selection rectangle; on release the
+    // viewport snaps to that rectangle. Releasing without dragging at
+    // all (or releasing a too-small box) is treated as a no-op so
+    // accidental clicks don't change the zoom.
+    let dragState = null;
+    SVG.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      if (e.target.closest('.cl-bubble-g')) return; // bubble click → selection
+      // Only inside chart area
+      const rect = SVG.getBoundingClientRect();
+      const px = e.clientX - rect.x;
+      const py = e.clientY - rect.y;
+      if (px < padL || px > padL + innerW || py < padT || py > padT + innerH) return;
+      dragState = { startX: px, startY: py, curX: px, curY: py };
+      e.preventDefault();
+    });
+    SVG.addEventListener('mousemove', (e) => {
+      if (!dragState) return;
+      const rect = SVG.getBoundingClientRect();
+      dragState.curX = Math.max(padL, Math.min(padL + innerW, e.clientX - rect.x));
+      dragState.curY = Math.max(padT, Math.min(padT + innerH, e.clientY - rect.y));
+      // Live-render the selection rect.
+      let r = document.getElementById('cloudZoomRect');
+      if (!r) {
+        r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        r.setAttribute('id', 'cloudZoomRect');
+        r.setAttribute('class', 'cl-zoom-rect');
+        SVG.appendChild(r);
+      }
+      const x1 = Math.min(dragState.startX, dragState.curX);
+      const y1 = Math.min(dragState.startY, dragState.curY);
+      const x2 = Math.max(dragState.startX, dragState.curX);
+      const y2 = Math.max(dragState.startY, dragState.curY);
+      r.setAttribute('x', x1);
+      r.setAttribute('y', y1);
+      r.setAttribute('width', x2 - x1);
+      r.setAttribute('height', y2 - y1);
+    });
+    SVG.addEventListener('mouseup', () => {
+      const r = document.getElementById('cloudZoomRect');
+      if (r) r.remove();
+      if (!dragState) return;
+      const x1 = Math.min(dragState.startX, dragState.curX);
+      const y1 = Math.min(dragState.startY, dragState.curY);
+      const x2 = Math.max(dragState.startX, dragState.curX);
+      const y2 = Math.max(dragState.startY, dragState.curY);
+      const dx = x2 - x1, dy = y2 - y1;
+      dragState = null;
+      if (dx < 8 || dy < 8) return; // too small — treat as click on background
+      // Convert pixel box to viewport fractions.
+      // x in [padL, padL+innerW] maps to xMinFrac..xMaxFrac
+      const vp = _cloudState.viewport;
+      const xMinNew = vp.xMinFrac + ((x1 - padL) / innerW) * (vp.xMaxFrac - vp.xMinFrac);
+      const xMaxNew = vp.xMinFrac + ((x2 - padL) / innerW) * (vp.xMaxFrac - vp.xMinFrac);
+      // y is inverted: top of chart = yMax
+      const yMaxNew = vp.yMinFrac + (1 - (y1 - padT) / innerH) * (vp.yMaxFrac - vp.yMinFrac);
+      const yMinNew = vp.yMinFrac + (1 - (y2 - padT) / innerH) * (vp.yMaxFrac - vp.yMinFrac);
+      const MIN_SPAN = 0.03;
+      vp.xMinFrac = Math.max(0, Math.min(1 - MIN_SPAN, xMinNew));
+      vp.xMaxFrac = Math.max(vp.xMinFrac + MIN_SPAN, Math.min(1, xMaxNew));
+      vp.yMinFrac = Math.max(0, Math.min(1 - MIN_SPAN, yMinNew));
+      vp.yMaxFrac = Math.max(vp.yMinFrac + MIN_SPAN, Math.min(1, yMaxNew));
+      render();
+    });
+    // Cancel drag on leave/escape so a stuck drag-rect doesn't linger.
+    SVG.addEventListener('mouseleave', () => {
+      const r = document.getElementById('cloudZoomRect');
+      if (r) r.remove();
+      dragState = null;
+    });
     $('#cloudCSV').addEventListener('click', () => {
       exportCSV(`action-cloud-${(curProjectIsMerged() ? 'all' : curProject().name).replace(/\s+/g, '_')}-${todayISO()}.csv`,
         allActions, [
