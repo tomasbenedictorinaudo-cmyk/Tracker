@@ -2786,7 +2786,7 @@
             <button class="seg-btn ${_cloudState.preset === 'A' ? 'active' : ''}" data-cloud-preset="A" title="X = days-to-due · Y = % complete · bubble size = composite importance">A · Urgency × Progress</button>
             <button class="seg-btn ${_cloudState.preset === 'B' ? 'active' : ''}" data-cloud-preset="B" title="X = owner (sorted by load) · Y = composite importance · bubble size = commitment %">B · Owner × Importance</button>
           </div>
-          <button class="ghost ${_cloudState.focusMode ? 'is-on' : ''}" id="cloudFocus" title="Highlight only the top ${_cloudState.focusN} most noteworthy actions">★ Focus top ${_cloudState.focusN}</button>
+          <button class="ghost ${_cloudState.focusMode ? 'is-on' : ''}" id="cloudFocus" title="Highlight the ${_cloudState.focusN} bubbles closest to this preset's origin (firefight epicenter in A · overload epicenter in B). Toggle the preset to rerank.">★ Focus top ${_cloudState.focusN}</button>
           <button class="ghost" id="cloudCSV" title="Download the cloud's currently-visible actions as CSV">↓ CSV</button>
         </div>
       </div>
@@ -3005,11 +3005,23 @@
       });
     })();
 
-    // Focus mode ranking — top-N by composite importance.
+    // Focus mode ranking — N bubbles closest to the preset's origin
+    // in canvas coordinates. Origin is bottom-left in Preset A
+    // (firefight epicenter: most-overdue × 0% complete) and top-left
+    // in Preset B (overload epicenter: most-loaded owner × highest
+    // importance). This makes "top N noteworthy" self-consistent with
+    // the concentric heat rings — the inner ring literally contains
+    // the focused set — and crucially it makes the focused set
+    // PRESET-SPECIFIC so toggling A ↔ B reranks the noteworthy items.
     const focusIds = new Set();
     if (_cloudState.focusMode) {
-      placed.slice().sort((a, b) => b.importance - a.importance).slice(0, _cloudState.focusN)
-        .forEach((p) => focusIds.add(p.id));
+      const oX = padL;
+      const oY = _cloudState.preset === 'A' ? (padT + innerH) : padT;
+      placed.slice().sort((a, b) => {
+        const da = (a.x - oX) * (a.x - oX) + (a.y - oY) * (a.y - oY);
+        const db = (b.x - oX) * (b.x - oX) + (b.y - oY) * (b.y - oY);
+        return da - db;
+      }).slice(0, _cloudState.focusN).forEach((p) => focusIds.add(p.id));
     }
 
     // ── Axes + decorations ────────────────────────────────────────────
