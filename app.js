@@ -2805,7 +2805,6 @@
       </div>
       <div class="cloud-filterbar">
         <div class="cloud-sel-strip" id="cloudSelStrip" hidden></div>
-        <div class="cloud-comp-strip" id="cloudCompStrip"></div>
       </div>
       <div class="cloud-canvas-wrap">
         <div class="cloud-canvas-scroll" id="cloudScroll">
@@ -2824,49 +2823,10 @@
       </div>`;
     root.appendChild(view);
 
-    // ── Component filter strip — clickable mini-bar chart ─────────────
-    const compStrip = $('#cloudCompStrip');
-    const compCounts = new Map();
-    allActions.forEach(({ a, proj: p }) => {
-      const cmp = a.component ? findComponent(p, a.component) : null;
-      const key = cmp ? `${p.id}:${a.component}` : '__none__';
-      compCounts.set(key, (compCounts.get(key) || 0) + 1);
-    });
-    // In merged mode the component IDs are project-scoped, so we keep
-    // the (project,component) tuple for click semantics but display
-    // only the component name. Sort descending by count.
-    const compEntries = Array.from(compCounts.entries()).sort((a, b) => b[1] - a[1]);
-    const maxCt = compEntries[0]?.[1] || 1;
-    const activeCompFilter = $('#filterComponent')?.value || '';
-    compStrip.innerHTML = `
-      <span class="cl-strip-lbl">Component</span>
-      ${compEntries.map(([k, n]) => {
-        if (k === '__none__') {
-          const on = activeCompFilter === '__none__';
-          return `<button class="cl-comp-chip ${on ? 'is-on' : ''}" data-cloud-comp="__none__" title="${n} action${n === 1 ? '' : 's'} with no component">
-            <span class="cl-comp-bar"><span class="cl-comp-bar-fill" style="width:${(n / maxCt) * 100}%; background: var(--text-faint);"></span></span>
-            <span class="cl-comp-name">— None —</span>
-            <span class="cl-comp-n">${n}</span>
-          </button>`;
-        }
-        const [projId, compId] = k.split(':');
-        const p = state.projects.find((x) => x.id === projId);
-        const cmp = findComponent(p, compId);
-        const c = cmp ? componentColor(cmp.color) : null;
-        const on = activeCompFilter === compId;
-        return `<button class="cl-comp-chip ${on ? 'is-on' : ''}" data-cloud-comp="${escapeHTML(compId)}" style="${c ? `--c-rgb: ${c.rgb};` : ''}" title="${escapeHTML(cmp?.name || compId)}: ${n}">
-          <span class="cl-comp-bar"><span class="cl-comp-bar-fill" style="width:${(n / maxCt) * 100}%; ${c ? `background: rgb(${c.rgb});` : ''}"></span></span>
-          <span class="cl-comp-name">${escapeHTML(cmp?.name || compId)}</span>
-          <span class="cl-comp-n">${n}</span>
-        </button>`;
-      }).join('')}
-      ${activeCompFilter ? '<button class="cl-comp-clear" data-cloud-comp="">× clear</button>' : ''}`;
-    $$('.cl-comp-chip, .cl-comp-clear', compStrip).forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const v = btn.dataset.cloudComp;
-        applyTopbarFilter({ component: v });
-      });
-    });
+    // Component filtering lives on the topbar "All components"
+    // dropdown — it covers single-select, "__none__", and clear-all
+    // in one control and applies across every panel. The cloud panel
+    // intentionally does not duplicate it.
 
     // ── Selection strip — shown only when at least one bubble selected
     function refreshSelStrip() {

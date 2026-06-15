@@ -3291,51 +3291,6 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .cl-sel-count { color: var(--accent); font-weight: 600; }
 .cl-sel-hint  { color: var(--text-dim); flex: 1; font-size: 11.5px; font-style: italic; }
 .cloud-sel-strip .ghost { padding: 3px 10px; font-size: 11.5px; min-width: auto; }
-.cloud-comp-strip {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  padding: 4px 0;
-}
-.cl-strip-lbl {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  color: var(--text-faint);
-  margin-right: 6px;
-}
-.cl-comp-chip {
-  display: inline-grid;
-  grid-template-columns: 36px 1fr auto;
-  gap: 6px;
-  align-items: center;
-  padding: 3px 8px;
-  border: 1px solid var(--line);
-  background: var(--bg-2);
-  border-radius: 999px;
-  color: var(--text-dim);
-  font-size: 11px;
-  cursor: pointer;
-  transition: background var(--transition), border-color var(--transition);
-}
-.cl-comp-chip:hover { background: var(--bg-3); color: var(--text); }
-.cl-comp-chip.is-on { background: rgba(110,168,255,.15); border-color: var(--accent); color: var(--text); }
-.cl-comp-bar { height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
-.cl-comp-bar-fill { height: 100%; }
-.cl-comp-name { font-weight: 500; white-space: nowrap; }
-.cl-comp-n { font-weight: 700; font-variant-numeric: tabular-nums; }
-.cl-comp-clear {
-  background: transparent;
-  border: 1px dashed var(--line);
-  padding: 3px 10px;
-  border-radius: 999px;
-  color: var(--text-faint);
-  font-size: 11px;
-  cursor: pointer;
-}
-.cl-comp-clear:hover { color: var(--bad); border-color: var(--bad); }
-
 .cloud-canvas-wrap {
   background: var(--bg-1);
   border: 1px solid var(--line);
