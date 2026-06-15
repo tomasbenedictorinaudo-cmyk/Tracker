@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-15T11:14:45.192Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-15T11:18:13.902Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -10190,12 +10190,17 @@ body.is-row-dragging *        { user-select: none !important; }
    * filter wiring already in place.
    * ─────────────────────────────────────────────────────────────────── */
 
+  // Focus mode N is computed at render time from the preset's critical
+  // zone count (see renderActionCloud), not a hard-coded constant. The
+  // floor / ceiling keep it useful at both extremes — projects with no
+  // genuine crisis still get a top-3 spotlight, huge projects don't
+  // dilute Focus into "highlight everything."
+  const CLOUD_FOCUS_FLOOR = 3;
+  const CLOUD_FOCUS_CEIL  = 25;
   const _cloudState = {
     preset: 'A',                 // 'A' = urgency × progress, 'B' = owner × importance
     selection: new Set(),        // action ids — persists across preset toggles
     focusMode: false,
-    focusN: 12,
-    sizeBy: 'auto',              // 'auto' (preset-driven) or fixed override later
   };
 
   // Composite importance — drives bubble size (Preset A), Y position
@@ -10288,7 +10293,7 @@ body.is-row-dragging *        { user-select: none !important; }
             <button class="seg-btn ${_cloudState.preset === 'A' ? 'active' : ''}" data-cloud-preset="A" title="X = days-to-due · Y = % complete · bubble size = composite importance">A · Urgency × Progress</button>
             <button class="seg-btn ${_cloudState.preset === 'B' ? 'active' : ''}" data-cloud-preset="B" title="X = owner (sorted by load) · Y = composite importance · bubble size = commitment %">B · Owner × Importance</button>
           </div>
-          <button class="ghost ${_cloudState.focusMode ? 'is-on' : ''}" id="cloudFocus" title="Highlight the ${_cloudState.focusN} most noteworthy bubbles for the current preset. Preset A ranks by distance from the firefight origin (matches the inner heat ring). Preset B ranks by composite importance (matches the critical horizontal band).">★ Focus top ${_cloudState.focusN}</button>
+          <button class="ghost ${_cloudState.focusMode ? 'is-on' : ''}" id="cloudFocus" title="Highlight the N most noteworthy bubbles for the current preset. N adapts to context: it counts items inside the preset's critical zone (inner ring in A · critical band in B), clamped to [${CLOUD_FOCUS_FLOOR}, ${CLOUD_FOCUS_CEIL}].">★ Focus top <span id="cloudFocusN">…</span></button>
           <button class="ghost" id="cloudCSV" title="Download the cloud's currently-visible actions as CSV">↓ CSV</button>
         </div>
       </div>
@@ -10520,6 +10525,27 @@ body.is-row-dragging *        { user-select: none !important; }
     //              along it is meaningless; the chart's signal is
     //              purely vertical. The horizontal critical band
     //              contains the focused set by construction.
+    // Focus N is computed from the preset's critical zone — exactly the
+    // items the chart already calls "critical." The floor / ceiling
+    // keep it useful at both extremes.
+    let focusN;
+    if (_cloudState.preset === 'A') {
+      // Preset A — items inside the inner heat ring (diag × 0.22 from
+      // the bottom-left origin).
+      const oX = padL;
+      const oY = padT + innerH;
+      const critR = Math.sqrt(innerW * innerW + innerH * innerH) * 0.22;
+      const critR2 = critR * critR;
+      const inCrit = placed.reduce((n, p) =>
+        n + (((p.x - oX) * (p.x - oX) + (p.y - oY) * (p.y - oY) <= critR2) ? 1 : 0), 0);
+      focusN = Math.max(CLOUD_FOCUS_FLOOR, Math.min(CLOUD_FOCUS_CEIL, inCrit));
+    } else {
+      // Preset B — items inside the critical horizontal band
+      // (importance ≥ maxComp × 0.75).
+      const critThr = maxComp * 0.75;
+      const inCrit = placed.reduce((n, p) => n + (p.importance >= critThr ? 1 : 0), 0);
+      focusN = Math.max(CLOUD_FOCUS_FLOOR, Math.min(CLOUD_FOCUS_CEIL, inCrit));
+    }
     const focusIds = new Set();
     if (_cloudState.focusMode) {
       if (_cloudState.preset === 'A') {
@@ -10529,10 +10555,10 @@ body.is-row-dragging *        { user-select: none !important; }
           const da = (a.x - oX) * (a.x - oX) + (a.y - oY) * (a.y - oY);
           const db = (b.x - oX) * (b.x - oX) + (b.y - oY) * (b.y - oY);
           return da - db;
-        }).slice(0, _cloudState.focusN).forEach((p) => focusIds.add(p.id));
+        }).slice(0, focusN).forEach((p) => focusIds.add(p.id));
       } else {
         placed.slice().sort((a, b) => b.importance - a.importance)
-          .slice(0, _cloudState.focusN).forEach((p) => focusIds.add(p.id));
+          .slice(0, focusN).forEach((p) => focusIds.add(p.id));
       }
     }
 
@@ -10718,7 +10744,11 @@ body.is-row-dragging *        { user-select: none !important; }
     });
 
     SVG.innerHTML = svgFrag;
-    $('#cloudStat').textContent = `${allActions.length} action${allActions.length === 1 ? '' : 's'} · ${_cloudState.preset === 'A' ? 'Urgency × Progress' : 'Owner × Importance'}${_cloudState.focusMode ? ` · top ${_cloudState.focusN} highlighted` : ''}`;
+    $('#cloudStat').textContent = `${allActions.length} action${allActions.length === 1 ? '' : 's'} · ${_cloudState.preset === 'A' ? 'Urgency × Progress' : 'Owner × Importance'}${_cloudState.focusMode ? ` · top ${focusN} highlighted` : ''}`;
+    // Patch the button's N now that we've computed it from the
+    // critical-zone count.
+    const focusNEl = document.getElementById('cloudFocusN');
+    if (focusNEl) focusNEl.textContent = focusN;
 
     // Repaint just selection halos (skip full layout) — used after
     // selection toggles so we don't pay the relax cost on each click.
