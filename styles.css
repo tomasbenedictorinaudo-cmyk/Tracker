@@ -3348,6 +3348,13 @@ body.is-card-dragging * { cursor: grabbing !important; }
 
 .cl-axis  { stroke: var(--line); stroke-width: 1; }
 .cl-grid  { stroke: var(--line); stroke-width: .5; stroke-dasharray: 2 3; }
+/* Opaque rectangle that fills the axis gutter so plot content scrolling
+   underneath doesn't bleed through the axis labels. Same colour as the
+   canvas wrap background. */
+.cl-axis-bg {
+  fill: var(--bg-1);
+  stroke: none;
+}
 .cl-today { stroke: rgba(110,168,255,.55); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .cl-today-lbl { fill: rgb(110,168,255); font-size: 10px; font-weight: 600; pointer-events: none; }
 .cl-trend { stroke: rgba(74,222,128,.4); stroke-width: 1; stroke-dasharray: 4 4; }

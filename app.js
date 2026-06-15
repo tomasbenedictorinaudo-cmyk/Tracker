@@ -3256,7 +3256,14 @@
     }
 
     // ── Axes + decorations ────────────────────────────────────────────
+    // svgFrag = plot layer (bubbles, heat rings, today line, grid, zone
+    // labels) — scrolls when zoomed in.
+    // svgAxesFrag = sticky layer (Y/X axis lines + labels + titles) —
+    // wrapped in groups whose transforms track scrollLeft/scrollTop so
+    // they stay anchored to the viewport edges. Appended LAST to render
+    // on top of bubbles that scroll under the axis gutters.
     let svgFrag = '';
+    let svgAxesFrag = '';
     // When the user zooms in/out, the SVG renders at base × zoom
     // pixels (so the wrapper scrolls). Without compensation every
     // element scales — axis labels become huge or tiny depending on
@@ -3299,51 +3306,57 @@
       // Heat backdrop — radial red gradient anchored at the firefight
       // origin (bottom-left). Gives the danger zone a quiet visual
       // temperature so the eye lands there before reading any bubble.
+      // ── PLOT CONTENT (scrolls with bubbles when zoomed) ─────────────
       svgFrag += `<rect class="cl-heat-fill" x="${padL}" y="${padT}" width="${innerW}" height="${innerH}" fill="url(#cl-heat-grad-a)" clip-path="url(#cl-chart-clip)" />`;
-      // Concentric heat rings from origin (0,0 in chart space =
-      // bottom-left corner, i.e. "most overdue, 0% complete"). The
-      // bubble closest to that origin is the most noteworthy by
-      // construction; rings give the eye a radial ranking the same way
-      // a target's bullseye does. Three rings divide the canvas into
-      // critical / watch / monitor bands; everything outside the
-      // outermost ring is the "safe" half.
       const originX = padL;
       const originY = padT + innerH;
       const diag = Math.sqrt(innerW * innerW + innerH * innerH);
-      // Three rings without text labels — the colour gradient + the
-      // matching focus-mode highlight already convey the band semantics.
       [diag * 0.22, diag * 0.42, diag * 0.62].forEach((r, i) => {
         svgFrag += `<circle class="cl-heat-ring cl-heat-ring-${i}" cx="${originX}" cy="${originY}" r="${r.toFixed(1)}" clip-path="url(#cl-chart-clip)"></circle>`;
       });
-      // Y axis = % complete
-      svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
-      svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
-      // Today vertical reference line (X = sym-log 0 = 0 raw)
+      // Today vertical reference line (X = sym-log 0 = 0 raw). Stays
+      // in plot content — its X position is the real "today" in data
+      // coords; making it sticky would point at the wrong date.
       const todayX = padL + ((0 - -6.6) / (7.5 - -6.6)) * innerW;
       svgFrag += `<line class="cl-today" x1="${todayX}" y1="${padT}" x2="${todayX}" y2="${padT + innerH}"></line>`;
       svgFrag += `<text class="cl-today-lbl" x="${todayX + 3}" y="${padT + 12}">today</text>`;
-      // Y ticks (0/25/50/75/100 %)
+      // Y grid lines (stay in plot — they tie to the data, not to the
+      // sticky labels)
       for (let p = 0; p <= 100; p += 25) {
         const y = padT + (1 - p / 100) * innerH;
         svgFrag += `<line class="cl-grid" x1="${padL}" y1="${y}" x2="${padL + innerW}" y2="${y}"></line>`;
-        svgFrag += `<text class="cl-tick" x="${padL - 6}" y="${y + 3}" text-anchor="end">${p}%</text>`;
       }
-      // X ticks (-30, -7, today, +7, +30, +90, no date)
+      // Zone labels (stay in plot — they label specific chart corners)
+      svgFrag += `<text class="cl-zone fire" x="${padL + 12}" y="${padT + innerH - 12}">🔥 firefight zone</text>`;
+      svgFrag += `<text class="cl-zone safe" x="${padL + innerW - 12}" y="${padT + 16}" text-anchor="end">safe zone ✓</text>`;
+
+      // ── Y AXIS (sticky to viewport left) ────────────────────────────
+      svgAxesFrag += `<g class="cl-y-axis" id="cloudYAxis">`;
+      // Opaque BG that covers the left gutter so plot content scrolling
+      // under the axis area doesn't bleed through the labels.
+      svgAxesFrag += `<rect class="cl-axis-bg" x="0" y="0" width="${padL - 0.5}" height="${H}" />`;
+      svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
+      for (let p = 0; p <= 100; p += 25) {
+        const y = padT + (1 - p / 100) * innerH;
+        svgAxesFrag += `<text class="cl-tick" x="${padL - 6}" y="${y + 3}" text-anchor="end">${p}%</text>`;
+      }
+      svgAxesFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">% Complete →</text>`;
+      svgAxesFrag += `</g>`;
+
+      // ── X AXIS (sticky to viewport bottom) ──────────────────────────
+      svgAxesFrag += `<g class="cl-x-axis" id="cloudXAxis">`;
+      svgAxesFrag += `<rect class="cl-axis-bg" x="0" y="${padT + innerH + 0.5}" width="${W}" height="${H - padT - innerH}" />`;
+      svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
       [{ d: -30, lbl: 'overdue 30d' }, { d: -7, lbl: '-7d' }, { d: 7, lbl: '+7d' },
        { d: 30, lbl: '+30d' }, { d: 90, lbl: '+90d' }].forEach(({ d, lbl }) => {
         const xRaw = symLog(d);
         const x = padL + ((xRaw - -6.6) / (7.5 - -6.6)) * innerW;
-        svgFrag += `<text class="cl-tick" x="${x}" y="${padT + innerH + 16}" text-anchor="middle">${lbl}</text>`;
+        svgAxesFrag += `<text class="cl-tick" x="${x}" y="${padT + innerH + 16}" text-anchor="middle">${lbl}</text>`;
       });
-      // No-date lane label
       const ndX = padL + ((7.5 - -6.6) / (7.5 - -6.6)) * innerW;
-      svgFrag += `<text class="cl-tick muted" x="${ndX - 6}" y="${padT + innerH + 16}" text-anchor="end">no date</text>`;
-      // Quadrant labels (top-right safe, bottom-left firefight)
-      svgFrag += `<text class="cl-zone fire" x="${padL + 12}" y="${padT + innerH - 12}">🔥 firefight zone</text>`;
-      svgFrag += `<text class="cl-zone safe" x="${padL + innerW - 12}" y="${padT + 16}" text-anchor="end">safe zone ✓</text>`;
-      // Axis titles
-      svgFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Days to due (negative = overdue) →</text>`;
-      svgFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">% Complete →</text>`;
+      svgAxesFrag += `<text class="cl-tick muted" x="${ndX - 6}" y="${padT + innerH + 16}" text-anchor="end">no date</text>`;
+      svgAxesFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Days to due (negative = overdue) →</text>`;
+      svgAxesFrag += `</g>`;
     } else {
       // Preset B — horizontal importance bands (NOT concentric rings).
       //
@@ -3378,28 +3391,43 @@
         if (h < 4) return;
         svgFrag += `<rect class="cl-band ${cls}" x="${padL}" y="${yTop.toFixed(1)}" width="${innerW}" height="${h.toFixed(1)}" clip-path="url(#cl-chart-clip)"></rect>`;
       });
-      // Preset B axes
-      svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
-      svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
-      // Owner X ticks
+      // Grid lines (vertical owner lanes + horizontal importance ticks)
+      // stay in plot content — they tie to data positions.
       const ownerSpan = Math.max(1, owners.length - 1);
       owners.forEach((p, i) => {
         const x = padL + (i / Math.max(ownerSpan, 1)) * innerW;
         svgFrag += `<line class="cl-grid" x1="${x}" y1="${padT}" x2="${x}" y2="${padT + innerH}"></line>`;
-        const initials = (p.name || '').split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
-        svgFrag += `<text class="cl-tick" x="${x}" y="${padT + innerH + 14}" text-anchor="middle" title="${escapeHTML(p.name)}">${escapeHTML(initials)}</text>`;
-        svgFrag += `<text class="cl-tick muted" x="${x}" y="${padT + innerH + 26}" text-anchor="middle">${p._load || 0}</text>`;
       });
-      // Y ticks — composite importance, log scale
       [1, 2, 5, 10, 20].forEach((imp) => {
         if (imp > maxComp) return;
         const y = padT + (1 - Math.log2(1 + imp) / Math.log2(1 + maxComp)) * innerH;
         svgFrag += `<line class="cl-grid" x1="${padL}" y1="${y}" x2="${padL + innerW}" y2="${y}"></line>`;
-        svgFrag += `<text class="cl-tick" x="${padL - 6}" y="${y + 3}" text-anchor="end">${imp}</text>`;
       });
-      // Axis titles
-      svgFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Owner (sorted by load) →</text>`;
-      svgFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">Composite importance →</text>`;
+
+      // ── Y AXIS (sticky to viewport left) ────────────────────────────
+      svgAxesFrag += `<g class="cl-y-axis" id="cloudYAxis">`;
+      svgAxesFrag += `<rect class="cl-axis-bg" x="0" y="0" width="${padL - 0.5}" height="${H}" />`;
+      svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
+      [1, 2, 5, 10, 20].forEach((imp) => {
+        if (imp > maxComp) return;
+        const y = padT + (1 - Math.log2(1 + imp) / Math.log2(1 + maxComp)) * innerH;
+        svgAxesFrag += `<text class="cl-tick" x="${padL - 6}" y="${y + 3}" text-anchor="end">${imp}</text>`;
+      });
+      svgAxesFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">Composite importance →</text>`;
+      svgAxesFrag += `</g>`;
+
+      // ── X AXIS (sticky to viewport bottom) ──────────────────────────
+      svgAxesFrag += `<g class="cl-x-axis" id="cloudXAxis">`;
+      svgAxesFrag += `<rect class="cl-axis-bg" x="0" y="${padT + innerH + 0.5}" width="${W}" height="${H - padT - innerH}" />`;
+      svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
+      owners.forEach((p, i) => {
+        const x = padL + (i / Math.max(ownerSpan, 1)) * innerW;
+        const initials = (p.name || '').split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+        svgAxesFrag += `<text class="cl-tick" x="${x}" y="${padT + innerH + 14}" text-anchor="middle" title="${escapeHTML(p.name)}">${escapeHTML(initials)}</text>`;
+        svgAxesFrag += `<text class="cl-tick muted" x="${x}" y="${padT + innerH + 26}" text-anchor="middle">${p._load || 0}</text>`;
+      });
+      svgAxesFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Owner (sorted by load) →</text>`;
+      svgAxesFrag += `</g>`;
     }
 
     // ── Bubbles ────────────────────────────────────────────────────────
@@ -3453,7 +3481,9 @@
       </g>`;
     });
 
-    SVG.innerHTML = svgFrag;
+    // Axes appended after bubbles so the axis-gutter background rects
+    // hide any plot content that scrolls under them.
+    SVG.innerHTML = svgFrag + svgAxesFrag;
     $('#cloudStat').textContent = `${allActions.length} action${allActions.length === 1 ? '' : 's'} · ${_cloudState.preset === 'A' ? 'Urgency × Progress' : 'Owner × Importance'}${_cloudState.focusMode ? ` · top ${focusN} highlighted` : ''}`;
     // Patch the button's N now that we've computed it from the
     // critical-zone count.
@@ -3627,19 +3657,39 @@
         `;
       }
       $('#cloudZoomVal').textContent = Math.round(clamped * 100) + '%';
-      // Re-render the focusN span label width — it's part of the same
-      // button, but the focusN value itself only changes when the
-      // critical-zone count changes, so a re-render isn't strictly
-      // needed for zoom.
       if (anchor && oldW && newW) {
         const sx = (sc.scrollLeft + anchor.x) / oldW;
         const sy = (sc.scrollTop  + anchor.y) / oldH;
         sc.scrollLeft = sx * newW - anchor.x;
         sc.scrollTop  = sy * newH - anchor.y;
       }
+      // Sticky axes: re-apply translates so the axis groups end up at
+      // the new scrollLeft / scrollTop after the zoom step.
+      updateStickyAxes();
     };
-    $('#cloudZoomOut').addEventListener('click', () => applyZoom(_cloudState.zoom - 0.2));
-    $('#cloudZoomIn') .addEventListener('click', () => applyZoom(_cloudState.zoom + 0.2));
+    // Sticky axes — Y/X axis groups translate so the labels stay at
+    // the viewport edges when the user scrolls inside the zoomed
+    // canvas. RAF-throttled to keep things smooth at zoom 3×.
+    const updateStickyAxes = () => {
+      const sc = $('#cloudScroll');
+      if (!sc) return;
+      const z = _cloudState.zoom || 1;
+      const tx = sc.scrollLeft / z;
+      const ty = sc.scrollTop  / z;
+      const yAx = document.getElementById('cloudYAxis');
+      const xAx = document.getElementById('cloudXAxis');
+      if (yAx) yAx.setAttribute('transform', `translate(${tx.toFixed(1)}, 0)`);
+      if (xAx) xAx.setAttribute('transform', `translate(0, ${ty.toFixed(1)})`);
+    };
+    // Direct (non-RAF) listener — modern browsers handle ~hundreds of
+    // setAttribute calls per second comfortably. Was RAF-throttled but
+    // headless previews and some scroll-driven environments don't fire
+    // RAF in time, so go direct.
+    $('#cloudScroll').addEventListener('scroll', updateStickyAxes, { passive: true });
+    // Zoom step bumped 0.20 → 0.25 for buttons, 0.15 → 0.20 for wheel.
+    // Going from Fit (~1.0) to 1.5× now takes 2 clicks instead of 3.
+    $('#cloudZoomOut').addEventListener('click', () => applyZoom(_cloudState.zoom - 0.25));
+    $('#cloudZoomIn') .addEventListener('click', () => applyZoom(_cloudState.zoom + 0.25));
     $('#cloudZoomFit').addEventListener('click', () => {
       const sc = $('#cloudScroll');
       if (!sc) return;
@@ -3649,10 +3699,30 @@
     $('#cloudScroll').addEventListener('wheel', (e) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       e.preventDefault();
-      const step = e.deltaY < 0 ? 0.15 : -0.15;
+      const step = e.deltaY < 0 ? 0.2 : -0.2;
       const rect = $('#cloudScroll').getBoundingClientRect();
       applyZoom(_cloudState.zoom + step, { x: e.clientX - rect.x, y: e.clientY - rect.y });
     }, { passive: false });
+    // Keyboard shortcuts: Ctrl/⌘ + +/- to zoom, 0 to fit.
+    const cloudKeyHandler = (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.target?.closest('input, textarea, [contenteditable]')) return;
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault(); applyZoom(_cloudState.zoom + 0.25);
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault(); applyZoom(_cloudState.zoom - 0.25);
+      } else if (e.key === '0') {
+        e.preventDefault();
+        const sc = $('#cloudScroll');
+        if (sc) applyZoom(sc.clientWidth / W);
+      }
+    };
+    document.addEventListener('keydown', cloudKeyHandler);
+    // Drop the listener when the view is replaced — the next render
+    // re-attaches a fresh one. Prevents handler leakage across views.
+    view.__cloudCleanup = () => document.removeEventListener('keydown', cloudKeyHandler);
+    // First paint: align sticky axes with the initial scroll (0,0).
+    updateStickyAxes();
     $('#cloudCSV').addEventListener('click', () => {
       exportCSV(`action-cloud-${(curProjectIsMerged() ? 'all' : curProject().name).replace(/\s+/g, '_')}-${todayISO()}.csv`,
         allActions, [
