@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-15T11:18:13.902Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-15T11:23:59.962Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3353,7 +3353,48 @@ body.is-card-dragging * { cursor: grabbing !important; }
   position: relative;
   overflow: hidden;
 }
-.cloud-svg { display: block; width: 100%; }
+.cloud-canvas-scroll {
+  /* Scrollable viewport for the chart — when the user zooms in, the
+     SVG renders at base × zoom and overflows; the wrapper scrolls
+     horizontally and vertically. Mirrors .op-bubbles-scroll. */
+  overflow: auto;
+  background: var(--bg-1);
+  border-radius: var(--radius-sm);
+  /* Cap the visible area so vertical scroll triggers when zoomed in.
+     min/max keep the unzoomed default sensible on small / large
+     laptop screens. */
+  max-height: calc(100vh - 280px);
+  min-height: 420px;
+  scrollbar-width: thin;
+}
+.cloud-svg { display: block; }
+/* Inline zoom group in the page actions — matches the budgets / open
+   points zoom layout (-/value/+/100/Fit). */
+.cloud-zoom-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.cloud-zoom-seg .ghost {
+  padding: 3px 8px;
+  font-size: 12px;
+  min-width: 26px;
+  border: 0;
+  background: transparent;
+}
+.cloud-zoom-seg .ghost:hover { background: var(--bg-3); }
+.cloud-zoom-val {
+  display: inline-block;
+  min-width: 42px;
+  text-align: center;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
 
 .cl-axis  { stroke: var(--line); stroke-width: 1; }
 .cl-grid  { stroke: var(--line); stroke-width: .5; stroke-dasharray: 2 3; }
@@ -10201,6 +10242,7 @@ body.is-row-dragging *        { user-select: none !important; }
     preset: 'A',                 // 'A' = urgency × progress, 'B' = owner × importance
     selection: new Set(),        // action ids — persists across preset toggles
     focusMode: false,
+    zoom: 1,                     // 0.4 .. 3 — mirrors the Open Points bubble zoom pattern
   };
 
   // Composite importance — drives bubble size (Preset A), Y position
@@ -10294,6 +10336,13 @@ body.is-row-dragging *        { user-select: none !important; }
             <button class="seg-btn ${_cloudState.preset === 'B' ? 'active' : ''}" data-cloud-preset="B" title="X = owner (sorted by load) · Y = composite importance · bubble size = commitment %">B · Owner × Importance</button>
           </div>
           <button class="ghost ${_cloudState.focusMode ? 'is-on' : ''}" id="cloudFocus" title="Highlight the N most noteworthy bubbles for the current preset. N adapts to context: it counts items inside the preset's critical zone (inner ring in A · critical band in B), clamped to [${CLOUD_FOCUS_FLOOR}, ${CLOUD_FOCUS_CEIL}].">★ Focus top <span id="cloudFocusN">…</span></button>
+          <div class="seg cloud-zoom-seg" role="group" aria-label="Zoom">
+            <button type="button" class="ghost" id="cloudZoomOut"   title="Zoom out (Ctrl/⌘ + wheel inside the canvas)">−</button>
+            <span class="cloud-zoom-val" id="cloudZoomVal">${Math.round(_cloudState.zoom * 100)}%</span>
+            <button type="button" class="ghost" id="cloudZoomIn"    title="Zoom in (Ctrl/⌘ + wheel inside the canvas)">+</button>
+            <button type="button" class="ghost" id="cloudZoomReset" title="Reset to 100%">100%</button>
+            <button type="button" class="ghost" id="cloudZoomFit"   title="Fit canvas to width">⤢ Fit</button>
+          </div>
           <button class="ghost" id="cloudCSV" title="Download the cloud's currently-visible actions as CSV">↓ CSV</button>
         </div>
       </div>
@@ -10302,7 +10351,9 @@ body.is-row-dragging *        { user-select: none !important; }
         <div class="cloud-comp-strip" id="cloudCompStrip"></div>
       </div>
       <div class="cloud-canvas-wrap">
-        <svg id="cloudSvg" class="cloud-svg" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="cloud-canvas-scroll" id="cloudScroll">
+          <svg id="cloudSvg" class="cloud-svg" preserveAspectRatio="xMidYMid meet"></svg>
+        </div>
         <div class="cloud-legend">
           <span class="cl-leg-item"><span class="cl-leg-dot s-todo"></span>To-do</span>
           <span class="cl-leg-item"><span class="cl-leg-dot s-doing"></span>Doing</span>
@@ -10385,18 +10436,24 @@ body.is-row-dragging *        { user-select: none !important; }
     refreshSelStrip();
 
     // ── Layout ─────────────────────────────────────────────────────────
-    // Canvas dimensions are determined at render time by the surrounding
-    // container; SVG uses an internal coordinate system that adapts.
+    // Base canvas dimensions = the chart's intrinsic coordinate system.
+    // The SVG's viewBox stays fixed at base size so all positions and
+    // ring radii remain stable across zoom levels — zoom only scales
+    // the rendered width/height (and the wrapper scrolls). Mirrors the
+    // Open Points bubble-view zoom pattern.
     const SVG = $('#cloudSvg');
-    const wrap = SVG.parentElement;
-    const W = Math.max(720, wrap.clientWidth || 1200);
+    const scroller = $('#cloudScroll');
+    const W = Math.max(720, scroller.clientWidth || 1200);
     const H = Math.max(420, Math.min(window.innerHeight - 280, 720));
     const padL = 48, padR = 24, padT = 14, padB = 36;
     const innerW = W - padL - padR;
     const innerH = H - padT - padB;
+    const zoom = Math.max(0.4, Math.min(3, _cloudState.zoom || 1));
+    const renderW = Math.round(W * zoom);
+    const renderH = Math.round(H * zoom);
     SVG.setAttribute('viewBox', `0 0 ${W} ${H}`);
-    SVG.setAttribute('width', W);
-    SVG.setAttribute('height', H);
+    SVG.setAttribute('width', renderW);
+    SVG.setAttribute('height', renderH);
 
     // Bubble radius scale — sqrt of composite importance, anchored
     // between 5 and 18 px. Identical across presets so an action's
@@ -10878,6 +10935,53 @@ body.is-row-dragging *        { user-select: none !important; }
       _cloudState.focusMode = !_cloudState.focusMode;
       render();
     });
+    // ── Zoom controls ─────────────────────────────────────────────────
+    // Setting zoom does not re-relax the layout; it just rescales the
+    // rendered pixel size. The viewBox is constant, so all positions /
+    // halos / labels stay correct. Wheel-zoom only when Ctrl/⌘ is held
+    // so plain wheel still scrolls inside the canvas.
+    const applyZoom = (z, anchor) => {
+      const clamped = Math.max(0.4, Math.min(3, z));
+      _cloudState.zoom = clamped;
+      const sv = $('#cloudSvg');
+      const sc = $('#cloudScroll');
+      if (!sv || !sc) return;
+      // Anchor zoom to a cursor point so zooming feels stable (the
+      // point under the cursor stays under the cursor).
+      const oldW = sv.clientWidth || sv.getBoundingClientRect().width;
+      const oldH = sv.clientHeight || sv.getBoundingClientRect().height;
+      const newW = Math.round(W * clamped);
+      const newH = Math.round(H * clamped);
+      sv.setAttribute('width', newW);
+      sv.setAttribute('height', newH);
+      $('#cloudZoomVal').textContent = Math.round(clamped * 100) + '%';
+      // Re-render the focusN span label width — it's part of the same
+      // button, but the focusN value itself only changes when the
+      // critical-zone count changes, so a re-render isn't strictly
+      // needed for zoom.
+      if (anchor && oldW && newW) {
+        const sx = (sc.scrollLeft + anchor.x) / oldW;
+        const sy = (sc.scrollTop  + anchor.y) / oldH;
+        sc.scrollLeft = sx * newW - anchor.x;
+        sc.scrollTop  = sy * newH - anchor.y;
+      }
+    };
+    $('#cloudZoomOut')  .addEventListener('click', () => applyZoom(_cloudState.zoom - 0.2));
+    $('#cloudZoomIn')   .addEventListener('click', () => applyZoom(_cloudState.zoom + 0.2));
+    $('#cloudZoomReset').addEventListener('click', () => applyZoom(1));
+    $('#cloudZoomFit')  .addEventListener('click', () => {
+      const sc = $('#cloudScroll');
+      if (!sc) return;
+      applyZoom(sc.clientWidth / W);
+    });
+    // Ctrl/⌘ + wheel inside the scroller zooms; plain wheel scrolls.
+    $('#cloudScroll').addEventListener('wheel', (e) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const step = e.deltaY < 0 ? 0.15 : -0.15;
+      const rect = $('#cloudScroll').getBoundingClientRect();
+      applyZoom(_cloudState.zoom + step, { x: e.clientX - rect.x, y: e.clientY - rect.y });
+    }, { passive: false });
     $('#cloudCSV').addEventListener('click', () => {
       exportCSV(`action-cloud-${(curProjectIsMerged() ? 'all' : curProject().name).replace(/\s+/g, '_')}-${todayISO()}.csv`,
         allActions, [

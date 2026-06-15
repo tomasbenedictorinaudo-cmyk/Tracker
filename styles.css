@@ -3344,7 +3344,48 @@ body.is-card-dragging * { cursor: grabbing !important; }
   position: relative;
   overflow: hidden;
 }
-.cloud-svg { display: block; width: 100%; }
+.cloud-canvas-scroll {
+  /* Scrollable viewport for the chart — when the user zooms in, the
+     SVG renders at base × zoom and overflows; the wrapper scrolls
+     horizontally and vertically. Mirrors .op-bubbles-scroll. */
+  overflow: auto;
+  background: var(--bg-1);
+  border-radius: var(--radius-sm);
+  /* Cap the visible area so vertical scroll triggers when zoomed in.
+     min/max keep the unzoomed default sensible on small / large
+     laptop screens. */
+  max-height: calc(100vh - 280px);
+  min-height: 420px;
+  scrollbar-width: thin;
+}
+.cloud-svg { display: block; }
+/* Inline zoom group in the page actions — matches the budgets / open
+   points zoom layout (-/value/+/100/Fit). */
+.cloud-zoom-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.cloud-zoom-seg .ghost {
+  padding: 3px 8px;
+  font-size: 12px;
+  min-width: 26px;
+  border: 0;
+  background: transparent;
+}
+.cloud-zoom-seg .ghost:hover { background: var(--bg-3); }
+.cloud-zoom-val {
+  display: inline-block;
+  min-width: 42px;
+  text-align: center;
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
 
 .cl-axis  { stroke: var(--line); stroke-width: 1; }
 .cl-grid  { stroke: var(--line); stroke-width: .5; stroke-dasharray: 2 3; }
