@@ -2700,6 +2700,7 @@
     selection: new Set(),        // action ids — persists across preset toggles
     focusMode: false,
     zoom: 1,                     // 0.4 .. 3 — mirrors the Open Points bubble zoom pattern
+    riskLinkedOnly: false,       // cloud-local filter toggled via the legend
   };
 
   // Composite importance — drives bubble size (Preset A), Y position
@@ -2777,6 +2778,7 @@
     // canvas real estate.
     const allActions = scopeProjects.flatMap((p) => (p.actions || [])
       .filter((a) => !a.deletedAt && a.status !== 'done' && a.status !== 'cancelled' && actionMatchesFilters(a))
+      .filter((a) => !_cloudState.riskLinkedOnly || ctx.riskLinks.has(a.id))
       .map((a) => ({ a, proj: p })));
 
     const view = document.createElement('div');
@@ -2810,15 +2812,12 @@
         <div class="cloud-canvas-scroll" id="cloudScroll">
           <svg id="cloudSvg" class="cloud-svg" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
-        <div class="cloud-legend">
-          <span class="cl-leg-item"><span class="cl-leg-dot s-todo"></span>To-do</span>
-          <span class="cl-leg-item"><span class="cl-leg-dot s-doing"></span>Doing</span>
-          <span class="cl-leg-item"><span class="cl-leg-dot s-blocked"></span>Blocked</span>
-          <span class="cl-leg-item"><span class="cl-leg-ring cl-leg-risk"></span>Risk attached</span>
-          <span class="cl-leg-item"><span class="cl-leg-ring cl-leg-late"></span>Overdue</span>
-          <span class="cl-leg-item"><span class="cl-leg-ring cl-leg-proj"></span>Project</span>
-          <span class="cl-leg-spacer"></span>
-          <span class="cl-leg-stat" id="cloudStat"></span>
+        <div class="cloud-legend" id="cloudLegend">
+          <!-- Legend items are clickable filter toggles. Status items
+               and Overdue route through the topbar filter pipeline so
+               they stack with other filters; Risk attached is a cloud-
+               local toggle since the topbar has no equivalent. Project
+               (only in __all__ mode) is informational, not clickable. -->
         </div>
       </div>`;
     root.appendChild(view);
@@ -2851,6 +2850,50 @@
       });
     }
     refreshSelStrip();
+
+    // ── Clickable legend — doubles as additional filter chips ─────────
+    // Each item maps to a filter axis: status dots route through the
+    // topbar status filter, Overdue → topbar due=late, Risk attached
+    // → cloud-local _cloudState.riskLinkedOnly. Project (in __all__
+    // mode only) stays informational. The active state pulls from the
+    // current filter values so the legend always shows the truth.
+    function renderLegend() {
+      const el = $('#cloudLegend'); if (!el) return;
+      const fStatus = $('#filterStatus')?.value || '';
+      const fDue    = $('#filterDue')?.value || '';
+      const items = [
+        { kind: 'status',  val: 'todo',    cls: 'cl-leg-dot s-todo',    label: 'To-do',         active: fStatus === 'todo' },
+        { kind: 'status',  val: 'doing',   cls: 'cl-leg-dot s-doing',   label: 'Doing',         active: fStatus === 'doing' },
+        { kind: 'status',  val: 'blocked', cls: 'cl-leg-dot s-blocked', label: 'Blocked',       active: fStatus === 'blocked' },
+        { kind: 'risk',    val: null,      cls: 'cl-leg-ring cl-leg-risk', label: 'Risk attached', active: _cloudState.riskLinkedOnly },
+        { kind: 'overdue', val: 'late',    cls: 'cl-leg-ring cl-leg-late', label: 'Overdue',       active: fDue === 'late' },
+      ];
+      if (curProjectIsMerged()) {
+        items.push({ kind: 'info', cls: 'cl-leg-ring cl-leg-proj', label: 'Project (in merged view)', active: false });
+      }
+      el.innerHTML = items.map((it) =>
+        `<button type="button" class="cl-leg-item${it.active ? ' is-on' : ''}${it.kind === 'info' ? ' cl-leg-info' : ''}" data-leg-kind="${it.kind}" ${it.val ? `data-leg-val="${escapeHTML(it.val)}"` : ''} title="${it.kind === 'info' ? 'Each bubble carries a colour ring matching its project — informational only.' : (it.active ? 'Click to clear this filter' : 'Click to filter the cloud to this slice')}">
+          <span class="${it.cls}"></span>${escapeHTML(it.label)}
+        </button>`).join('') +
+        '<span class="cl-leg-spacer"></span>' +
+        '<span class="cl-leg-stat" id="cloudStat"></span>';
+      $$('.cl-leg-item:not(.cl-leg-info)', el).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const kind = btn.dataset.legKind;
+          const val  = btn.dataset.legVal;
+          const wasActive = btn.classList.contains('is-on');
+          if (kind === 'status') {
+            applyTopbarFilter({ status: wasActive ? '' : val });
+          } else if (kind === 'overdue') {
+            applyTopbarFilter({ due: wasActive ? '' : val });
+          } else if (kind === 'risk') {
+            _cloudState.riskLinkedOnly = !wasActive;
+            render();
+          }
+        });
+      });
+    }
+    renderLegend();
 
     // ── Layout ─────────────────────────────────────────────────────────
     // Base canvas dimensions = the chart's intrinsic coordinate system.
@@ -3212,7 +3255,7 @@
         : '';
       svgFrag += `<g class="cl-bubble-g ${sel ? 'is-sel' : ''} ${focusDim ? 'is-dim' : ''} ${b.isBlocked ? 'is-blocked' : ''}" data-action-id="${escapeHTML(b.id)}" data-proj-id="${escapeHTML(b.proj.id)}">
         ${halos}
-        <circle class="cl-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="${b.palette.fill}" stroke="${b.palette.stroke}" stroke-width="${b.isBlocked ? 1.5 : 1}" ${b.isBlocked ? 'stroke-dasharray="3 2"' : ''}></circle>
+        <circle class="cl-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="${b.palette.fill}" stroke="${b.palette.stroke}" stroke-width="${b.isBlocked ? 1.5 : 1}"></circle>
         ${ident}
       </g>`;
     });

@@ -3454,11 +3454,34 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-size: 11px;
   color: var(--text-faint);
 }
-.cl-leg-item { display: inline-flex; align-items: center; gap: 5px; }
+.cl-leg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 2px 8px 2px 6px;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+.cl-leg-item:hover { background: var(--bg-2); color: var(--text); }
+.cl-leg-item.is-on {
+  background: rgba(110,168,255,.15);
+  border-color: var(--accent);
+  color: var(--text);
+}
+.cl-leg-item.cl-leg-info {
+  cursor: default;
+  background: transparent;
+}
+.cl-leg-item.cl-leg-info:hover { background: transparent; color: var(--text-faint); }
 .cl-leg-dot  { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
 .cl-leg-dot.s-todo    { background: rgba(148,163,184,.45); border: 1px solid rgb(148,163,184); }
 .cl-leg-dot.s-doing   { background: rgba(110,168,255,.6); border: 1px solid rgb(110,168,255); }
-.cl-leg-dot.s-blocked { background: rgba(248,113,121,.6); border: 1px dashed rgb(248,113,121); }
+.cl-leg-dot.s-blocked { background: rgba(248,113,121,.6); border: 1px solid rgb(248,113,121); }
 .cl-leg-ring { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid; background: transparent; }
 .cl-leg-risk { border-color: rgba(245,193,80,.85); border-style: dashed; }
 .cl-leg-late { border-color: rgba(248,113,121,.9); }
