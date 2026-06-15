@@ -3489,6 +3489,101 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .cl-leg-spacer { flex: 1; }
 .cl-leg-stat  { font-style: italic; }
 
+/* Legend groups + divider. The categorical chips on the left, the
+   decoration chips in the middle, and the stat + colour-by control on
+   the right are separated by spacers (flex:1) and a thin vertical
+   divider between the two chip groups so the eye reads them as
+   distinct signal types. */
+.cl-leg-group {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cl-leg-divider {
+  display: inline-block;
+  width: 1px;
+  height: 16px;
+  background: var(--line);
+  margin: 0 4px;
+}
+
+/* Categorical chip — colour swatch (matches its bubbles) + label + count.
+   Same active-state visuals as the decoration chips. */
+.cl-leg-cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 8px 1px 4px;
+}
+.cl-leg-swatch {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.cl-leg-cat-lbl {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cl-leg-cat-n {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-faint);
+  padding-left: 3px;
+}
+.cl-leg-cat.is-on .cl-leg-cat-n { color: var(--text); }
+
+/* "+N more" chip — same shape, dashed border so it reads as an
+   expand-collapse affordance rather than a filter. */
+.cl-leg-more {
+  border-style: dashed;
+  color: var(--text-faint);
+  font-style: italic;
+}
+.cl-leg-more:hover {
+  background: var(--bg-3);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Colour-by dropdown — lives at the far right of the legend, matches
+   the topbar's other selects so it doesn't feel like a foreign body. */
+.cl-leg-cby {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+.cl-leg-cby-lbl {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-faint);
+}
+.cl-leg-cby-sel {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 11.5px;
+  padding: 3px 22px 3px 8px;
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-faint) 50%), linear-gradient(135deg, var(--text-faint) 50%, transparent 50%);
+  background-position: calc(100% - 11px) 50%, calc(100% - 6px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+}
+.cl-leg-cby-sel:hover { border-color: var(--accent); }
+.cl-leg-cby-sel:focus { border-color: var(--accent-2); }
+
 .page-actions .ghost.is-on {
   background: rgba(245,193,80,.15);
   border-color: rgba(245,193,80,.5);

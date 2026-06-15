@@ -2701,7 +2701,73 @@
     focusMode: false,
     zoom: 1,                     // 0.4 .. 3 — mirrors the Open Points bubble zoom pattern
     riskLinkedOnly: false,       // cloud-local filter toggled via the legend
+    priorityFilter: '',          // cloud-local filter set by clicking a Priority legend chip
+    colorBy: 'status',           // 'status' | 'owner' | 'component' | 'priority' | 'project'
   };
+  const CLOUD_COLOR_BY_OPTS = [
+    { id: 'status',    label: 'Status' },
+    { id: 'owner',     label: 'Owner' },
+    { id: 'component', label: 'Component' },
+    { id: 'priority',  label: 'Priority' },
+    { id: 'project',   label: 'Project', mergedOnly: true },
+  ];
+
+  // Hash-stable colour for a string id (used for owners + projects so
+  // their chip / bubble / ring colours stay consistent across renders).
+  function cloudHashColor(id) {
+    let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
+    const pal = [
+      '245,193,80',   // amber
+      '110,168,255',  // sky-blue
+      '168,140,255',  // violet
+      '72,206,200',   // teal
+      '244,131,89',   // orange
+      '74,222,128',   // green
+      '231,123,166',  // pink
+      '180,180,200',  // grey
+      '252,165,165',  // salmon
+      '147,197,253',  // light-blue
+    ];
+    return pal[Math.abs(h) % pal.length];
+  }
+
+  // Compute fill/stroke + the category key/label for one bubble under
+  // the current colour-by setting. The key is used to bucket the legend
+  // chip the bubble belongs to; the label is what's shown in the chip.
+  // Returns { fill, stroke, key, label }.
+  function bubbleColorEncoding(a, proj) {
+    const cb = _cloudState.colorBy;
+    if (cb === 'status') {
+      if (a.status === 'blocked') return { fill: 'rgba(248,113,121,.6)',  stroke: 'rgb(248,113,121)', key: 'blocked', label: 'Blocked' };
+      if (a.status === 'doing')   return { fill: 'rgba(110,168,255,.6)', stroke: 'rgb(110,168,255)', key: 'doing',   label: 'Doing'   };
+      return                              { fill: 'rgba(148,163,184,.45)', stroke: 'rgb(148,163,184)', key: 'todo',  label: 'To-do' };
+    }
+    if (cb === 'owner') {
+      const oid = a.owner || '__none__';
+      if (oid === '__none__') return { fill: 'rgba(148,163,184,.35)', stroke: 'rgb(148,163,184)', key: '__none__', label: '— No owner —' };
+      const rgb = cloudHashColor(oid);
+      return { fill: `rgba(${rgb},.55)`, stroke: `rgb(${rgb})`, key: oid, label: personName(oid) };
+    }
+    if (cb === 'component') {
+      const cmpId = a.component || '__none__';
+      if (cmpId === '__none__') return { fill: 'rgba(148,163,184,.35)', stroke: 'rgb(148,163,184)', key: '__none__', label: '— No component —' };
+      const cmp = findComponent(proj, cmpId);
+      if (!cmp) return { fill: 'rgba(148,163,184,.45)', stroke: 'rgb(148,163,184)', key: cmpId, label: 'Component' };
+      const c = componentColor(cmp.color);
+      return { fill: `rgba(${c.rgb},.55)`, stroke: `rgb(${c.rgb})`, key: cmpId, label: cmp.name };
+    }
+    if (cb === 'priority') {
+      const lvl = priorityLevel(a.priorityLevel);
+      const rgb = lvl.rgb;
+      return { fill: `rgba(${rgb},.55)`, stroke: `rgb(${rgb})`, key: lvl.id, label: lvl.label };
+    }
+    if (cb === 'project') {
+      const rgb = cloudHashColor(proj.id);
+      return { fill: `rgba(${rgb},.55)`, stroke: `rgb(${rgb})`, key: proj.id, label: proj.name };
+    }
+    // Fallback — should never hit.
+    return { fill: 'rgba(148,163,184,.45)', stroke: 'rgb(148,163,184)', key: 'unknown', label: '' };
+  }
 
   // Composite importance — drives bubble size (Preset A), Y position
   // (Preset B), and Focus mode's top-N ranking. Five additive signals,
@@ -2783,6 +2849,7 @@
     const allActions = scopeProjects.flatMap((p) => (p.actions || [])
       .filter((a) => !a.deletedAt && a.status !== 'done' && a.status !== 'cancelled' && actionMatchesFilters(a))
       .filter((a) => !_cloudState.riskLinkedOnly || ctx.riskLinks.has(a.id))
+      .filter((a) => !_cloudState.priorityFilter || (a.priorityLevel || 'med') === _cloudState.priorityFilter)
       .map((a) => ({ a, proj: p })));
 
     const view = document.createElement('div');
@@ -2855,46 +2922,136 @@
     }
     refreshSelStrip();
 
-    // ── Clickable legend — doubles as additional filter chips ─────────
-    // Each item maps to a filter axis: status dots route through the
-    // topbar status filter, Overdue → topbar due=late, Risk attached
-    // → cloud-local _cloudState.riskLinkedOnly. Project (in __all__
-    // mode only) stays informational. The active state pulls from the
-    // current filter values so the legend always shows the truth.
+    // ── Dynamic legend — categorical chips + always-on decorations + colour-by control ──
+    //
+    // The legend has three groups in a single horizontal row:
+    //   1. CATEGORICAL chips — auto-derived from the visible actions
+    //      based on _cloudState.colorBy. Bubble fill colours come from
+    //      the same encoding so the chip colour ↔ bubble colour match
+    //      tautologically. Sorted by count desc, top 10 shown, rest
+    //      collapsed into "+N more" that expands on click.
+    //   2. DECORATION chips — always present, orthogonal signals that
+    //      don't participate in the colour encoding: Risk attached,
+    //      Overdue, Project ring (in __all__ mode).
+    //   3. Stat strip + COLOR-BY dropdown — far right.
+    //
+    // Active state pulls from live filter values so the legend always
+    // reflects current truth. Click each chip → filter (status / owner
+    // / component → topbar; priority → cloud-local; project → switch
+    // active project; risk → cloud-local; overdue → topbar due=late).
     function renderLegend() {
       const el = $('#cloudLegend'); if (!el) return;
       const fStatus = $('#filterStatus')?.value || '';
+      const fOwner  = $('#filterOwner')?.value || '';
+      const fComp   = $('#filterComponent')?.value || '';
       const fDue    = $('#filterDue')?.value || '';
-      const items = [
-        { kind: 'status',  val: 'todo',    cls: 'cl-leg-dot s-todo',    label: 'To-do',         active: fStatus === 'todo' },
-        { kind: 'status',  val: 'doing',   cls: 'cl-leg-dot s-doing',   label: 'Doing',         active: fStatus === 'doing' },
-        { kind: 'status',  val: 'blocked', cls: 'cl-leg-dot s-blocked', label: 'Blocked',       active: fStatus === 'blocked' },
-        { kind: 'risk',    val: null,      cls: 'cl-leg-ring cl-leg-risk', label: 'Risk attached', active: _cloudState.riskLinkedOnly },
-        { kind: 'overdue', val: 'late',    cls: 'cl-leg-ring cl-leg-late', label: 'Overdue',       active: fDue === 'late' },
+
+      // ── Categorical chips ──────────────────────────────────────────
+      // Bucket the visible actions by colour-by key. The bubble's own
+      // encoding is the source of truth — same function, same colours.
+      const buckets = new Map();
+      allActions.forEach(({ a, proj: p }) => {
+        const enc = bubbleColorEncoding(a, p);
+        if (!buckets.has(enc.key)) buckets.set(enc.key, { ...enc, count: 0 });
+        buckets.get(enc.key).count++;
+      });
+      const entries = Array.from(buckets.values()).sort((a, b) => b.count - a.count);
+      const EXPANDED = el.dataset.expanded === '1';
+      const SHOW_N = EXPANDED ? entries.length : 10;
+      const visible = entries.slice(0, SHOW_N);
+      const hiddenCount = entries.length - visible.length;
+      const cb = _cloudState.colorBy;
+
+      // Compute active state per chip based on the current filter:
+      const isCategoricalActive = (key) => {
+        if (cb === 'status')    return fStatus === key;
+        if (cb === 'owner')     return (fOwner || '') === key;
+        if (cb === 'component') return (fComp  || '') === key;
+        if (cb === 'priority')  return _cloudState.priorityFilter === key;
+        if (cb === 'project')   return state.currentProjectId === key && !curProjectIsMerged();
+        return false;
+      };
+
+      const categoricalChips = visible.map((e) => {
+        const active = isCategoricalActive(e.key);
+        return `<button type="button" class="cl-leg-item cl-leg-cat${active ? ' is-on' : ''}" data-leg-cat="${escapeHTML(e.key)}" title="${escapeHTML(e.label)} — ${e.count} action${e.count === 1 ? '' : 's'}${active ? ' · click to clear' : ' · click to filter'}">
+          <span class="cl-leg-swatch" style="background:${e.fill};border-color:${e.stroke};"></span>
+          <span class="cl-leg-cat-lbl">${escapeHTML(e.label)}</span>
+          <span class="cl-leg-cat-n">${e.count}</span>
+        </button>`;
+      }).join('');
+      const moreChip = hiddenCount > 0
+        ? `<button type="button" class="cl-leg-item cl-leg-more" data-leg-more="1" title="Show ${hiddenCount} more">+${hiddenCount} more</button>`
+        : (EXPANDED && entries.length > 10
+            ? `<button type="button" class="cl-leg-item cl-leg-more" data-leg-more="0" title="Collapse">collapse</button>`
+            : '');
+
+      // ── Decoration chips (always present) ──────────────────────────
+      const decoChips = [
+        { kind: 'risk',    cls: 'cl-leg-ring cl-leg-risk', label: 'Risk attached', active: _cloudState.riskLinkedOnly },
+        { kind: 'overdue', val: 'late', cls: 'cl-leg-ring cl-leg-late', label: 'Overdue',       active: fDue === 'late' },
       ];
       if (curProjectIsMerged()) {
-        items.push({ kind: 'info', cls: 'cl-leg-ring cl-leg-proj', label: 'Project (in merged view)', active: false });
+        decoChips.push({ kind: 'info', cls: 'cl-leg-ring cl-leg-proj', label: 'Project ring', active: false });
       }
-      el.innerHTML = items.map((it) =>
-        `<button type="button" class="cl-leg-item${it.active ? ' is-on' : ''}${it.kind === 'info' ? ' cl-leg-info' : ''}" data-leg-kind="${it.kind}" ${it.val ? `data-leg-val="${escapeHTML(it.val)}"` : ''} title="${it.kind === 'info' ? 'Each bubble carries a colour ring matching its project — informational only.' : (it.active ? 'Click to clear this filter' : 'Click to filter the cloud to this slice')}">
+      const decoHTML = decoChips.map((it) =>
+        `<button type="button" class="cl-leg-item${it.active ? ' is-on' : ''}${it.kind === 'info' ? ' cl-leg-info' : ''}" data-leg-kind="${it.kind}" ${it.val ? `data-leg-val="${escapeHTML(it.val)}"` : ''} title="${it.kind === 'info' ? 'Each bubble carries an outer colour ring matching its project — informational only.' : (it.active ? 'Click to clear this filter' : 'Click to filter')}">
           <span class="${it.cls}"></span>${escapeHTML(it.label)}
-        </button>`).join('') +
-        '<span class="cl-leg-spacer"></span>' +
-        '<span class="cl-leg-stat" id="cloudStat"></span>';
-      $$('.cl-leg-item:not(.cl-leg-info)', el).forEach((btn) => {
+        </button>`).join('');
+
+      // ── Color-by dropdown ──────────────────────────────────────────
+      const cbOpts = CLOUD_COLOR_BY_OPTS
+        .filter((o) => !o.mergedOnly || curProjectIsMerged())
+        .map((o) => `<option value="${o.id}" ${o.id === cb ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('');
+      const cbControl = `
+        <span class="cl-leg-cby-lbl">Color by</span>
+        <select class="cl-leg-cby-sel" id="cloudColorBy" title="Choose which attribute drives bubble colour and the categorical chips on the left">${cbOpts}</select>`;
+
+      el.innerHTML = `
+        <span class="cl-leg-group cl-leg-group-cat">${categoricalChips}${moreChip}</span>
+        <span class="cl-leg-divider" aria-hidden="true"></span>
+        <span class="cl-leg-group">${decoHTML}</span>
+        <span class="cl-leg-spacer"></span>
+        <span class="cl-leg-stat" id="cloudStat"></span>
+        <span class="cl-leg-cby">${cbControl}</span>`;
+
+      // Categorical chip clicks → filter axis (depends on colorBy).
+      $$('.cl-leg-cat', el).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const key = btn.dataset.legCat;
+          const wasActive = btn.classList.contains('is-on');
+          if (cb === 'status')    applyTopbarFilter({ status:    wasActive ? '' : key });
+          else if (cb === 'owner')     applyTopbarFilter({ owner:     wasActive ? '' : (key === '__none__' ? '' : key) });
+          else if (cb === 'component') applyTopbarFilter({ component: wasActive ? '' : (key === '__none__' ? '__none__' : key) });
+          else if (cb === 'priority')  { _cloudState.priorityFilter = wasActive ? '' : key; render(); }
+          else if (cb === 'project')   { state.currentProjectId = key; saveState(); render(); }
+        });
+      });
+      // "+N more" expand / collapse — local state on the element only.
+      $$('.cl-leg-more', el).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          el.dataset.expanded = btn.dataset.legMore === '1' ? '1' : '';
+          renderLegend();
+        });
+      });
+      // Decoration chip clicks (unchanged behaviour from before).
+      $$('.cl-leg-item:not(.cl-leg-cat):not(.cl-leg-more):not(.cl-leg-info)', el).forEach((btn) => {
         btn.addEventListener('click', () => {
           const kind = btn.dataset.legKind;
           const val  = btn.dataset.legVal;
           const wasActive = btn.classList.contains('is-on');
-          if (kind === 'status') {
-            applyTopbarFilter({ status: wasActive ? '' : val });
-          } else if (kind === 'overdue') {
-            applyTopbarFilter({ due: wasActive ? '' : val });
-          } else if (kind === 'risk') {
-            _cloudState.riskLinkedOnly = !wasActive;
-            render();
-          }
+          if (kind === 'overdue') applyTopbarFilter({ due: wasActive ? '' : val });
+          else if (kind === 'risk') { _cloudState.riskLinkedOnly = !wasActive; render(); }
         });
+      });
+      // Color-by select change — re-render the whole cloud so bubble
+      // colours regenerate alongside the legend.
+      $('#cloudColorBy')?.addEventListener('change', (e) => {
+        _cloudState.colorBy = e.target.value;
+        // Clear priority filter when leaving priority mode — its only
+        // entry-point is a Priority chip click.
+        if (_cloudState.colorBy !== 'priority') _cloudState.priorityFilter = '';
+        render();
       });
     }
     renderLegend();
@@ -2926,13 +3083,10 @@
     const maxComp = Math.max(4, ...compositeScores);
     const radiusForComp = (c) => 5 + Math.min(13, Math.sqrt(c) * 3);
 
-    // Status → fill / stroke palette. Same colours as the Board so the
-    // visual language carries across views.
-    function statusPalette(a) {
-      if (a.status === 'blocked') return { fill: 'rgba(248,113,121,.6)',  stroke: 'rgb(248,113,121)' };
-      if (a.status === 'doing')   return { fill: 'rgba(110,168,255,.6)', stroke: 'rgb(110,168,255)' };
-      return                              { fill: 'rgba(148,163,184,.45)', stroke: 'rgb(148,163,184)' };
-    }
+    // Bubble colour encoding now driven by _cloudState.colorBy via
+    // bubbleColorEncoding(a, proj). The legacy statusPalette is gone;
+    // the encoding returns fill + stroke AND the categorical key/label
+    // that the legend chips group by.
 
     // Project palette — used in __all__ mode to draw a thin outer ring
     // around each bubble carrying its project's signature colour.
@@ -2963,7 +3117,7 @@
 
     const placed = allActions.map(({ a, proj: p }, i) => {
       const r = radiusForComp(compositeScores[i]);
-      const palette = statusPalette(a);
+      const palette = bubbleColorEncoding(a, p);
       const dtd = actionDaysToDue(a);
       const pct = percentComplete(a);
       let xRaw, yRaw, xMin, xMax, yMin, yMax;
