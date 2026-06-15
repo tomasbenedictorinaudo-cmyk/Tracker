@@ -2889,8 +2889,7 @@
             <button type="button" class="ghost" id="cloudZoomOut"   title="Zoom out (Ctrl/⌘ + wheel inside the canvas)">−</button>
             <span class="cloud-zoom-val" id="cloudZoomVal">${Math.round(_cloudState.zoom * 100)}%</span>
             <button type="button" class="ghost" id="cloudZoomIn"    title="Zoom in (Ctrl/⌘ + wheel inside the canvas)">+</button>
-            <button type="button" class="ghost" id="cloudZoomReset" title="Reset to 100%">100%</button>
-            <button type="button" class="ghost" id="cloudZoomFit"   title="Fit canvas to width">⤢ Fit</button>
+            <button type="button" class="ghost" id="cloudZoomFit"   title="Fit canvas to width (same effect as 100% in normal layouts)">⤢ Fit</button>
           </div>
           <button class="ghost" id="cloudCSV" title="Download the cloud's currently-visible actions as CSV">↓ CSV</button>
         </div>
@@ -3600,10 +3599,9 @@
         sc.scrollTop  = sy * newH - anchor.y;
       }
     };
-    $('#cloudZoomOut')  .addEventListener('click', () => applyZoom(_cloudState.zoom - 0.2));
-    $('#cloudZoomIn')   .addEventListener('click', () => applyZoom(_cloudState.zoom + 0.2));
-    $('#cloudZoomReset').addEventListener('click', () => applyZoom(1));
-    $('#cloudZoomFit')  .addEventListener('click', () => {
+    $('#cloudZoomOut').addEventListener('click', () => applyZoom(_cloudState.zoom - 0.2));
+    $('#cloudZoomIn') .addEventListener('click', () => applyZoom(_cloudState.zoom + 0.2));
+    $('#cloudZoomFit').addEventListener('click', () => {
       const sc = $('#cloudScroll');
       if (!sc) return;
       applyZoom(sc.clientWidth / W);
