@@ -3288,6 +3288,10 @@ body.is-card-dragging * { cursor: grabbing !important; }
   border-radius: 6px;
   font-size: 12px;
 }
+/* Respect the HTML hidden attribute — the explicit display: flex
+   above would otherwise override the browser default and leave an
+   empty blue-bordered box between the page-head and the canvas. */
+.cloud-sel-strip[hidden] { display: none; }
 .cl-sel-count { color: var(--accent); font-weight: 600; }
 .cl-sel-hint  { color: var(--text-dim); flex: 1; font-size: 11.5px; font-style: italic; }
 .cloud-sel-strip .ghost { padding: 3px 10px; font-size: 11.5px; min-width: auto; }

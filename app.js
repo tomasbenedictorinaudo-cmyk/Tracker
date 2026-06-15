@@ -3272,21 +3272,10 @@
       const originX = padL;
       const originY = padT + innerH;
       const diag = Math.sqrt(innerW * innerW + innerH * innerH);
-      const rings = [
-        { r: diag * 0.22, label: '🔥 critical' },
-        { r: diag * 0.42, label: '⚠ watch' },
-        { r: diag * 0.62, label: '👁 monitor' },
-      ];
-      rings.forEach(({ r, label }, i) => {
+      // Three rings without text labels — the colour gradient + the
+      // matching focus-mode highlight already convey the band semantics.
+      [diag * 0.22, diag * 0.42, diag * 0.62].forEach((r, i) => {
         svgFrag += `<circle class="cl-heat-ring cl-heat-ring-${i}" cx="${originX}" cy="${originY}" r="${r.toFixed(1)}" clip-path="url(#cl-chart-clip)"></circle>`;
-        // Label sits along the 45° tangent — kept inside the chart by
-        // clamping if it would overflow the right/top edges.
-        const angle = Math.PI / 4;
-        let lx = originX + r * Math.cos(angle);
-        let ly = originY - r * Math.sin(angle);
-        if (lx > padL + innerW - 60) lx = padL + innerW - 60;
-        if (ly < padT + 22) ly = padT + 22;
-        svgFrag += `<text class="cl-heat-lbl cl-heat-lbl-${i}" x="${(lx + 2).toFixed(1)}" y="${(ly - 4).toFixed(1)}">${label}</text>`;
       });
       // Y axis = % complete
       svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
@@ -3311,17 +3300,6 @@
       // No-date lane label
       const ndX = padL + ((7.5 - -6.6) / (7.5 - -6.6)) * innerW;
       svgFrag += `<text class="cl-tick muted" x="${ndX - 6}" y="${padT + innerH + 16}" text-anchor="end">no date</text>`;
-      // Diagonal "on track" trend line — bottom-right (+90d, 0%) to
-      // top-left (-90d, 100%). Trajectory of a healthy action: as the
-      // due date approaches (X decreases from +90 to 0), % complete
-      // should rise to 100% by the due date. Items above the line are
-      // ahead of schedule; items below are behind.
-      const x1 = padL + ((symLog(90)  - -6.6) / (7.5 - -6.6)) * innerW;
-      const y1 = padT + innerH;
-      const x2 = padL + ((symLog(-90) - -6.6) / (7.5 - -6.6)) * innerW;
-      const y2 = padT;
-      svgFrag += `<line class="cl-trend" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
-      svgFrag += `<text class="cl-trend-lbl" x="${(x2 + 8).toFixed(1)}" y="${y2 + 18}" text-anchor="start">← on-track diagonal</text>`;
       // Quadrant labels (top-right safe, bottom-left firefight)
       svgFrag += `<text class="cl-zone fire" x="${padL + 12}" y="${padT + innerH - 12}">🔥 firefight zone</text>`;
       svgFrag += `<text class="cl-zone safe" x="${padL + innerW - 12}" y="${padT + 16}" text-anchor="end">safe zone ✓</text>`;
@@ -3361,8 +3339,6 @@
         const h = Math.max(0, yBot - yTop);
         if (h < 4) return;
         svgFrag += `<rect class="cl-band ${cls}" x="${padL}" y="${yTop.toFixed(1)}" width="${innerW}" height="${h.toFixed(1)}" clip-path="url(#cl-chart-clip)"></rect>`;
-        // Label snug to the right edge inside its band.
-        svgFrag += `<text class="cl-band-lbl cl-heat-lbl ${cls === 'cl-band-0' ? 'cl-heat-lbl-0' : cls === 'cl-band-1' ? 'cl-heat-lbl-1' : 'cl-heat-lbl-2'}" x="${(padL + innerW - 6).toFixed(1)}" y="${(yTop + 14).toFixed(1)}" text-anchor="end">${label}</text>`;
       });
       // Preset B axes
       svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
