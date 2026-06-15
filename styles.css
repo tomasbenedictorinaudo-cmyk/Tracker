@@ -3270,6 +3270,241 @@ body.is-card-dragging * { cursor: grabbing !important; }
    Singleton, position:fixed so it can escape SVG clips and follow the
    cursor. Pointer-events: none keeps clicks landing on the bubble
    underneath. */
+/* Action cloud — 2D scatter view of actions. Shares the .op-hover-card
+   visual language for the rich hover tooltip (defined just below). */
+.cloud-filterbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.cloud-sel-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(110,168,255,.08);
+  border: 1px solid rgba(110,168,255,.4);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.cl-sel-count { color: var(--accent); font-weight: 600; }
+.cl-sel-hint  { color: var(--text-dim); flex: 1; font-size: 11.5px; font-style: italic; }
+.cloud-sel-strip .ghost { padding: 3px 10px; font-size: 11.5px; min-width: auto; }
+.cloud-comp-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.cl-strip-lbl {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-faint);
+  margin-right: 6px;
+}
+.cl-comp-chip {
+  display: inline-grid;
+  grid-template-columns: 36px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.cl-comp-chip:hover { background: var(--bg-3); color: var(--text); }
+.cl-comp-chip.is-on { background: rgba(110,168,255,.15); border-color: var(--accent); color: var(--text); }
+.cl-comp-bar { height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
+.cl-comp-bar-fill { height: 100%; }
+.cl-comp-name { font-weight: 500; white-space: nowrap; }
+.cl-comp-n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.cl-comp-clear {
+  background: transparent;
+  border: 1px dashed var(--line);
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+.cl-comp-clear:hover { color: var(--bad); border-color: var(--bad); }
+
+.cloud-canvas-wrap {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 4px 0;
+  position: relative;
+  overflow: hidden;
+}
+.cloud-svg { display: block; width: 100%; }
+
+.cl-axis  { stroke: var(--line); stroke-width: 1; }
+.cl-grid  { stroke: var(--line); stroke-width: .5; stroke-dasharray: 2 3; }
+.cl-today { stroke: rgba(110,168,255,.55); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.cl-today-lbl { fill: rgb(110,168,255); font-size: 10px; font-weight: 600; pointer-events: none; }
+.cl-trend { stroke: rgba(74,222,128,.4); stroke-width: 1; stroke-dasharray: 4 4; }
+.cl-trend-lbl { fill: rgba(74,222,128,.6); font-size: 10px; font-style: italic; pointer-events: none; }
+.cl-tick  { fill: var(--text-dim); font-size: 10.5px; }
+.cl-tick.muted { fill: var(--text-faint); font-style: italic; }
+.cl-axis-title {
+  fill: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+.cl-zone  {
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: .7;
+  paint-order: stroke fill;
+  stroke: var(--bg-1);
+  stroke-width: 3px;
+}
+.cl-zone.fire { fill: rgba(248,113,121,.7); }
+.cl-zone.safe { fill: rgba(74,222,128,.55); }
+
+.cl-bubble-g { cursor: pointer; transition: opacity .15s ease, transform .15s ease; }
+.cl-bubble-g:hover .cl-bubble { filter: brightness(1.25); stroke-width: 2; }
+.cl-bubble-g.is-dim { opacity: .25; filter: saturate(.4); }
+.cl-bubble-g.is-sel .cl-bubble { stroke-width: 2.5; }
+.cl-bubble { transition: filter .12s ease, stroke-width .12s ease; }
+
+.cl-ring {
+  fill: none;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.cl-ring-proj { stroke-width: 1; opacity: .6; }
+.cl-ring-risk { stroke: rgba(245,193,80,.85); stroke-dasharray: 2 3; }
+.cl-ring-late { stroke: rgba(248,113,121,.9); stroke-width: 2; animation: cl-pulse-late 1.6s ease-in-out infinite; }
+.cl-ring-sel  { stroke: rgb(110,168,255); stroke-width: 2; }
+@keyframes cl-pulse-late {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
+}
+
+.cl-bubble-ident {
+  fill: rgba(255,255,255,.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  pointer-events: none;
+}
+
+.cloud-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.cl-leg-item { display: inline-flex; align-items: center; gap: 5px; }
+.cl-leg-dot  { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.cl-leg-dot.s-todo    { background: rgba(148,163,184,.45); border: 1px solid rgb(148,163,184); }
+.cl-leg-dot.s-doing   { background: rgba(110,168,255,.6); border: 1px solid rgb(110,168,255); }
+.cl-leg-dot.s-blocked { background: rgba(248,113,121,.6); border: 1px dashed rgb(248,113,121); }
+.cl-leg-ring { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid; background: transparent; }
+.cl-leg-risk { border-color: rgba(245,193,80,.85); border-style: dashed; }
+.cl-leg-late { border-color: rgba(248,113,121,.9); }
+.cl-leg-proj { border-color: rgba(110,168,255,.85); border-style: dotted; }
+.cl-leg-spacer { flex: 1; }
+.cl-leg-stat  { font-style: italic; }
+
+.page-actions .ghost.is-on {
+  background: rgba(245,193,80,.15);
+  border-color: rgba(245,193,80,.5);
+  color: rgb(245,193,80);
+}
+
+/* Action cloud hover card — same shape as op-hover-card but kept
+   distinct so we can tune them independently. */
+.action-hover-card {
+  position: fixed;
+  top: 0; left: 0;
+  z-index: 9999;
+  max-width: 340px;
+  min-width: 240px;
+  padding: 10px 12px 9px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+.action-hover-card.show { opacity: 1; transform: translateY(0); }
+.action-hover-card .hc-ident {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-bottom: 6px;
+}
+.action-hover-card .hc-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+.action-hover-card .hc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.action-hover-card .hc-chip {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.action-hover-card .hc-chip[data-cs="blocked"] { color: rgb(248,113,121); border-color: rgba(248,113,121,.5); background: rgba(248,113,121,.08); }
+.action-hover-card .hc-chip[data-cs="doing"]   { color: rgb(110,168,255); border-color: rgba(110,168,255,.5); background: rgba(110,168,255,.08); }
+.action-hover-card .hc-meta {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.action-hover-card .hc-meta .hc-sep { margin: 0 6px; color: var(--text-faint); }
+.action-hover-card .hc-meta .bad { color: var(--bad); font-weight: 600; }
+.action-hover-card .hc-meta .ok  { color: var(--ok);  font-weight: 600; }
+.action-hover-card .hc-hint {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
 .op-hover-card {
   position: fixed;
   top: 0; left: 0;

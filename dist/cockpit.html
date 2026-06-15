@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-04T20:06:26.169Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-15T09:55:54.627Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3279,6 +3279,241 @@ body.is-card-dragging * { cursor: grabbing !important; }
    Singleton, position:fixed so it can escape SVG clips and follow the
    cursor. Pointer-events: none keeps clicks landing on the bubble
    underneath. */
+/* Action cloud — 2D scatter view of actions. Shares the .op-hover-card
+   visual language for the rich hover tooltip (defined just below). */
+.cloud-filterbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.cloud-sel-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(110,168,255,.08);
+  border: 1px solid rgba(110,168,255,.4);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.cl-sel-count { color: var(--accent); font-weight: 600; }
+.cl-sel-hint  { color: var(--text-dim); flex: 1; font-size: 11.5px; font-style: italic; }
+.cloud-sel-strip .ghost { padding: 3px 10px; font-size: 11.5px; min-width: auto; }
+.cloud-comp-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 4px 0;
+}
+.cl-strip-lbl {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-faint);
+  margin-right: 6px;
+}
+.cl-comp-chip {
+  display: inline-grid;
+  grid-template-columns: 36px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  border-radius: 999px;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.cl-comp-chip:hover { background: var(--bg-3); color: var(--text); }
+.cl-comp-chip.is-on { background: rgba(110,168,255,.15); border-color: var(--accent); color: var(--text); }
+.cl-comp-bar { height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; }
+.cl-comp-bar-fill { height: 100%; }
+.cl-comp-name { font-weight: 500; white-space: nowrap; }
+.cl-comp-n { font-weight: 700; font-variant-numeric: tabular-nums; }
+.cl-comp-clear {
+  background: transparent;
+  border: 1px dashed var(--line);
+  padding: 3px 10px;
+  border-radius: 999px;
+  color: var(--text-faint);
+  font-size: 11px;
+  cursor: pointer;
+}
+.cl-comp-clear:hover { color: var(--bad); border-color: var(--bad); }
+
+.cloud-canvas-wrap {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 4px 4px 0;
+  position: relative;
+  overflow: hidden;
+}
+.cloud-svg { display: block; width: 100%; }
+
+.cl-axis  { stroke: var(--line); stroke-width: 1; }
+.cl-grid  { stroke: var(--line); stroke-width: .5; stroke-dasharray: 2 3; }
+.cl-today { stroke: rgba(110,168,255,.55); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.cl-today-lbl { fill: rgb(110,168,255); font-size: 10px; font-weight: 600; pointer-events: none; }
+.cl-trend { stroke: rgba(74,222,128,.4); stroke-width: 1; stroke-dasharray: 4 4; }
+.cl-trend-lbl { fill: rgba(74,222,128,.6); font-size: 10px; font-style: italic; pointer-events: none; }
+.cl-tick  { fill: var(--text-dim); font-size: 10.5px; }
+.cl-tick.muted { fill: var(--text-faint); font-style: italic; }
+.cl-axis-title {
+  fill: var(--text-dim);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: .04em;
+}
+.cl-zone  {
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  opacity: .7;
+  paint-order: stroke fill;
+  stroke: var(--bg-1);
+  stroke-width: 3px;
+}
+.cl-zone.fire { fill: rgba(248,113,121,.7); }
+.cl-zone.safe { fill: rgba(74,222,128,.55); }
+
+.cl-bubble-g { cursor: pointer; transition: opacity .15s ease, transform .15s ease; }
+.cl-bubble-g:hover .cl-bubble { filter: brightness(1.25); stroke-width: 2; }
+.cl-bubble-g.is-dim { opacity: .25; filter: saturate(.4); }
+.cl-bubble-g.is-sel .cl-bubble { stroke-width: 2.5; }
+.cl-bubble { transition: filter .12s ease, stroke-width .12s ease; }
+
+.cl-ring {
+  fill: none;
+  stroke-width: 1.5;
+  pointer-events: none;
+}
+.cl-ring-proj { stroke-width: 1; opacity: .6; }
+.cl-ring-risk { stroke: rgba(245,193,80,.85); stroke-dasharray: 2 3; }
+.cl-ring-late { stroke: rgba(248,113,121,.9); stroke-width: 2; animation: cl-pulse-late 1.6s ease-in-out infinite; }
+.cl-ring-sel  { stroke: rgb(110,168,255); stroke-width: 2; }
+@keyframes cl-pulse-late {
+  0%, 100% { opacity: .55; }
+  50%      { opacity: 1; }
+}
+
+.cl-bubble-ident {
+  fill: rgba(255,255,255,.85);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  pointer-events: none;
+}
+
+.cloud-legend {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 6px 12px 8px;
+  border-top: 1px solid var(--line);
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.cl-leg-item { display: inline-flex; align-items: center; gap: 5px; }
+.cl-leg-dot  { display: inline-block; width: 10px; height: 10px; border-radius: 50%; }
+.cl-leg-dot.s-todo    { background: rgba(148,163,184,.45); border: 1px solid rgb(148,163,184); }
+.cl-leg-dot.s-doing   { background: rgba(110,168,255,.6); border: 1px solid rgb(110,168,255); }
+.cl-leg-dot.s-blocked { background: rgba(248,113,121,.6); border: 1px dashed rgb(248,113,121); }
+.cl-leg-ring { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid; background: transparent; }
+.cl-leg-risk { border-color: rgba(245,193,80,.85); border-style: dashed; }
+.cl-leg-late { border-color: rgba(248,113,121,.9); }
+.cl-leg-proj { border-color: rgba(110,168,255,.85); border-style: dotted; }
+.cl-leg-spacer { flex: 1; }
+.cl-leg-stat  { font-style: italic; }
+
+.page-actions .ghost.is-on {
+  background: rgba(245,193,80,.15);
+  border-color: rgba(245,193,80,.5);
+  color: rgb(245,193,80);
+}
+
+/* Action cloud hover card — same shape as op-hover-card but kept
+   distinct so we can tune them independently. */
+.action-hover-card {
+  position: fixed;
+  top: 0; left: 0;
+  z-index: 9999;
+  max-width: 340px;
+  min-width: 240px;
+  padding: 10px 12px 9px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.45), 0 2px 6px rgba(0,0,0,.25);
+  color: var(--text);
+  font-size: 12.5px;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity .12s ease, transform .12s ease;
+}
+.action-hover-card.show { opacity: 1; transform: translateY(0); }
+.action-hover-card .hc-ident {
+  display: inline-block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  color: var(--text-dim);
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-bottom: 6px;
+}
+.action-hover-card .hc-title {
+  font-weight: 600;
+  font-size: 13.5px;
+  color: var(--text);
+  margin-bottom: 6px;
+  line-height: 1.3;
+}
+.action-hover-card .hc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.action-hover-card .hc-chip {
+  font-size: 11px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.action-hover-card .hc-chip[data-cs="blocked"] { color: rgb(248,113,121); border-color: rgba(248,113,121,.5); background: rgba(248,113,121,.08); }
+.action-hover-card .hc-chip[data-cs="doing"]   { color: rgb(110,168,255); border-color: rgba(110,168,255,.5); background: rgba(110,168,255,.08); }
+.action-hover-card .hc-meta {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.action-hover-card .hc-meta .hc-sep { margin: 0 6px; color: var(--text-faint); }
+.action-hover-card .hc-meta .bad { color: var(--bad); font-weight: 600; }
+.action-hover-card .hc-meta .ok  { color: var(--ok);  font-weight: 600; }
+.action-hover-card .hc-hint {
+  margin-top: 7px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-style: italic;
+}
+
 .op-hover-card {
   position: fixed;
   top: 0; left: 0;
@@ -6980,6 +7215,9 @@ body.is-row-dragging *        { user-select: none !important; }
         <button class="nav-item" data-view="register">
           <span class="nav-icon">≣</span><span>Register</span>
         </button>
+        <button class="nav-item" data-view="actioncloud">
+          <span class="nav-icon">◯</span><span>Cloud</span>
+        </button>
         <button class="nav-item" data-view="openpoints">
           <span class="nav-icon">⚐</span><span>Open points</span>
         </button>
@@ -8770,6 +9008,7 @@ body.is-row-dragging *        { user-select: none !important; }
       people: renderPeople,
       board: renderBoard,
       register: renderRegister,
+      actioncloud: renderActionCloud,
       openpoints: renderOpenPoints,
       timeline: renderTimeline,
       dashboard: renderDashboard,
@@ -9881,6 +10120,602 @@ body.is-row-dragging *        { user-select: none !important; }
     const stepShrink = 1 - 0.4 * _opStepsRatio(op);
     return c * p * ageWeight * Math.max(0.4, stepShrink);
   }
+  /* ───────────────────────── Action Cloud ─────────────────────────────
+   * A 2D scatter view of live actions designed for rapid triage. The PM's
+   * Monday-morning question — "of N actions, which 8-10 should I look at
+   * this week" — is a recognition task; neither the Board (flow) nor the
+   * Register (table) is good at it. The cloud gives every action a
+   * spatial position so the noteworthy ones pop visually.
+   *
+   * Two axis presets the user toggles between:
+   *   A — Urgency × Progress  (days-to-due × % complete). Diagonal acts
+   *       as the "on track" benchmark; the bottom-left quadrant is the
+   *       firefighting zone.
+   *   B — Owner × Importance  (categorical X by owner sorted by load,
+   *       Y by composite importance). Reveals per-owner load
+   *       concentration.
+   *
+   * Selection persists across preset changes so the user can verify
+   * both presets surface the same critical items.
+   *
+   * Reuses: percentComplete(), priorityLevel(), STATUSES,
+   * actionMatchesFilters(), CSV export, and the openDrawer / topbar
+   * filter wiring already in place.
+   * ─────────────────────────────────────────────────────────────────── */
+
+  const _cloudState = {
+    preset: 'A',                 // 'A' = urgency × progress, 'B' = owner × importance
+    selection: new Set(),        // action ids — persists across preset toggles
+    focusMode: false,
+    focusN: 12,
+    sizeBy: 'auto',              // 'auto' (preset-driven) or fixed override later
+  };
+
+  // Composite importance — drives bubble size (Preset A), Y position
+  // (Preset B), and Focus mode's top-N ranking. Five additive signals,
+  // each capped, then bonus for risk-attached / critical-path. The
+  // scoring is intentionally smooth (no hard thresholds) so the bubble
+  // size distribution feels continuous.
+  //
+  // Signals:
+  //   pri  — priority level rank (critical=4 … low=1)
+  //   cmt  — commitment %  (5 → 0.2, 100 → 4)
+  //   dsn  — log of downstream-dep count (0 if none)
+  //   risk — 2 if any risk has actionId === a.id, else 0
+  //   stl  — staleness: min(daysSinceUpdate / 14, 1) × 2
+  //   crit — 1.5 if the action is on the critical path (computed
+  //          lazily and cached per-render via the optional `criticalSet`).
+  function actionImportance(a, ctx = {}) {
+    // Priority rank — index in PRIORITY_LEVELS + 1 (low=1, med=2, high=3, critical=4).
+    const pri = PRIORITY_LEVELS.findIndex((p) => p.id === (a.priorityLevel || 'med')) + 1 || 2;
+    const cmt = ((typeof a.commitment === 'number') ? a.commitment : 100) / 25;
+    const dsn = ctx.downstream?.get(a.id) || 0;
+    const dsW = Math.log2(1 + dsn);                                // 0,1,2…
+    const risk = (ctx.riskLinks?.has(a.id)) ? 2 : 0;
+    const ageDays = a.updatedAt ? Math.max(0, dayDiff(todayISO(), a.updatedAt)) : 0;
+    const stl = Math.min(ageDays / 14, 1) * 2;
+    const crit = (ctx.criticalSet?.has(a.id)) ? 1.5 : 0;
+    return pri + cmt + dsW + risk + stl + crit;
+  }
+
+  // Symmetric log transform: keeps sign, log-scales magnitude.
+  // -90 → -6.5 · -7 → -3 · 0 → 0 · +7 → +3 · +90 → +6.5
+  // Used so the immediate-urgency region (next 2 weeks) gets visual
+  // breathing room while a 6-month-out item still fits on the canvas.
+  function symLog(v) {
+    if (!v) return 0;
+    return Math.sign(v) * Math.log2(1 + Math.abs(v));
+  }
+
+  // Days-to-due (negative = overdue). Null when no due date.
+  function actionDaysToDue(a) {
+    if (!a.due) return null;
+    return dayDiff(a.due, todayISO()) * -1;
+  }
+
+  // Build per-render context: downstream-dep counts, risk-link set,
+  // (no critical-set yet — Gantt has its own; defer to a later cut).
+  function buildCloudCtx(scopeProjects) {
+    const downstream = new Map();
+    const riskLinks  = new Set();
+    scopeProjects.forEach((p) => {
+      (p.actions || []).forEach((a) => {
+        (a.dependsOn || []).forEach((depId) => {
+          downstream.set(depId, (downstream.get(depId) || 0) + 1);
+        });
+      });
+      (p.risks || []).forEach((r) => {
+        if (r.actionId) riskLinks.add(r.actionId);
+      });
+    });
+    return { downstream, riskLinks };
+  }
+
+  function renderActionCloud(root) {
+    const scopeProjects = curProjectIsMerged()
+      ? state.projects.filter((p) => !p.archived)
+      : [curProject()];
+    const ctx = buildCloudCtx(scopeProjects);
+
+    // Source actions — every live (non-archived, non-done, non-cancelled)
+    // action across the scope projects, tagged with their owning project.
+    // Topbar filters (search / owner / component / status / due) are
+    // applied via actionMatchesFilters. The "done / cancelled" exclusion
+    // is hard-coded here (not optional via the topbar) because the
+    // cloud's purpose is triage — closed items shouldn't take up
+    // canvas real estate.
+    const allActions = scopeProjects.flatMap((p) => (p.actions || [])
+      .filter((a) => !a.deletedAt && a.status !== 'done' && a.status !== 'cancelled' && actionMatchesFilters(a))
+      .map((a) => ({ a, proj: p })));
+
+    const view = document.createElement('div');
+    view.className = 'view';
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">${escapeHTML(curProjectIsMerged() ? 'All projects' : curProject().name)} — Action cloud</div>
+          <div class="page-sub">2D scatter for rapid triage — click bubbles to select, toggle presets to verify both surface the same critical items. Done &amp; cancelled actions are excluded.</div>
+        </div>
+        <div class="page-actions">
+          <div class="seg" id="cloudPresetSeg" role="tablist" aria-label="Axis preset">
+            <button class="seg-btn ${_cloudState.preset === 'A' ? 'active' : ''}" data-cloud-preset="A" title="X = days-to-due · Y = % complete · bubble size = composite importance">A · Urgency × Progress</button>
+            <button class="seg-btn ${_cloudState.preset === 'B' ? 'active' : ''}" data-cloud-preset="B" title="X = owner (sorted by load) · Y = composite importance · bubble size = commitment %">B · Owner × Importance</button>
+          </div>
+          <button class="ghost ${_cloudState.focusMode ? 'is-on' : ''}" id="cloudFocus" title="Highlight only the top ${_cloudState.focusN} most noteworthy actions">★ Focus top ${_cloudState.focusN}</button>
+          <button class="ghost" id="cloudCSV" title="Download the cloud's currently-visible actions as CSV">↓ CSV</button>
+        </div>
+      </div>
+      <div class="cloud-filterbar">
+        <div class="cloud-sel-strip" id="cloudSelStrip" hidden></div>
+        <div class="cloud-comp-strip" id="cloudCompStrip"></div>
+      </div>
+      <div class="cloud-canvas-wrap">
+        <svg id="cloudSvg" class="cloud-svg" preserveAspectRatio="xMidYMid meet"></svg>
+        <div class="cloud-legend">
+          <span class="cl-leg-item"><span class="cl-leg-dot s-todo"></span>To-do</span>
+          <span class="cl-leg-item"><span class="cl-leg-dot s-doing"></span>Doing</span>
+          <span class="cl-leg-item"><span class="cl-leg-dot s-blocked"></span>Blocked</span>
+          <span class="cl-leg-item"><span class="cl-leg-ring cl-leg-risk"></span>Risk attached</span>
+          <span class="cl-leg-item"><span class="cl-leg-ring cl-leg-late"></span>Overdue</span>
+          <span class="cl-leg-item"><span class="cl-leg-ring cl-leg-proj"></span>Project</span>
+          <span class="cl-leg-spacer"></span>
+          <span class="cl-leg-stat" id="cloudStat"></span>
+        </div>
+      </div>`;
+    root.appendChild(view);
+
+    // ── Component filter strip — clickable mini-bar chart ─────────────
+    const compStrip = $('#cloudCompStrip');
+    const compCounts = new Map();
+    allActions.forEach(({ a, proj: p }) => {
+      const cmp = a.component ? findComponent(p, a.component) : null;
+      const key = cmp ? `${p.id}:${a.component}` : '__none__';
+      compCounts.set(key, (compCounts.get(key) || 0) + 1);
+    });
+    // In merged mode the component IDs are project-scoped, so we keep
+    // the (project,component) tuple for click semantics but display
+    // only the component name. Sort descending by count.
+    const compEntries = Array.from(compCounts.entries()).sort((a, b) => b[1] - a[1]);
+    const maxCt = compEntries[0]?.[1] || 1;
+    const activeCompFilter = $('#filterComponent')?.value || '';
+    compStrip.innerHTML = `
+      <span class="cl-strip-lbl">Component</span>
+      ${compEntries.map(([k, n]) => {
+        if (k === '__none__') {
+          const on = activeCompFilter === '__none__';
+          return `<button class="cl-comp-chip ${on ? 'is-on' : ''}" data-cloud-comp="__none__" title="${n} action${n === 1 ? '' : 's'} with no component">
+            <span class="cl-comp-bar"><span class="cl-comp-bar-fill" style="width:${(n / maxCt) * 100}%; background: var(--text-faint);"></span></span>
+            <span class="cl-comp-name">— None —</span>
+            <span class="cl-comp-n">${n}</span>
+          </button>`;
+        }
+        const [projId, compId] = k.split(':');
+        const p = state.projects.find((x) => x.id === projId);
+        const cmp = findComponent(p, compId);
+        const c = cmp ? componentColor(cmp.color) : null;
+        const on = activeCompFilter === compId;
+        return `<button class="cl-comp-chip ${on ? 'is-on' : ''}" data-cloud-comp="${escapeHTML(compId)}" style="${c ? `--c-rgb: ${c.rgb};` : ''}" title="${escapeHTML(cmp?.name || compId)}: ${n}">
+          <span class="cl-comp-bar"><span class="cl-comp-bar-fill" style="width:${(n / maxCt) * 100}%; ${c ? `background: rgb(${c.rgb});` : ''}"></span></span>
+          <span class="cl-comp-name">${escapeHTML(cmp?.name || compId)}</span>
+          <span class="cl-comp-n">${n}</span>
+        </button>`;
+      }).join('')}
+      ${activeCompFilter ? '<button class="cl-comp-clear" data-cloud-comp="">× clear</button>' : ''}`;
+    $$('.cl-comp-chip, .cl-comp-clear', compStrip).forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.cloudComp;
+        applyTopbarFilter({ component: v });
+      });
+    });
+
+    // ── Selection strip — shown only when at least one bubble selected
+    function refreshSelStrip() {
+      const strip = $('#cloudSelStrip');
+      if (!strip) return;
+      const n = _cloudState.selection.size;
+      if (!n) { strip.hidden = true; strip.innerHTML = ''; return; }
+      strip.hidden = false;
+      strip.innerHTML = `
+        <span class="cl-sel-count"><b>${n}</b> selected</span>
+        <span class="cl-sel-hint">Selection persists across presets — toggle <b>A ↔ B</b> to verify the same items pop in both lenses.</span>
+        <button class="ghost" id="cloudSelOpen" title="Open the first selected action in the drawer">Open first</button>
+        <button class="ghost" id="cloudSelClear" title="Clear selection">× Clear</button>`;
+      $('#cloudSelClear').addEventListener('click', () => {
+        _cloudState.selection.clear();
+        refreshSelStrip();
+        repaintSelectionOnly();
+      });
+      $('#cloudSelOpen').addEventListener('click', () => {
+        const first = Array.from(_cloudState.selection)[0];
+        if (first) openDrawer(first);
+      });
+    }
+    refreshSelStrip();
+
+    // ── Layout ─────────────────────────────────────────────────────────
+    // Canvas dimensions are determined at render time by the surrounding
+    // container; SVG uses an internal coordinate system that adapts.
+    const SVG = $('#cloudSvg');
+    const wrap = SVG.parentElement;
+    const W = Math.max(720, wrap.clientWidth || 1200);
+    const H = Math.max(420, Math.min(window.innerHeight - 280, 720));
+    const padL = 48, padR = 24, padT = 14, padB = 36;
+    const innerW = W - padL - padR;
+    const innerH = H - padT - padB;
+    SVG.setAttribute('viewBox', `0 0 ${W} ${H}`);
+    SVG.setAttribute('width', W);
+    SVG.setAttribute('height', H);
+
+    // Bubble radius scale — sqrt of composite importance, anchored
+    // between 5 and 18 px. Identical across presets so an action's
+    // visual weight stays consistent when the user toggles presets.
+    const compositeScores = allActions.map(({ a }) => actionImportance(a, ctx));
+    const maxComp = Math.max(4, ...compositeScores);
+    const radiusForComp = (c) => 5 + Math.min(13, Math.sqrt(c) * 3);
+
+    // Status → fill / stroke palette. Same colours as the Board so the
+    // visual language carries across views.
+    function statusPalette(a) {
+      if (a.status === 'blocked') return { fill: 'rgba(248,113,121,.6)',  stroke: 'rgb(248,113,121)' };
+      if (a.status === 'doing')   return { fill: 'rgba(110,168,255,.6)', stroke: 'rgb(110,168,255)' };
+      return                              { fill: 'rgba(148,163,184,.45)', stroke: 'rgb(148,163,184)' };
+    }
+
+    // Project palette — used in __all__ mode to draw a thin outer ring
+    // around each bubble carrying its project's signature colour.
+    function projectRing(p) {
+      // Hash the project id to a fixed colour from the palette so
+      // ring colour is stable across renders.
+      let h = 0; for (let i = 0; i < p.id.length; i++) h = (h * 31 + p.id.charCodeAt(i)) | 0;
+      const pal = ['rgb(245,193,80)','rgb(110,168,255)','rgb(168,140,255)','rgb(72,206,200)','rgb(244,131,89)','rgb(74,222,128)'];
+      return pal[Math.abs(h) % pal.length];
+    }
+
+    // ── Position calculation per preset ───────────────────────────────
+    // Preset A: X = sym-log days-to-due, Y = % complete (inverted: 100% top).
+    //           Items without a due date sit in a dedicated "no-date" lane
+    //           at the far right.
+    // Preset B: X = owner slot (sorted by total commitment load desc).
+    //           Y = composite importance (sym-log so the spread is
+    //           readable when one action dwarfs the rest).
+    const owners = state.people.slice();
+    owners.sort((a, b) => {
+      const la = (a._load = scopeProjects.reduce((s, p) =>
+        s + (p.actions || []).filter((x) => x.owner === a.id && !x.deletedAt && x.status !== 'done' && x.status !== 'cancelled').length, 0));
+      const lb = (b._load = scopeProjects.reduce((s, p) =>
+        s + (p.actions || []).filter((x) => x.owner === b.id && !x.deletedAt && x.status !== 'done' && x.status !== 'cancelled').length, 0));
+      return lb - la;
+    });
+    const ownerIdx = new Map(owners.map((p, i) => [p.id, i]));
+
+    const placed = allActions.map(({ a, proj: p }, i) => {
+      const r = radiusForComp(compositeScores[i]);
+      const palette = statusPalette(a);
+      const dtd = actionDaysToDue(a);
+      const pct = percentComplete(a);
+      let xRaw, yRaw, xMin, xMax, yMin, yMax;
+      if (_cloudState.preset === 'A') {
+        // X: sym-log days-to-due, clamped to ±90 for layout (extremes still
+        // shown but pinned to the edge). Items without a due date go in
+        // their own lane at the far right past the +90-day mark.
+        if (dtd == null) {
+          xRaw = 7.5; // beyond +90's sym-log of ~6.5
+          xMin = -6.6; xMax = 7.5;
+        } else {
+          xMin = -6.6; xMax = 7.5;
+          xRaw = Math.max(-6.6, Math.min(6.6, symLog(dtd)));
+        }
+        yRaw = pct;
+        yMin = 0; yMax = 100;
+      } else {
+        // Preset B
+        xMin = 0; xMax = Math.max(1, owners.length - 1);
+        xRaw = ownerIdx.has(a.owner) ? ownerIdx.get(a.owner) : owners.length;
+        if (xRaw === owners.length) { xMax = Math.max(1, owners.length); } // unassigned lane
+        // Y: composite importance sym-log so the bottom band stays readable.
+        const imp = compositeScores[i];
+        yRaw = Math.log2(1 + imp);
+        yMin = 0;
+        yMax = Math.log2(1 + maxComp);
+      }
+      const x = padL + ((xRaw - xMin) / (xMax - xMin)) * innerW;
+      const y = padT + (1 - (yRaw - yMin) / (yMax - yMin)) * innerH;
+      return {
+        id: a.id, a, proj: p, x, y, r, palette,
+        importance: compositeScores[i],
+        hasRisk: ctx.riskLinks.has(a.id),
+        isLate: a.status !== 'done' && a.due && dayDiff(a.due, todayISO()) < 0,
+        isBlocked: a.status === 'blocked',
+        commitment: (typeof a.commitment === 'number') ? a.commitment : 100,
+      };
+    });
+
+    // Light collision resolution — small repulsion preserving global
+    // position so the scatter stays interpretable but bubbles don't
+    // overlap. 30 iterations is plenty for ~250 nodes.
+    (function relax() {
+      for (let iter = 0; iter < 30; iter++) {
+        let moved = false;
+        for (let i = 0; i < placed.length; i++) {
+          for (let j = i + 1; j < placed.length; j++) {
+            const a = placed[i], b = placed[j];
+            const dx = b.x - a.x, dy = b.y - a.y;
+            const dist = Math.sqrt(dx * dx + dy * dy) || 0.01;
+            const min = a.r + b.r + 1.5;
+            if (dist < min) {
+              const push = (min - dist) / 2;
+              const ux = dx / dist, uy = dy / dist;
+              a.x -= ux * push; a.y -= uy * push;
+              b.x += ux * push; b.y += uy * push;
+              moved = true;
+            }
+          }
+        }
+        if (!moved) break;
+      }
+      // Clamp into viewport so over-pushed bubbles don't drift off-canvas.
+      placed.forEach((p) => {
+        p.x = Math.max(padL + p.r + 1, Math.min(W - padR - p.r - 1, p.x));
+        p.y = Math.max(padT + p.r + 1, Math.min(H - padB - p.r - 1, p.y));
+      });
+    })();
+
+    // Focus mode ranking — top-N by composite importance.
+    const focusIds = new Set();
+    if (_cloudState.focusMode) {
+      placed.slice().sort((a, b) => b.importance - a.importance).slice(0, _cloudState.focusN)
+        .forEach((p) => focusIds.add(p.id));
+    }
+
+    // ── Axes + decorations ────────────────────────────────────────────
+    let svgFrag = '';
+    if (_cloudState.preset === 'A') {
+      // Y axis = % complete
+      svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
+      svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
+      // Today vertical reference line (X = sym-log 0 = 0 raw)
+      const todayX = padL + ((0 - -6.6) / (7.5 - -6.6)) * innerW;
+      svgFrag += `<line class="cl-today" x1="${todayX}" y1="${padT}" x2="${todayX}" y2="${padT + innerH}"></line>`;
+      svgFrag += `<text class="cl-today-lbl" x="${todayX + 3}" y="${padT + 12}">today</text>`;
+      // Y ticks (0/25/50/75/100 %)
+      for (let p = 0; p <= 100; p += 25) {
+        const y = padT + (1 - p / 100) * innerH;
+        svgFrag += `<line class="cl-grid" x1="${padL}" y1="${y}" x2="${padL + innerW}" y2="${y}"></line>`;
+        svgFrag += `<text class="cl-tick" x="${padL - 6}" y="${y + 3}" text-anchor="end">${p}%</text>`;
+      }
+      // X ticks (-30, -7, today, +7, +30, +90, no date)
+      [{ d: -30, lbl: 'overdue 30d' }, { d: -7, lbl: '-7d' }, { d: 7, lbl: '+7d' },
+       { d: 30, lbl: '+30d' }, { d: 90, lbl: '+90d' }].forEach(({ d, lbl }) => {
+        const xRaw = symLog(d);
+        const x = padL + ((xRaw - -6.6) / (7.5 - -6.6)) * innerW;
+        svgFrag += `<text class="cl-tick" x="${x}" y="${padT + innerH + 16}" text-anchor="middle">${lbl}</text>`;
+      });
+      // No-date lane label
+      const ndX = padL + ((7.5 - -6.6) / (7.5 - -6.6)) * innerW;
+      svgFrag += `<text class="cl-tick muted" x="${ndX - 6}" y="${padT + innerH + 16}" text-anchor="end">no date</text>`;
+      // Diagonal "on track" trend line — bottom-left (-90d, 0%) to
+      // top-right (+90d, 100%). Items above are ahead; below are behind.
+      const x1 = padL + ((symLog(-90) - -6.6) / (7.5 - -6.6)) * innerW;
+      const y1 = padT + innerH;
+      const x2 = padL + ((symLog(90)  - -6.6) / (7.5 - -6.6)) * innerW;
+      const y2 = padT;
+      svgFrag += `<line class="cl-trend" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
+      svgFrag += `<text class="cl-trend-lbl" x="${x2 - 8}" y="${y2 + 18}" text-anchor="end">on-track diagonal →</text>`;
+      // Quadrant labels (top-right safe, bottom-left firefight)
+      svgFrag += `<text class="cl-zone fire" x="${padL + 12}" y="${padT + innerH - 12}">🔥 firefight zone</text>`;
+      svgFrag += `<text class="cl-zone safe" x="${padL + innerW - 12}" y="${padT + 16}" text-anchor="end">safe zone ✓</text>`;
+      // Axis titles
+      svgFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Days to due (negative = overdue) →</text>`;
+      svgFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">% Complete →</text>`;
+    } else {
+      // Preset B axes
+      svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
+      svgFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
+      // Owner X ticks
+      const ownerSpan = Math.max(1, owners.length - 1);
+      owners.forEach((p, i) => {
+        const x = padL + (i / Math.max(ownerSpan, 1)) * innerW;
+        svgFrag += `<line class="cl-grid" x1="${x}" y1="${padT}" x2="${x}" y2="${padT + innerH}"></line>`;
+        const initials = (p.name || '').split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+        svgFrag += `<text class="cl-tick" x="${x}" y="${padT + innerH + 14}" text-anchor="middle" title="${escapeHTML(p.name)}">${escapeHTML(initials)}</text>`;
+        svgFrag += `<text class="cl-tick muted" x="${x}" y="${padT + innerH + 26}" text-anchor="middle">${p._load || 0}</text>`;
+      });
+      // Y ticks — composite importance, log scale
+      [1, 2, 5, 10, 20].forEach((imp) => {
+        if (imp > maxComp) return;
+        const y = padT + (1 - Math.log2(1 + imp) / Math.log2(1 + maxComp)) * innerH;
+        svgFrag += `<line class="cl-grid" x1="${padL}" y1="${y}" x2="${padL + innerW}" y2="${y}"></line>`;
+        svgFrag += `<text class="cl-tick" x="${padL - 6}" y="${y + 3}" text-anchor="end">${imp}</text>`;
+      });
+      // Axis titles
+      svgFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Owner (sorted by load) →</text>`;
+      svgFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">Composite importance →</text>`;
+    }
+
+    // ── Bubbles ────────────────────────────────────────────────────────
+    placed.forEach((b) => {
+      const sel = _cloudState.selection.has(b.id);
+      const focusDim = _cloudState.focusMode && !focusIds.has(b.id) && !sel;
+      // Halo rings — outer ring = project (always in merged mode),
+      // overdue glow, risk-link orange, blocked dashed.
+      let halos = '';
+      if (curProjectIsMerged()) {
+        const ring = projectRing(b.proj);
+        halos += `<circle class="cl-ring cl-ring-proj" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${(b.r + 3).toFixed(1)}" stroke="${ring}"></circle>`;
+      }
+      if (b.hasRisk) {
+        halos += `<circle class="cl-ring cl-ring-risk" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${(b.r + 6).toFixed(1)}"></circle>`;
+      }
+      if (b.isLate) {
+        halos += `<circle class="cl-ring cl-ring-late" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${(b.r + 9).toFixed(1)}"></circle>`;
+      }
+      // Selection halo always on top
+      if (sel) {
+        halos += `<circle class="cl-ring cl-ring-sel" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${(b.r + 12).toFixed(1)}"></circle>`;
+      }
+      // Inline identifier — only shown when bubble is big enough to host it.
+      const showIdent = b.r >= 11;
+      const ident = showIdent && (b.a.identifier || (b.a.title || '').match(/[A-Z]{2,}-\d+/)?.[0])
+        ? `<text class="cl-bubble-ident" x="${b.x.toFixed(1)}" y="${(b.y + 3).toFixed(1)}" text-anchor="middle">${escapeHTML(b.a.identifier || '')}</text>`
+        : '';
+      svgFrag += `<g class="cl-bubble-g ${sel ? 'is-sel' : ''} ${focusDim ? 'is-dim' : ''} ${b.isBlocked ? 'is-blocked' : ''}" data-action-id="${escapeHTML(b.id)}" data-proj-id="${escapeHTML(b.proj.id)}">
+        ${halos}
+        <circle class="cl-bubble" cx="${b.x.toFixed(1)}" cy="${b.y.toFixed(1)}" r="${b.r.toFixed(1)}" fill="${b.palette.fill}" stroke="${b.palette.stroke}" stroke-width="${b.isBlocked ? 1.5 : 1}" ${b.isBlocked ? 'stroke-dasharray="3 2"' : ''}></circle>
+        ${ident}
+      </g>`;
+    });
+
+    SVG.innerHTML = svgFrag;
+    $('#cloudStat').textContent = `${allActions.length} action${allActions.length === 1 ? '' : 's'} · ${_cloudState.preset === 'A' ? 'Urgency × Progress' : 'Owner × Importance'}${_cloudState.focusMode ? ` · top ${_cloudState.focusN} highlighted` : ''}`;
+
+    // Repaint just selection halos (skip full layout) — used after
+    // selection toggles so we don't pay the relax cost on each click.
+    function repaintSelectionOnly() {
+      $$('.cl-bubble-g', SVG).forEach((g) => {
+        const id = g.dataset.actionId;
+        const sel = _cloudState.selection.has(id);
+        g.classList.toggle('is-sel', sel);
+        const existing = g.querySelector('.cl-ring-sel');
+        if (sel && !existing) {
+          const ref = placed.find((p) => p.id === id);
+          if (!ref) return;
+          const c = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+          c.setAttribute('class', 'cl-ring cl-ring-sel');
+          c.setAttribute('cx', ref.x.toFixed(1));
+          c.setAttribute('cy', ref.y.toFixed(1));
+          c.setAttribute('r',  (ref.r + 12).toFixed(1));
+          g.insertBefore(c, g.querySelector('.cl-bubble'));
+        } else if (!sel && existing) {
+          existing.remove();
+        }
+      });
+    }
+
+    // ── Interactions ───────────────────────────────────────────────────
+    // Click bubble → toggle selection. Shift-click adds (no remove).
+    // Cmd/Ctrl-click → open the action's drawer directly.
+    SVG.addEventListener('click', (e) => {
+      const g = e.target.closest('.cl-bubble-g');
+      if (!g) {
+        // Empty space — clear selection (only if there's something to clear).
+        if (_cloudState.selection.size && !e.shiftKey) {
+          _cloudState.selection.clear();
+          refreshSelStrip();
+          repaintSelectionOnly();
+        }
+        return;
+      }
+      const id = g.dataset.actionId;
+      if (e.metaKey || e.ctrlKey) { openDrawer(id); return; }
+      if (e.shiftKey) {
+        _cloudState.selection.add(id);
+      } else {
+        if (_cloudState.selection.has(id)) _cloudState.selection.delete(id);
+        else _cloudState.selection.add(id);
+      }
+      refreshSelStrip();
+      repaintSelectionOnly();
+    });
+    SVG.addEventListener('dblclick', (e) => {
+      const g = e.target.closest('.cl-bubble-g');
+      if (g) openDrawer(g.dataset.actionId);
+    });
+
+    // Hover card — singleton appended to <body> so it escapes SVG clip.
+    let hoverCard = document.getElementById('actionHoverCard');
+    if (!hoverCard) {
+      hoverCard = document.createElement('div');
+      hoverCard.id = 'actionHoverCard';
+      hoverCard.className = 'action-hover-card';
+      document.body.appendChild(hoverCard);
+    }
+    const hideHover = () => hoverCard.classList.remove('show');
+    const positionHover = (e) => {
+      const pad = 12;
+      const rect = hoverCard.getBoundingClientRect();
+      const x = Math.min(window.innerWidth - rect.width - pad, e.clientX + 14);
+      const y = Math.min(window.innerHeight - rect.height - pad, e.clientY + 14);
+      hoverCard.style.left = Math.max(pad, x) + 'px';
+      hoverCard.style.top  = Math.max(pad, y) + 'px';
+    };
+    const showHover = (a, p, e) => {
+      const lvl = priorityLevel(a.priorityLevel);
+      const cmp = a.component ? findComponent(p, a.component) : null;
+      const cRgb = cmp ? componentColor(cmp.color).rgb : null;
+      const owner = personName(a.owner);
+      const dtd = actionDaysToDue(a);
+      const pct = percentComplete(a);
+      const ph  = plannedHoursTotal(a);
+      const ah  = totalLoggedHours(a);
+      const slip = baselineSlipDays(a);
+      const dueLbl = a.due
+        ? (dtd < 0 ? `overdue ${Math.abs(dtd)}d` : dtd === 0 ? 'due today' : `due in ${dtd}d`)
+        : 'no due date';
+      hoverCard.innerHTML = `
+        ${a.identifier ? `<div class="hc-ident">${escapeHTML(a.identifier)}</div>` : ''}
+        <div class="hc-title">${escapeHTML(a.title || '(untitled)')}</div>
+        <div class="hc-chips">
+          ${curProjectIsMerged() ? `<span class="hc-chip" style="border-color:${projectRing(p)};color:${projectRing(p)};">${escapeHTML(p.name)}</span>` : ''}
+          ${cmp ? `<span class="hc-chip" style="background:rgba(${cRgb},.18);color:rgb(${cRgb});border-color:rgba(${cRgb},.5)">${escapeHTML(cmp.name)}</span>` : ''}
+          <span class="hc-chip" style="color:rgb(${lvl.rgb}); border-color:rgba(${lvl.rgb},.5)">${escapeHTML(lvl.label)} priority</span>
+          <span class="hc-chip" data-cs="${a.status}">${escapeHTML(a.status)}</span>
+        </div>
+        <div class="hc-meta">
+          <span>${escapeHTML(owner)}</span>
+          <span class="hc-sep">·</span>
+          <span class="${a.due && dtd < 0 && a.status !== 'done' ? 'bad' : ''}">${escapeHTML(dueLbl)}</span>
+          <span class="hc-sep">·</span>
+          <span>${pct}% complete</span>
+        </div>
+        <div class="hc-meta">
+          <span>${ah.toFixed(1)}h / ${ph.toFixed(1)}h planned</span>
+          ${slip != null ? `<span class="hc-sep">·</span><span class="${slip > 0 ? 'bad' : 'ok'}">${slip > 0 ? '+' : ''}${slip}d vs baseline</span>` : ''}
+        </div>
+        <div class="hc-hint">click to ${_cloudState.selection.has(a.id) ? 'deselect' : 'select'} · ⌘/ctrl-click to open</div>
+      `;
+      hoverCard.classList.add('show');
+      positionHover(e);
+    };
+    SVG.addEventListener('mousemove', (e) => {
+      const g = e.target.closest('.cl-bubble-g');
+      if (!g) { hideHover(); return; }
+      const id = g.dataset.actionId;
+      const ref = placed.find((p) => p.id === id);
+      if (ref) showHover(ref.a, ref.proj, e);
+    });
+    SVG.addEventListener('mouseleave', hideHover);
+
+    // ── Toolbar buttons ────────────────────────────────────────────────
+    $$('[data-cloud-preset]', view).forEach((btn) => {
+      btn.addEventListener('click', () => {
+        _cloudState.preset = btn.dataset.cloudPreset;
+        render();
+      });
+    });
+    $('#cloudFocus').addEventListener('click', () => {
+      _cloudState.focusMode = !_cloudState.focusMode;
+      render();
+    });
+    $('#cloudCSV').addEventListener('click', () => {
+      exportCSV(`action-cloud-${(curProjectIsMerged() ? 'all' : curProject().name).replace(/\s+/g, '_')}-${todayISO()}.csv`,
+        allActions, [
+          { header: 'Project',         value: ({ proj }) => proj.name },
+          { header: 'Identifier',      value: ({ a }) => a.identifier || '' },
+          { header: 'Title',           value: ({ a }) => a.title },
+          { header: 'Owner',           value: ({ a }) => personName(a.owner) },
+          { header: 'Status',          value: ({ a }) => a.status },
+          { header: 'Priority',        value: ({ a }) => priorityLevel(a.priorityLevel).label },
+          { header: 'Component',       value: ({ a, proj }) => findComponent(proj, a.component)?.name || '' },
+          { header: 'Due',             value: ({ a }) => a.due || '' },
+          { header: 'Days to due',     value: ({ a }) => actionDaysToDue(a) ?? '' },
+          { header: '% Complete',      value: ({ a }) => percentComplete(a) },
+          { header: 'Composite imp.',  value: ({ a }) => actionImportance(a, ctx).toFixed(2) },
+          { header: 'Selected',        value: ({ a }) => _cloudState.selection.has(a.id) ? 'yes' : '' },
+        ]);
+    });
+  }
+  /* ─────────────────────── /Action Cloud ─────────────────────────── */
+
   function renderOpenPoints(root) {
     const proj = curProject();
     proj.openPoints = proj.openPoints || [];
