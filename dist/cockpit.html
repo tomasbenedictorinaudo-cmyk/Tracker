@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-15T12:33:22.028Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-15T12:41:39.050Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -10882,6 +10882,26 @@ body.is-row-dragging *        { user-select: none !important; }
 
     // ── Axes + decorations ────────────────────────────────────────────
     let svgFrag = '';
+    // When the user zooms in/out, the SVG renders at base × zoom
+    // pixels (so the wrapper scrolls). Without compensation every
+    // element scales — axis labels become huge or tiny depending on
+    // zoom. To keep axes / ticks / titles readable, we inject a
+    // <style> block inside the SVG that re-declares those classes
+    // with font-size and stroke-width multiplied by 1/zoom. The
+    // CSS is scoped to this SVG only, so the rest of the app is
+    // unaffected. Bubbles, heat rings, and bubble identifier labels
+    // are NOT in this list — they're the plot content and should
+    // scale with zoom.
+    const iz = 1 / zoom;
+    svgFrag += `<style>
+      .cl-axis        { stroke-width: ${(1 * iz).toFixed(3)}px; }
+      .cl-grid        { stroke-width: ${(0.5 * iz).toFixed(3)}px; }
+      .cl-today       { stroke-width: ${(1.5 * iz).toFixed(3)}px; }
+      .cl-tick        { font-size: ${(10.5 * iz).toFixed(2)}px; }
+      .cl-today-lbl   { font-size: ${(10 * iz).toFixed(2)}px; }
+      .cl-axis-title  { font-size: ${(11 * iz).toFixed(2)}px; }
+      .cl-zone        { font-size: ${(11 * iz).toFixed(2)}px; stroke-width: ${(3 * iz).toFixed(3)}px; }
+    </style>`;
     // Shared clip path so heat rings can be rendered as full circles
     // (centred at origin) and naturally clipped to the chart area —
     // avoids manual arc-direction maths and keeps the geometry honest
@@ -11212,6 +11232,25 @@ body.is-row-dragging *        { user-select: none !important; }
       const newH = Math.round(H * clamped);
       sv.setAttribute('width', newW);
       sv.setAttribute('height', newH);
+      // Patch the inline <style> block inside the SVG so axis labels +
+      // grid + tick stroke widths re-scale to keep their rendered
+      // pixel size constant across the new zoom level. The style block
+      // was set at render time using a stale zoom factor; this update
+      // is cheaper than a full re-render and keeps the axes readable
+      // at every step.
+      const izN = 1 / clamped;
+      const styleEl = sv.querySelector('style');
+      if (styleEl) {
+        styleEl.textContent = `
+          .cl-axis        { stroke-width: ${(1 * izN).toFixed(3)}px; }
+          .cl-grid        { stroke-width: ${(0.5 * izN).toFixed(3)}px; }
+          .cl-today       { stroke-width: ${(1.5 * izN).toFixed(3)}px; }
+          .cl-tick        { font-size: ${(10.5 * izN).toFixed(2)}px; }
+          .cl-today-lbl   { font-size: ${(10 * izN).toFixed(2)}px; }
+          .cl-axis-title  { font-size: ${(11 * izN).toFixed(2)}px; }
+          .cl-zone        { font-size: ${(11 * izN).toFixed(2)}px; stroke-width: ${(3 * izN).toFixed(3)}px; }
+        `;
+      }
       $('#cloudZoomVal').textContent = Math.round(clamped * 100) + '%';
       // Re-render the focusN span label width — it's part of the same
       // button, but the focusN value itself only changes when the
