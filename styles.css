@@ -3433,6 +3433,10 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 
 .cl-bubble-g { cursor: pointer; transition: opacity .15s ease, transform .15s ease; }
+/* Background area in the chart shows the pan/grab affordance — bubbles
+   override with pointer (above) since clicks on them select. */
+.cloud-svg { cursor: grab; }
+.cloud-svg:active { cursor: grabbing; }
 .cl-bubble-g:hover .cl-bubble { filter: brightness(1.25); stroke-width: 2; }
 .cl-bubble-g.is-dim { opacity: .25; filter: saturate(.4); }
 .cl-bubble-g.is-sel .cl-bubble { stroke-width: 2.5; }

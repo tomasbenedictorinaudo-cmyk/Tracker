@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-15T20:06:24.723Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-15T20:20:07.489Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3442,6 +3442,10 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 
 .cl-bubble-g { cursor: pointer; transition: opacity .15s ease, transform .15s ease; }
+/* Background area in the chart shows the pan/grab affordance — bubbles
+   override with pointer (above) since clicks on them select. */
+.cloud-svg { cursor: grab; }
+.cloud-svg:active { cursor: grabbing; }
 .cl-bubble-g:hover .cl-bubble { filter: brightness(1.25); stroke-width: 2; }
 .cl-bubble-g.is-dim { opacity: .25; filter: saturate(.4); }
 .cl-bubble-g.is-sel .cl-bubble { stroke-width: 2.5; }
@@ -10520,7 +10524,7 @@ body.is-row-dragging *        { user-select: none !important; }
       <div class="page-head">
         <div>
           <div class="page-title">${escapeHTML(curProjectIsMerged() ? 'All projects' : curProject().name)} — Action cloud</div>
-          <div class="page-sub">2D scatter for rapid triage — click bubbles to select, toggle presets to verify both surface the same critical items. Done &amp; cancelled actions are excluded.</div>
+          <div class="page-sub">2D scatter for rapid triage — click bubbles to select · drag to pan · shift+drag to zoom to a box · Ctrl/⌘ + wheel to zoom at cursor. Done &amp; cancelled actions are excluded.</div>
         </div>
         <div class="page-actions">
           <div class="seg" id="cloudPresetSeg" role="tablist" aria-label="Axis preset">
@@ -11147,9 +11151,12 @@ body.is-row-dragging *        { user-select: none !important; }
       </g>`;
     });
 
-    // Axes appended after bubbles so the axis-gutter background rects
-    // hide any plot content that scrolls under them.
-    SVG.innerHTML = svgFrag + svgAxesFrag;
+    // Plot content wrapped in #cloudPlotPan so pan-with-drag can apply a
+    // live SVG transform during the drag without re-running render() per
+    // mousemove. On mouseup the viewport fractions are committed and a
+    // normal re-render replaces the transform. Axes are OUTSIDE the
+    // pan group so they stay anchored.
+    SVG.innerHTML = `<g id="cloudPlotPan">${svgFrag}</g>${svgAxesFrag}`;
     $('#cloudStat').textContent = `${allActions.length} action${allActions.length === 1 ? '' : 's'} · ${_cloudState.preset === 'A' ? 'Urgency × Progress' : 'Owner × Importance'}${_cloudState.focusMode ? ` · top ${focusN} highlighted` : ''}`;
     // Patch the button's N now that we've computed it from the
     // critical-zone count.
@@ -11376,22 +11383,33 @@ body.is-row-dragging *        { user-select: none !important; }
     document.addEventListener('keydown', cloudKeyHandler);
     view.__cloudCleanup = () => document.removeEventListener('keydown', cloudKeyHandler);
 
-    // ── Drag-select to zoom to a box ──────────────────────────────────
+    // ── Pan with plain drag · zoom-to-box with shift-drag ────────────
+    //
     // Mouse-down on the chart background (NOT on a bubble) starts a
-    // drag; the user pulls a selection rectangle; on release the
-    // viewport snaps to that rectangle. Releasing without dragging at
-    // all (or releasing a too-small box) is treated as a no-op so
-    // accidental clicks don't change the zoom.
+    // drag. The interpretation depends on whether Shift is held at
+    // mousedown time:
+    //
+    //   plain drag  → PAN. The plot content translates live via SVG
+    //                 transform on #cloudPlotPan; on release the
+    //                 viewport fractions are shifted and the chart
+    //                 re-renders so the axis tick labels update.
+    //
+    //   shift+drag  → ZOOM TO BOX. A selection rectangle follows the
+    //                 cursor; on release the viewport snaps to it.
+    //
+    // Bubble clicks are unaffected (selection still toggles).
     let dragState = null;
     SVG.addEventListener('mousedown', (e) => {
       if (e.button !== 0) return;
       if (e.target.closest('.cl-bubble-g')) return; // bubble click → selection
-      // Only inside chart area
       const rect = SVG.getBoundingClientRect();
       const px = e.clientX - rect.x;
       const py = e.clientY - rect.y;
       if (px < padL || px > padL + innerW || py < padT || py > padT + innerH) return;
-      dragState = { startX: px, startY: py, curX: px, curY: py };
+      const isZoomBox = e.shiftKey;
+      dragState = { mode: isZoomBox ? 'zoom' : 'pan', startX: px, startY: py, curX: px, curY: py };
+      // Pan-mode cursor cue
+      if (!isZoomBox) SVG.style.cursor = 'grabbing';
       e.preventDefault();
     });
     SVG.addEventListener('mousemove', (e) => {
@@ -11399,42 +11417,82 @@ body.is-row-dragging *        { user-select: none !important; }
       const rect = SVG.getBoundingClientRect();
       dragState.curX = Math.max(padL, Math.min(padL + innerW, e.clientX - rect.x));
       dragState.curY = Math.max(padT, Math.min(padT + innerH, e.clientY - rect.y));
-      // Live-render the selection rect.
-      let r = document.getElementById('cloudZoomRect');
-      if (!r) {
-        r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        r.setAttribute('id', 'cloudZoomRect');
-        r.setAttribute('class', 'cl-zoom-rect');
-        SVG.appendChild(r);
+      if (dragState.mode === 'pan') {
+        // Live pan via SVG transform on the plot group. Translate so
+        // the point that was at startX is now under curX.
+        const dx = dragState.curX - dragState.startX;
+        const dy = dragState.curY - dragState.startY;
+        const pan = document.getElementById('cloudPlotPan');
+        if (pan) pan.setAttribute('transform', `translate(${dx.toFixed(1)}, ${dy.toFixed(1)})`);
+      } else {
+        // Live-render the zoom selection rect.
+        let r = document.getElementById('cloudZoomRect');
+        if (!r) {
+          r = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+          r.setAttribute('id', 'cloudZoomRect');
+          r.setAttribute('class', 'cl-zoom-rect');
+          SVG.appendChild(r);
+        }
+        const x1 = Math.min(dragState.startX, dragState.curX);
+        const y1 = Math.min(dragState.startY, dragState.curY);
+        const x2 = Math.max(dragState.startX, dragState.curX);
+        const y2 = Math.max(dragState.startY, dragState.curY);
+        r.setAttribute('x', x1);
+        r.setAttribute('y', y1);
+        r.setAttribute('width', x2 - x1);
+        r.setAttribute('height', y2 - y1);
       }
-      const x1 = Math.min(dragState.startX, dragState.curX);
-      const y1 = Math.min(dragState.startY, dragState.curY);
-      const x2 = Math.max(dragState.startX, dragState.curX);
-      const y2 = Math.max(dragState.startY, dragState.curY);
-      r.setAttribute('x', x1);
-      r.setAttribute('y', y1);
-      r.setAttribute('width', x2 - x1);
-      r.setAttribute('height', y2 - y1);
     });
     SVG.addEventListener('mouseup', () => {
       const r = document.getElementById('cloudZoomRect');
       if (r) r.remove();
+      SVG.style.cursor = '';
       if (!dragState) return;
-      const x1 = Math.min(dragState.startX, dragState.curX);
-      const y1 = Math.min(dragState.startY, dragState.curY);
-      const x2 = Math.max(dragState.startX, dragState.curX);
-      const y2 = Math.max(dragState.startY, dragState.curY);
-      const dx = x2 - x1, dy = y2 - y1;
+      const ds = dragState;
       dragState = null;
-      if (dx < 8 || dy < 8) return; // too small — treat as click on background
-      // Convert pixel box to viewport fractions.
-      // x in [padL, padL+innerW] maps to xMinFrac..xMaxFrac
+      const dx = ds.curX - ds.startX;
+      const dy = ds.curY - ds.startY;
+      if (Math.abs(dx) < 4 && Math.abs(dy) < 4) {
+        // Click without drag — clear any in-progress transform and bail.
+        const pan = document.getElementById('cloudPlotPan');
+        if (pan) pan.removeAttribute('transform');
+        return;
+      }
       const vp = _cloudState.viewport;
-      const xMinNew = vp.xMinFrac + ((x1 - padL) / innerW) * (vp.xMaxFrac - vp.xMinFrac);
-      const xMaxNew = vp.xMinFrac + ((x2 - padL) / innerW) * (vp.xMaxFrac - vp.xMinFrac);
-      // y is inverted: top of chart = yMax
-      const yMaxNew = vp.yMinFrac + (1 - (y1 - padT) / innerH) * (vp.yMaxFrac - vp.yMinFrac);
-      const yMinNew = vp.yMinFrac + (1 - (y2 - padT) / innerH) * (vp.yMaxFrac - vp.yMinFrac);
+      const xSpan = vp.xMaxFrac - vp.xMinFrac;
+      const ySpan = vp.yMaxFrac - vp.yMinFrac;
+      if (ds.mode === 'pan') {
+        // Convert pixel delta to viewport-fraction shift. A positive dx
+        // (drag right) means the user wants to see what was to the
+        // LEFT, so xMin/xMax shift LEFT.
+        const dxFrac = (dx / innerW) * xSpan;
+        const dyFrac = (dy / innerH) * ySpan;
+        let xMin = vp.xMinFrac - dxFrac;
+        let xMax = vp.xMaxFrac - dxFrac;
+        // Y is inverted: drag down (positive dy) means user wants to see
+        // what was above (higher Y values in data space).
+        let yMin = vp.yMinFrac + dyFrac;
+        let yMax = vp.yMaxFrac + dyFrac;
+        // Clamp into [0, 1] preserving span.
+        if (xMin < 0) { xMax -= xMin; xMin = 0; }
+        if (xMax > 1) { xMin -= (xMax - 1); xMax = 1; xMin = Math.max(0, xMin); }
+        if (yMin < 0) { yMax -= yMin; yMin = 0; }
+        if (yMax > 1) { yMin -= (yMax - 1); yMax = 1; yMin = Math.max(0, yMin); }
+        vp.xMinFrac = xMin; vp.xMaxFrac = xMax;
+        vp.yMinFrac = yMin; vp.yMaxFrac = yMax;
+        render();
+        return;
+      }
+      // ZOOM-TO-BOX path
+      const x1 = Math.min(ds.startX, ds.curX);
+      const y1 = Math.min(ds.startY, ds.curY);
+      const x2 = Math.max(ds.startX, ds.curX);
+      const y2 = Math.max(ds.startY, ds.curY);
+      if (x2 - x1 < 8 || y2 - y1 < 8) return; // box too small
+      const xMinNew = vp.xMinFrac + ((x1 - padL) / innerW) * xSpan;
+      const xMaxNew = vp.xMinFrac + ((x2 - padL) / innerW) * xSpan;
+      const yMaxNew = vp.yMinFrac + (1 - (y1 - padT) / innerH) * ySpan;
+      const yMinNew = vp.yMinFrac + (1 - (y2 - padT) / innerH) * ySpan;
       const MIN_SPAN = 0.03;
       vp.xMinFrac = Math.max(0, Math.min(1 - MIN_SPAN, xMinNew));
       vp.xMaxFrac = Math.max(vp.xMinFrac + MIN_SPAN, Math.min(1, xMaxNew));
@@ -11442,10 +11500,13 @@ body.is-row-dragging *        { user-select: none !important; }
       vp.yMaxFrac = Math.max(vp.yMinFrac + MIN_SPAN, Math.min(1, yMaxNew));
       render();
     });
-    // Cancel drag on leave/escape so a stuck drag-rect doesn't linger.
+    // Cancel drag on leave so a stuck drag-rect or pan-transform doesn't linger.
     SVG.addEventListener('mouseleave', () => {
       const r = document.getElementById('cloudZoomRect');
       if (r) r.remove();
+      const pan = document.getElementById('cloudPlotPan');
+      if (pan && dragState?.mode === 'pan') pan.removeAttribute('transform');
+      SVG.style.cursor = '';
       dragState = null;
     });
     $('#cloudCSV').addEventListener('click', () => {
