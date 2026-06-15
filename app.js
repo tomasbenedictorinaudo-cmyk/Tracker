@@ -2739,10 +2739,14 @@
     return Math.sign(v) * Math.log2(1 + Math.abs(v));
   }
 
-  // Days-to-due (negative = overdue). Null when no due date.
+  // Days-to-due — positive = future, negative = overdue, 0 = today.
+  // (dayDiff(due, today) computes due − today directly, which already
+  // matches this convention. The earlier * −1 inverted the sign and
+  // pushed overdue items to the right side of the cloud's X axis,
+  // where the labels say future. Removed.)
   function actionDaysToDue(a) {
     if (!a.due) return null;
-    return dayDiff(a.due, todayISO()) * -1;
+    return dayDiff(a.due, todayISO());
   }
 
   // Build per-render context: downstream-dep counts, risk-link set,
@@ -3153,14 +3157,17 @@
       // No-date lane label
       const ndX = padL + ((7.5 - -6.6) / (7.5 - -6.6)) * innerW;
       svgFrag += `<text class="cl-tick muted" x="${ndX - 6}" y="${padT + innerH + 16}" text-anchor="end">no date</text>`;
-      // Diagonal "on track" trend line — bottom-left (-90d, 0%) to
-      // top-right (+90d, 100%). Items above are ahead; below are behind.
-      const x1 = padL + ((symLog(-90) - -6.6) / (7.5 - -6.6)) * innerW;
+      // Diagonal "on track" trend line — bottom-right (+90d, 0%) to
+      // top-left (-90d, 100%). Trajectory of a healthy action: as the
+      // due date approaches (X decreases from +90 to 0), % complete
+      // should rise to 100% by the due date. Items above the line are
+      // ahead of schedule; items below are behind.
+      const x1 = padL + ((symLog(90)  - -6.6) / (7.5 - -6.6)) * innerW;
       const y1 = padT + innerH;
-      const x2 = padL + ((symLog(90)  - -6.6) / (7.5 - -6.6)) * innerW;
+      const x2 = padL + ((symLog(-90) - -6.6) / (7.5 - -6.6)) * innerW;
       const y2 = padT;
       svgFrag += `<line class="cl-trend" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"></line>`;
-      svgFrag += `<text class="cl-trend-lbl" x="${x2 - 8}" y="${y2 + 18}" text-anchor="end">on-track diagonal →</text>`;
+      svgFrag += `<text class="cl-trend-lbl" x="${(x2 + 8).toFixed(1)}" y="${y2 + 18}" text-anchor="start">← on-track diagonal</text>`;
       // Quadrant labels (top-right safe, bottom-left firefight)
       svgFrag += `<text class="cl-zone fire" x="${padL + 12}" y="${padT + innerH - 12}">🔥 firefight zone</text>`;
       svgFrag += `<text class="cl-zone safe" x="${padL + innerW - 12}" y="${padT + 16}" text-anchor="end">safe zone ✓</text>`;
