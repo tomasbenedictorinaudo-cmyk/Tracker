@@ -1193,16 +1193,43 @@
     const doneDays = (today - start) / dayMs;
     return total * (doneDays / fullDays);
   }
-  // Status-derived progress %, with actuals refinement for "doing".
+  // Progress %, with a four-step fallback chain:
+  //   1. Status overrides: done → 100, cancelled → 0.
+  //   2. Manual override (a.percentComplete is a number 0..100) wins
+  //      over everything below.
+  //   3. Auto from time elapsed in [originatorDate, due] — clamped to
+  //      [0, 100]. This is the new "if nothing is provided" default
+  //      and gives a meaningful figure for in-flight actions before
+  //      anyone enters actuals.
+  //   4. Actuals refinement: if planned + logged hours exist, use
+  //      ah / ph (capped at 100).
+  //   5. Last-ditch fallback: status-derived 50 for doing/blocked,
+  //      0 for todo.
   function percentComplete(a) {
     if (!a) return 0;
-    if (a.status === 'done') return 100;
-    if (a.status === 'cancelled' || a.status === 'todo') return 0;
-    // doing / blocked → 50% baseline, refined by actuals if we have
-    // both planned hours and logged hours.
+    if (a.status === 'done')      return 100;
+    if (a.status === 'cancelled') return 0;
+    if (typeof a.percentComplete === 'number') {
+      return Math.max(0, Math.min(100, Math.round(a.percentComplete)));
+    }
+    // Auto from time elapsed — only when we have an origin AND a due.
+    const origin = a.originatorDate || a.startDate || a.createdAt;
+    if (origin && a.due) {
+      const oMs = parseDate(origin)?.getTime();
+      const dMs = parseDate(a.due)?.getTime();
+      const tMs = parseDate(todayISO())?.getTime();
+      if (oMs && dMs && tMs && dMs > oMs) {
+        if (tMs <= oMs) return 0;
+        if (tMs >= dMs) return 100;
+        return Math.round(((tMs - oMs) / (dMs - oMs)) * 100);
+      }
+    }
+    // Actuals refinement if hours are tracked.
     const ph = plannedHoursTotal(a);
     const ah = totalLoggedHours(a);
     if (ph > 0 && ah > 0) return Math.max(0, Math.min(100, Math.round((ah / ph) * 100)));
+    // Last-ditch status default.
+    if (a.status === 'todo') return 0;
     return 50;
   }
   // Hourly rate of an action's owner, defaulting to 100 when unknown so
@@ -1615,13 +1642,10 @@
       const items = (proj.actions || [])
         .filter((a) => a.status === s.id && actionMatchesFilters(a))
         .sort((a, b) => (a.priority || 0) - (b.priority || 0));
-      // Hide the "cancelled" column when empty — it's a terminal status
-      // explicitly set by the user (no one drops into it as a working
-      // step), so an empty Cancelled column just wastes a whole column.
-      // Other statuses stay visible even when empty so they remain valid
-      // drop targets and the board's layout doesn't reflow on every
-      // drag-and-drop. Re-appears as soon as a card is cancelled.
-      if (s.id === 'cancelled' && !items.length) return;
+      // Every status column always renders, even when empty — they
+      // need to remain valid drop targets for drag-and-drop. (An
+      // earlier version hid the Cancelled column when empty but that
+      // made it impossible to cancel a card via drag.)
       const col = document.createElement('div');
       col.className = 'column';
       col.dataset.status = s.id;
@@ -3132,7 +3156,13 @@
     // Preset B: X = owner slot (sorted by total commitment load desc).
     //           Y = composite importance (sym-log so the spread is
     //           readable when one action dwarfs the rest).
-    const owners = state.people.slice();
+    // Only include owners who currently have at least one visible
+    // action in the cloud's allActions set. Showing every person in the
+    // roster wastes lane real estate on owners with nothing to display
+    // — especially when filters narrow the set or in __all__ mode where
+    // not every person has work in every project.
+    const ownersWithActions = new Set(allActions.map(({ a }) => a.owner).filter(Boolean));
+    const owners = state.people.filter((p) => ownersWithActions.has(p.id));
     owners.sort((a, b) => {
       const la = (a._load = scopeProjects.reduce((s, p) =>
         s + (p.actions || []).filter((x) => x.owner === a.id && !x.deletedAt && x.status !== 'done' && x.status !== 'cancelled').length, 0));
@@ -11290,9 +11320,19 @@
         </div>
         <div class="field"><label>Due</label><input id="dDue" type="date" value="${a.due || ''}" /></div>
       </div>
-      <div class="field">
-        <label>Commitment <span class="muted" id="dCmtVal">${typeof a.commitment === 'number' ? a.commitment : 100}%</span></label>
-        <input id="dCmt" type="range" min="5" max="100" step="5" value="${typeof a.commitment === 'number' ? a.commitment : 100}" />
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div class="field">
+          <label>Commitment <span class="muted" id="dCmtVal">${typeof a.commitment === 'number' ? a.commitment : 100}%</span></label>
+          <input id="dCmt" type="range" min="5" max="100" step="5" value="${typeof a.commitment === 'number' ? a.commitment : 100}" />
+        </div>
+        <div class="field">
+          <label>% complete <span class="muted" id="dPctMode">${typeof a.percentComplete === 'number' ? 'manual' : 'auto from due date'}</span></label>
+          <div style="display:flex; gap:6px; align-items:center; min-width: 0;">
+            <input id="dPct" type="range" min="0" max="100" step="1" value="${percentComplete(a)}" style="flex:1; min-width: 0;" />
+            <input id="dPctNum" type="number" min="0" max="100" step="1" value="${percentComplete(a)}" style="width: 56px;" />
+            <button type="button" class="ghost" id="dPctAuto" title="Reset to auto — % complete is computed from elapsed time between Originated and Due dates" style="padding: 3px 7px; font-size: 11px;">auto</button>
+          </div>
+        </div>
       </div>
       <div class="field"><label>Component</label>
         <select id="dComponent"><option value="">—</option>${(proj.components || []).map((pt) => `<option value="${pt.id}" ${pt.id === a.component ? 'selected' : ''}>${escapeHTML(pt.name)}</option>`).join('')}</select>
@@ -11357,6 +11397,26 @@
       </div>`;
     $('#drawer').hidden = false;
     $('#dCmt').addEventListener('input', (e) => { $('#dCmtVal').textContent = e.target.value + '%'; });
+    // % complete — manual override. Slider and number input mirror
+    // each other; pressing "auto" clears the override so the value
+    // returns to the time-based default.
+    const pctRange = $('#dPct'), pctNum = $('#dPctNum'), pctMode = $('#dPctMode');
+    const setPctManual = (v) => {
+      const n = Math.max(0, Math.min(100, Math.round(+v || 0)));
+      pctRange.value = n;
+      pctNum.value = n;
+      pctMode.textContent = 'manual';
+    };
+    pctRange?.addEventListener('input', (e) => setPctManual(e.target.value));
+    pctNum?.addEventListener('input',   (e) => setPctManual(e.target.value));
+    $('#dPctAuto')?.addEventListener('click', () => {
+      // Clear manual override; show what auto would give.
+      a.percentComplete = null;
+      const auto = percentComplete(a);
+      pctRange.value = auto;
+      pctNum.value = auto;
+      pctMode.textContent = 'auto from due date';
+    });
     // Recurrence — show / hide the interval input based on the selected unit.
     $('#dRecurUnit')?.addEventListener('change', (e) => {
       const on = !!e.target.value;
@@ -11745,6 +11805,17 @@
         a.history.push({ at: todayISO(), what: `Priority: ${priorityLevel(oldPriorityLevel).label} → ${priorityLevel(a.priorityLevel).label}` });
       }
       a.commitment = clamp(parseInt($('#dCmt').value, 10) || 100, 5, 100);
+      // % complete — save only if the mode is currently "manual"
+      // (the user touched the slider/number). Pressing "auto" clears
+      // the override at the moment of click; that null gets preserved
+      // here too, which is what we want.
+      const pctModeNow = $('#dPctMode')?.textContent?.trim();
+      if (pctModeNow === 'manual') {
+        const pctVal = clamp(parseInt($('#dPct').value, 10) || 0, 0, 100);
+        a.percentComplete = pctVal;
+      } else {
+        a.percentComplete = null;
+      }
       if (oldCmt !== a.commitment) a.history.push({ at: todayISO(), what: `Commitment: ${oldCmt}% → ${a.commitment}%` });
       // Recurrence + snooze
       const recurUnit = $('#dRecurUnit')?.value || '';
@@ -13436,6 +13507,9 @@
         // existing rank-by-priority sort behaviour stays unchanged. Retrocompat.
         a.priorityLevel = (a.priorityLevel && PRIORITY_LEVELS.some((p) => p.id === a.priorityLevel)) ? a.priorityLevel : 'med';
         a.commitment = (typeof a.commitment === 'number') ? a.commitment : 100;
+        // Manual % complete override. null = use the time-based / actuals
+        // auto-calc in percentComplete(). A number 0..100 wins over both.
+        if (typeof a.percentComplete !== 'number' && a.percentComplete !== null) a.percentComplete = null;
         a.owner = a.owner || null;
         a.originator = a.originator || null;
         a.due = a.due || null;

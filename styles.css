@@ -6299,12 +6299,19 @@ kbd {
   border-bottom: 1px solid var(--line);
 }
 .drawer-title { font-weight: 600; flex: 1; font-size: 14px; }
-.drawer-body { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
-.field { display: grid; gap: 4px; }
+.drawer-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+/* Multi-column field rows inside the drawer use inline grid templates
+   like `grid-template-columns: 1fr 1fr 1fr` — give every grid cell
+   `min-width: 0` so date / select inputs (which have a non-zero
+   min-content width by default) shrink to fit without overflowing
+   the drawer width. */
+.drawer-body > [style*="grid-template-columns"] > * { min-width: 0; }
+.field { display: grid; gap: 4px; min-width: 0; }
 .field label { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .1em; }
 .field input, .field select, .field textarea {
   background: var(--bg-2); border: 1px solid var(--line);
   border-radius: var(--radius-sm); padding: 7px 10px; outline: none;
+  width: 100%; min-width: 0; box-sizing: border-box;
 }
 .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent-2); }
 .field input.field-err, .field select.field-err, .field textarea.field-err {
