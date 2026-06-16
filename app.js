@@ -1019,6 +1019,410 @@
       budgets['CC-ENG-ORBIT']  = eng;
       budgets['CC-TEST-ORBIT'] = test;
     })();
+
+    /* ─────────────────── augmentDemo() ──────────────────────────────
+     * Fills every demo-data gap identified in the seed audit so the
+     * shipping fixture exercises every feature: tags, open points,
+     * links + folders, project notes, manual % complete, action tags,
+     * comments, descriptions, recurrence, snooze, cost centres on the
+     * other two projects, change requests on the other two projects,
+     * meetings on Helios + Falcon, decision comments, saved views,
+     * personal todos.
+     * Mutates proj1/proj2/proj3 + budgets in-place; returns the
+     * top-level extras (notes, savedViews, todos) for the return
+     * object to spread. */
+    const extras = (function augmentDemo() {
+      // ── Project tags ────────────────────────────────────────────
+      proj1.tags = [
+        { id: 'tg_o_cust',   name: 'Customer rqmt',  rgb: '99,160,255' },
+        { id: 'tg_o_must',   name: 'Must-have',      rgb: '248,113,121' },
+        { id: 'tg_o_herit',  name: 'Heritage',       rgb: '101,194,73' },
+        { id: 'tg_o_ext',    name: 'External',       rgb: '194,99,168' },
+        { id: 'tg_o_block',  name: 'Blocker risk',   rgb: '245,193,80' },
+      ];
+      proj2.tags = [
+        { id: 'tg_h_beta',   name: 'Beta-blocker',   rgb: '248,113,121' },
+        { id: 'tg_h_perf',   name: 'Performance',    rgb: '245,193,80' },
+        { id: 'tg_h_ux',     name: 'UX',             rgb: '79,194,176' },
+        { id: 'tg_h_security', name: 'Security',     rgb: '194,99,168' },
+      ];
+      proj3.tags = [
+        { id: 'tg_f_flight', name: 'Flight-critical', rgb: '248,113,121' },
+        { id: 'tg_f_ground', name: 'Ground systems',  rgb: '99,160,255' },
+        { id: 'tg_f_rnd',    name: 'Research',        rgb: '168,140,255' },
+      ];
+
+      // ── Cost centres + budgets on Helios + Falcon ───────────────
+      // Helios: one CC for development, weekly budget.
+      proj2.costCenters = ['CC-DEV-HELIOS'];
+      // Map the relevant components to that CC so the budgets panel
+      // groups them correctly.
+      proj2.components.forEach((c) => { c.costCenter = 'CC-DEV-HELIOS'; });
+      const helEng = {};
+      // Same week schedule as Orbit-7
+      (function () {
+        const today = new Date(); today.setHours(0,0,0,0);
+        let monday = new Date(today);
+        while (monday.getDay() !== 1) monday = new Date(monday.getTime() - 86400000);
+        monday = new Date(monday.getTime() - 26 * 7 * 86400000);
+        for (let w = 0; w < 104; w++) {
+          const iso = fmtISO(new Date(monday.getTime() + w * 7 * 86400000));
+          // Helios is in a beta push — 200 h/wk steady, dip post-GA.
+          const phase = w - 26;
+          helEng[iso] = phase < -8 ? 160 : phase < 16 ? 220 : 140;
+        }
+      })();
+      budgets['CC-DEV-HELIOS'] = helEng;
+
+      // Falcon: one CC for R&D
+      proj3.costCenters = ['CC-RND-FALCON'];
+      proj3.components.forEach((c) => { c.costCenter = 'CC-RND-FALCON'; });
+      const falEng = {};
+      (function () {
+        const today = new Date(); today.setHours(0,0,0,0);
+        let monday = new Date(today);
+        while (monday.getDay() !== 1) monday = new Date(monday.getTime() - 86400000);
+        monday = new Date(monday.getTime() - 26 * 7 * 86400000);
+        for (let w = 0; w < 104; w++) {
+          const iso = fmtISO(new Date(monday.getTime() + w * 7 * 86400000));
+          const phase = w - 26;
+          // Lean R&D budget that ramps for field tests around week 16
+          falEng[iso] = phase < 0 ? 80 : phase < 18 ? 140 : 100;
+        }
+      })();
+      budgets['CC-RND-FALCON'] = falEng;
+
+      // ── Change requests for Helios + Falcon ─────────────────────
+      proj2.changes = [
+        { id: 'cr_h_oss',  title: 'Open-source the decoder library',
+          rationale: 'Brings in community fixes + recruitment pipeline.',
+          description: 'Move the decoder package to GitHub under Apache-2 with CI + contrib guide.',
+          analysis: 'Marginal legal review needed; engineering time ~2 weeks.',
+          status: 'under_review', originator: 'p_sofia', originatedDate: d(-12),
+          decisionBy: null, decisionDate: null, priorityLevel: 'med',
+          component: 'cm_be',
+          impact: { schedule: 7, cost: 6000, scope: 'Adds OSS publishing workflow.',
+                    risk: 'Public API stability commitment.' },
+          tags: [], comments: [] },
+        { id: 'cr_h_sso',  title: 'Switch from password auth to org SSO',
+          rationale: 'IT security mandate for any internal tool.',
+          description: 'OIDC integration with central IdP, fallback for service accounts.',
+          analysis: 'Backend rework ~3 weeks; frontend ~1 week.',
+          status: 'approved', originator: 'p_sofia', originatedDate: d(-30),
+          decisionBy: 'p_sofia', decisionDate: d(-18), priorityLevel: 'high',
+          component: 'cm_be',
+          impact: { schedule: 21, cost: 22000, scope: 'Removes password forms.',
+                    risk: 'Loss of break-glass admin access.' },
+          tags: [], comments: [] },
+      ];
+      proj3.changes = [
+        { id: 'cr_f_motor', title: 'Upgrade to brushless motor T-Motor MN5008',
+          rationale: 'Original choice underpowered for the heavier P2 frame.',
+          description: 'Re-select, requalify thrust curves, update CAD + harness.',
+          analysis: '6 weeks of mech rework; affects P2 schedule.',
+          status: 'proposed', originator: 'p_jonas', originatedDate: d(-5),
+          decisionBy: null, decisionDate: null, priorityLevel: 'high',
+          component: 'cm_mech',
+          impact: { schedule: 42, cost: 18000, scope: 'No scope change.',
+                    risk: 'Heat dissipation requalification.' },
+          tags: [], comments: [] },
+      ];
+
+      // ── Meetings on Helios + Falcon ─────────────────────────────
+      proj2.meetings = [
+        { id: 'mtg_h_standup', kind: 'weekly', title: 'Helios standup',
+          dayOfWeek: 1, startDate: d(-180), time: '10:00' },
+        { id: 'mtg_h_betarev', kind: 'oneoff', title: 'Beta review with Ops',
+          date: d(18), time: '14:00' },
+      ];
+      proj3.meetings = [
+        { id: 'mtg_f_weekly', kind: 'weekly', title: 'Falcon weekly sync',
+          dayOfWeek: 3, startDate: d(-90), time: '11:00' },
+        { id: 'mtg_f_field',  kind: 'oneoff', title: 'Field test go/no-go review',
+          date: d(60), time: '09:00' },
+      ];
+
+      // ── Open Points ─────────────────────────────────────────────
+      // Use the same generateOpenPointIdentifier helper the runtime
+      // uses so identifiers match the project's initials convention.
+      // (op.identifier left blank — normalizeState will fill it.)
+      proj1.openPoints = [
+        { id: 'op_o_battcap', title: 'Battery capacity margin — should we add 10%?',
+          notes: '<p>Latest power budget shows EOL margin at 4.2%. Customer asked if we can push to 8% without exceeding mass.</p>',
+          component: 'pt_power', criticality: 'high', priorityLevel: 'critical',
+          createdAt: d(-18),
+          steps: [
+            { id: 'st_o1', text: 'Get vendor quote on 10% larger cells', done: true },
+            { id: 'st_o2', text: 'Run mass impact analysis', done: false },
+            { id: 'st_o3', text: 'Propose to PDR', done: false },
+          ], comments: [], tags: ['tg_o_cust'] },
+        { id: 'op_o_startrack', title: 'Star tracker calibration approach',
+          notes: 'Vendor recommends two-pass; we have heritage with single-pass. Test results inconclusive at TID.',
+          component: 'pt_aocs', criticality: 'med', priorityLevel: 'high',
+          createdAt: d(-32),
+          steps: [
+            { id: 'st_o4', text: 'Heritage data dive (Mosaic-3)', done: true },
+            { id: 'st_o5', text: 'Run sensitivity sims', done: true },
+            { id: 'st_o6', text: 'Decision memo', done: false },
+          ], comments: [], tags: ['tg_o_herit'] },
+        { id: 'op_o_solar',   title: 'Vendor lead time for solar arrays slipped',
+          notes: 'Original ATP was 14 weeks, now 22. Affects TVAC slot.',
+          component: 'pt_power', criticality: 'critical', priorityLevel: 'critical',
+          createdAt: d(-3), steps: [], comments: [], tags: ['tg_o_block', 'tg_o_ext'] },
+        { id: 'op_o_fsw',     title: 'FSW: CCSDS aux header support?',
+          notes: 'Customer requirement mid-cycle — feasible if we drop secondary header parse.',
+          component: 'pt_sw', criticality: 'med', priorityLevel: 'med',
+          createdAt: d(-44), steps: [], comments: [], tags: [] },
+        { id: 'op_o_thermal', title: 'Thermal louvre material — Al vs PEEK?',
+          notes: 'Mass cost vs thermal performance trade.',
+          component: 'pt_thermal', criticality: 'med', priorityLevel: 'med',
+          createdAt: d(-66),
+          steps: [
+            { id: 'st_o7', text: 'Get vendor samples', done: true },
+            { id: 'st_o8', text: 'Bench test under hot case', done: false },
+          ], comments: [], tags: [] },
+        { id: 'op_o_pmreview',title: 'Customer doc review cycle — 2 weeks ok?',
+          notes: '', component: null, criticality: 'low', priorityLevel: 'low',
+          createdAt: d(-9), steps: [], comments: [], tags: ['tg_o_cust'] },
+        { id: 'op_o_pdr_just',title: 'PDR pack: include heritage justification for FSW reuse?',
+          notes: 'Could help, but adds 12 pages.', component: 'pt_pm',
+          criticality: 'med', priorityLevel: 'med',
+          createdAt: d(-7), steps: [], comments: [], tags: ['tg_o_herit'] },
+        { id: 'op_o_tvac',    title: 'Test campaign owner — Marie or Diego?',
+          notes: 'Marie has TVAC experience but is overloaded. Diego is free but new.',
+          component: 'pt_test', criticality: 'med', priorityLevel: 'high',
+          createdAt: d(-15), steps: [], comments: [], tags: [] },
+        { id: 'op_o_radhrd',  title: 'Should we ESCC-qualify the secondary MCU?',
+          notes: 'Cost ~€38k. Used only in non-flight HK loop.',
+          component: 'pt_avionics', criticality: 'low', priorityLevel: 'low',
+          createdAt: d(-50), steps: [], comments: [], tags: [] },
+      ];
+
+      proj2.openPoints = [
+        { id: 'op_h_shard',  title: 'Shard telemetry by mission or by time?',
+          notes: 'Current write rate ~3k/sec; time-shard is simpler, mission-shard is faster for per-mission queries.',
+          component: 'cm_be', criticality: 'high', priorityLevel: 'high',
+          createdAt: d(-21),
+          steps: [
+            { id: 'st_h1', text: 'Benchmark both with realistic load', done: true },
+            { id: 'st_h2', text: 'Plan migration path', done: false },
+          ], comments: [], tags: ['tg_h_perf'] },
+        { id: 'op_h_ie11',   title: 'Browser support: drop IE11?',
+          notes: 'Ops insists. Engineering wants it gone.',
+          component: 'cm_fe', criticality: 'med', priorityLevel: 'med',
+          createdAt: d(-40), steps: [], comments: [], tags: ['tg_h_ux'] },
+        { id: 'op_h_qabeta', title: 'Internal beta with QA team — when?',
+          notes: 'Window between feature freeze and customer beta is tight.',
+          component: 'cm_ops', criticality: 'med', priorityLevel: 'high',
+          createdAt: d(-10), steps: [], comments: [], tags: ['tg_h_beta'] },
+        { id: 'op_h_obs',    title: 'Datadog vs Grafana for observability?',
+          notes: 'Datadog has the budget but Grafana ties into existing infra.',
+          component: 'cm_ops', criticality: 'low', priorityLevel: 'med',
+          createdAt: d(-58), steps: [], comments: [], tags: [] },
+        { id: 'op_h_audit',  title: 'Add audit log for procedure execution?',
+          notes: 'Security review wants this before GA.',
+          component: 'cm_be', criticality: 'high', priorityLevel: 'critical',
+          createdAt: d(-12),
+          steps: [
+            { id: 'st_h3', text: 'Define audit-event schema', done: false },
+          ], comments: [], tags: ['tg_h_security'] },
+      ];
+
+      proj3.openPoints = [
+        { id: 'op_f_prop',  title: 'Propeller diameter: 13" or 15"?',
+          notes: '13" gives better agility, 15" gives endurance.',
+          component: 'cm_mech', criticality: 'high', priorityLevel: 'high',
+          createdAt: d(-15),
+          steps: [
+            { id: 'st_f1', text: 'Bench thrust comparison',  done: true },
+            { id: 'st_f2', text: 'Flight test sim',          done: false },
+          ], comments: [], tags: ['tg_f_flight'] },
+        { id: 'op_f_field', title: 'Field tests: indoor or outdoor first?',
+          notes: 'Weather risk vs RF environment.',
+          component: 'cm_test', criticality: 'med', priorityLevel: 'med',
+          createdAt: d(-8), steps: [], comments: [], tags: ['tg_f_ground'] },
+        { id: 'op_f_fc',    title: 'Flight controller firmware — fork or upstream?',
+          notes: 'Upstream is more sustainable but blocked by 2 PRs.',
+          component: 'cm_flight', criticality: 'high', priorityLevel: 'high',
+          createdAt: d(-22), steps: [], comments: [], tags: ['tg_f_rnd'] },
+        { id: 'op_f_battery', title: 'P2 battery cell type?',
+          notes: '21700 NMC vs 18650 LFP — energy vs safety.',
+          component: 'cm_avion', criticality: 'critical', priorityLevel: 'critical',
+          createdAt: d(-4), steps: [], comments: [], tags: ['tg_f_flight'] },
+      ];
+
+      // ── Links + linkFolders ─────────────────────────────────────
+      proj1.linkFolders = [
+        { id: 'lf_o_cust', name: 'Customer docs' },
+        { id: 'lf_o_tech', name: 'Technical references' },
+      ];
+      proj1.links = [
+        { id: 'l_o_sow',  folderId: 'lf_o_cust', title: 'Customer SoW v3.2',
+          url: 'https://customer.example/orbit/sow-v32.pdf', description: 'Signed scope.' },
+        { id: 'l_o_icd',  folderId: 'lf_o_cust', title: 'Spacecraft–payload ICD',
+          url: 'https://customer.example/orbit/icd.pdf', description: 'Mechanical + electrical interfaces.' },
+        { id: 'l_o_data', folderId: 'lf_o_tech', title: 'Vendor data sheets folder',
+          url: 'https://drive.example/orbit/datasheets', description: 'All component datasheets.' },
+        { id: 'l_o_wiki', folderId: null,      title: 'Internal Confluence: Orbit-7',
+          url: 'https://wiki.example/orbit', description: 'Engineering wiki space.' },
+        { id: 'l_o_mosaic', folderId: 'lf_o_tech', title: 'Mosaic-3 heritage docs',
+          url: 'https://archive.example/mosaic-3', description: 'For FSW reuse + thermal heritage.' },
+      ];
+      proj2.linkFolders = [
+        { id: 'lf_h_arch', name: 'Architecture' },
+        { id: 'lf_h_apis', name: 'Vendor APIs' },
+      ];
+      proj2.links = [
+        { id: 'l_h_arch', folderId: 'lf_h_arch', title: 'C4 model',
+          url: 'https://wiki.example/helios/c4', description: 'Current system architecture.' },
+        { id: 'l_h_repo', folderId: null, title: 'GitHub repo',
+          url: 'https://github.com/example/helios', description: 'Source + CI.' },
+        { id: 'l_h_postgres', folderId: 'lf_h_apis', title: 'Postgres extensions catalogue',
+          url: 'https://postgres.example/extensions', description: '' },
+      ];
+      proj3.linkFolders = [
+        { id: 'lf_f_cat', name: 'Vendor catalogues' },
+      ];
+      proj3.links = [
+        { id: 'l_f_tmotor', folderId: 'lf_f_cat', title: 'T-Motor catalogue',
+          url: 'https://t-motor.example/catalogue', description: 'Motor specs.' },
+        { id: 'l_f_betaflight', folderId: null, title: 'Betaflight docs',
+          url: 'https://betaflight.example/docs', description: 'FC firmware reference.' },
+      ];
+
+      // ── Sprinkle missing fields on actions ──────────────────────
+      // Manual % complete on a handful so the new feature renders.
+      // Pick the first 'doing' action of each project + a couple
+      // others with realistic values.
+      const sprinklePct = (acts, idxValPairs) => {
+        idxValPairs.forEach(([i, v]) => {
+          const target = acts.filter((a) => a.status === 'doing')[i];
+          if (target) target.percentComplete = v;
+        });
+      };
+      sprinklePct(proj1.actions, [[0, 65], [3, 35], [7, 80]]);
+      sprinklePct(proj2.actions, [[0, 70], [2, 40]]);
+      sprinklePct(proj3.actions, [[0, 50]]);
+
+      // Description on a handful (long-form scope clarification).
+      const orbitDoing = proj1.actions.filter((a) => a.status === 'doing');
+      if (orbitDoing[0]) orbitDoing[0].description = 'Includes FDIR coverage for SEU + latch-up. Joint Marie/Kira ownership.';
+      if (orbitDoing[1]) orbitDoing[1].description = 'Cover mode transitions + sun-pointing safe state.';
+      const helDoing = proj2.actions.filter((a) => a.status === 'doing');
+      if (helDoing[0]) helDoing[0].description = 'Telemetry throughput target: 5k samples/s at p95 < 50ms.';
+
+      // Action tags — sprinkle a few across each project.
+      const tagOne = (acts, tagId, n) => {
+        acts.slice(0, n).forEach((a) => { a.tags = a.tags || []; if (!a.tags.includes(tagId)) a.tags.push(tagId); });
+      };
+      tagOne(proj1.actions.filter((a) => a.component === 'pt_aocs').slice(0, 3),  'tg_o_must', 3);
+      tagOne(proj1.actions.filter((a) => a.component === 'pt_pm').slice(0, 2),    'tg_o_cust', 2);
+      tagOne(proj1.actions.filter((a) => a.component === 'pt_sw').slice(0, 2),    'tg_o_herit', 2);
+      tagOne(proj2.actions.filter((a) => a.component === 'cm_be').slice(0, 2),    'tg_h_perf', 2);
+      tagOne(proj2.actions.filter((a) => a.component === 'cm_ops').slice(0, 2),   'tg_h_beta', 2);
+      tagOne(proj3.actions.filter((a) => a.component === 'cm_flight').slice(0, 2),'tg_f_flight', 2);
+
+      // Comments on a handful of in-progress actions.
+      const addComment = (acts, idx, by, at, text) => {
+        const a = acts.filter((x) => x.status === 'doing')[idx];
+        if (a) { a.comments = a.comments || []; a.comments.push({ id: uid('cm'), by, at, text }); }
+      };
+      addComment(proj1.actions, 0, 'p_kira',  d(-3),  'Heritage code is closer to req than first thought — saves ~1 week.');
+      addComment(proj1.actions, 0, 'p_sofia', d(-2),  'Good. Update the WBS accordingly.');
+      addComment(proj1.actions, 1, 'p_arjun', d(-10), 'Vendor responded with the lead-time update — see email thread.');
+      addComment(proj2.actions, 0, 'p_kira',  d(-5),  'Backend benchmark numbers in the wiki page now.');
+
+      // Recurring action — weekly PM status report on Orbit-7.
+      proj1.actions.push({
+        id: 'a_o_recur', identifier: null, title: 'Weekly PM status report',
+        owner: 'p_sofia', originator: 'p_sofia', status: 'doing', priority: 999,
+        priorityLevel: 'med', commitment: 25,
+        due: d(7), startDate: d(0), originatorDate: d(-7),
+        component: 'pt_pm', deliverable: null, milestone: null,
+        description: 'Compose + send the weekly Friday update to the customer.',
+        notes: '', createdAt: d(-7), updatedAt: d(-1),
+        history: [], dependsOn: [], tags: ['tg_o_cust'], comments: [],
+        loggedHours: [], baseline: null, percentComplete: null,
+        recurrence: { unit: 'week', interval: 1 }, snoozedUntil: null,
+      });
+
+      // Snoozed action — re-emerges in 10 days.
+      proj1.actions.push({
+        id: 'a_o_snooze', identifier: null, title: 'Update vendor contact spreadsheet',
+        owner: 'p_sofia', originator: 'p_sofia', status: 'todo', priority: 1000,
+        priorityLevel: 'low', commitment: 25,
+        due: d(30), startDate: d(0), originatorDate: d(-14),
+        component: 'pt_pm', deliverable: null, milestone: null,
+        description: '', notes: 'Low priority — snoozed until after PDR.',
+        createdAt: d(-14), updatedAt: d(-2),
+        history: [], dependsOn: [], tags: [], comments: [],
+        loggedHours: [], baseline: null, percentComplete: null,
+        recurrence: null, snoozedUntil: d(10),
+      });
+
+      // ── Project-level rich notes ────────────────────────────────
+      const notes = {};
+      notes[proj1.id] = `
+        <h2>Orbit-7 PDR push</h2>
+        <ul>
+          <li>PDR data pack final draft due ${d(20)}.</li>
+          <li>Customer feedback window: 2 weeks from delivery.</li>
+          <li>Key risks: <b>r_supply</b> (reaction wheel), <b>r_sw</b> (FSW timeline).</li>
+        </ul>
+        <h3>Decisions to make this month</h3>
+        <ol>
+          <li>Star tracker calibration (single vs two-pass)</li>
+          <li>Battery cell capacity bump</li>
+          <li>Thermal louvre material</li>
+        </ol>
+        <p><i>Last updated by Sofia, ${d(-1)}.</i></p>
+      `;
+      notes[proj2.id] = `
+        <h2>Helios-2 beta plan</h2>
+        <p>Internal beta with Ops on ${d(18)}, customer beta two weeks later.</p>
+        <ul>
+          <li>Security review approval needed before customer beta.</li>
+          <li>Audit logging on backlog — must land before GA.</li>
+        </ul>
+      `;
+      notes[proj3.id] = `
+        <h2>Falcon P2 build</h2>
+        <p>Open vendor questions: motor (T-Motor MN5008?), prop (13" vs 15"), battery cells.</p>
+        <p>Field tests targeted for ${d(60)} — pre-flight checklist needed.</p>
+      `;
+
+      // ── Decision comments on Orbit-7's PDR slip decision ────────
+      const pdrDecision = proj1.decisions.find((x) => x.id === 'dec_pdr');
+      if (pdrDecision) {
+        pdrDecision.comments = [
+          { id: uid('cm'), by: 'p_sofia', at: d(-12), text: 'Customer email confirming the 2-week slip is OK.' },
+          { id: uid('cm'), by: 'p_arjun', at: d(-11), text: 'Updated the risk register accordingly.' },
+        ];
+      }
+
+      // ── Saved views ─────────────────────────────────────────────
+      const savedViews = [
+        { id: 'sv_overdue', name: 'My overdue actions',
+          filters: { search: '', owner: 'p_sofia', component: '', status: '', due: 'late', view: 'register' } },
+        { id: 'sv_this_week', name: 'Due this week',
+          filters: { search: '', owner: '', component: '', status: '', due: 'week', view: 'register' } },
+        { id: 'sv_blocked',   name: 'All blocked',
+          filters: { search: '', owner: '', component: '', status: 'blocked', due: '', view: 'board' } },
+        { id: 'sv_aocs',      name: 'AOCS focus (Orbit)',
+          filters: { search: '', owner: '', component: 'pt_aocs', status: '', due: '', view: 'register' } },
+      ];
+
+      // ── Personal todos ──────────────────────────────────────────
+      const todos = [
+        { id: 'td1', text: 'Review PDR slides before customer meeting', done: false },
+        { id: 'td2', text: 'Send Q3 budget summary to finance',         done: true  },
+        { id: 'td3', text: 'Prep board update on Falcon P2 progress',   done: false },
+        { id: 'td4', text: 'Schedule Marie ↔ Diego TVAC handover chat', done: false },
+      ];
+
+      return { notes, savedViews, todos };
+    })();
+
     return {
       people,
       projects: [proj1, proj2, proj3],
@@ -1026,6 +1430,9 @@
       currentView: 'board',
       settings: { theme: 'dark', holidayCountries: [] },
       budgets,
+      notes:      extras.notes,
+      savedViews: extras.savedViews,
+      todos:      extras.todos,
     };
   }
 
