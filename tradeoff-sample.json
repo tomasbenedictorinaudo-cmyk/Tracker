@@ -1,0 +1,126 @@
+{
+  "title": "Family SUV purchase",
+  "notes": "Comparing five compact SUVs for a family of four, each rated 1-5 per criterion. Budget-sensitive but safety and reliability matter most.",
+  "weightMode": "direct",
+  "norm": "scale",
+  "criteria": [
+    {
+      "id": "c_price",
+      "name": "Price",
+      "dir": "cost",
+      "weight": 25
+    },
+    {
+      "id": "c_safety",
+      "name": "Safety",
+      "dir": "benefit",
+      "weight": 20
+    },
+    {
+      "id": "c_mpg",
+      "name": "Fuel economy",
+      "dir": "benefit",
+      "weight": 15
+    },
+    {
+      "id": "c_cargo",
+      "name": "Cargo space",
+      "dir": "benefit",
+      "weight": 12
+    },
+    {
+      "id": "c_rel",
+      "name": "Reliability",
+      "dir": "benefit",
+      "weight": 18
+    },
+    {
+      "id": "c_comf",
+      "name": "Comfort",
+      "dir": "benefit",
+      "weight": 10
+    }
+  ],
+  "alternatives": [
+    {
+      "id": "a_rav4",
+      "name": "Toyota RAV4"
+    },
+    {
+      "id": "a_crv",
+      "name": "Honda CR-V"
+    },
+    {
+      "id": "a_cx5",
+      "name": "Mazda CX-5"
+    },
+    {
+      "id": "a_forester",
+      "name": "Subaru Forester"
+    },
+    {
+      "id": "a_sportage",
+      "name": "Kia Sportage"
+    }
+  ],
+  "scores": {
+    "a_rav4": {
+      "c_price": 4,
+      "c_safety": 4,
+      "c_mpg": 5,
+      "c_cargo": 4,
+      "c_rel": 5,
+      "c_comf": 3
+    },
+    "a_crv": {
+      "c_price": 5,
+      "c_safety": 4,
+      "c_mpg": 5,
+      "c_cargo": 5,
+      "c_rel": 4,
+      "c_comf": 4
+    },
+    "a_cx5": {
+      "c_price": 3,
+      "c_safety": 4,
+      "c_mpg": 2,
+      "c_cargo": 2,
+      "c_rel": 4,
+      "c_comf": 5
+    },
+    "a_forester": {
+      "c_price": 2,
+      "c_safety": 5,
+      "c_mpg": 4,
+      "c_cargo": 2,
+      "c_rel": 4,
+      "c_comf": 4
+    },
+    "a_sportage": {
+      "c_price": 1,
+      "c_safety": 3,
+      "c_mpg": 1,
+      "c_cargo": 5,
+      "c_rel": 3,
+      "c_comf": 4
+    }
+  },
+  "pairwise": {
+    "c_price|c_safety": 1.25,
+    "c_price|c_mpg": 1.6667,
+    "c_price|c_cargo": 2.0833,
+    "c_price|c_rel": 1.3889,
+    "c_price|c_comf": 2.5,
+    "c_safety|c_mpg": 1.3333,
+    "c_safety|c_cargo": 1.6667,
+    "c_safety|c_rel": 1.1111,
+    "c_safety|c_comf": 2.0,
+    "c_mpg|c_cargo": 1.25,
+    "c_mpg|c_rel": 0.8333,
+    "c_mpg|c_comf": 1.5,
+    "c_cargo|c_rel": 0.6667,
+    "c_cargo|c_comf": 1.2,
+    "c_rel|c_comf": 1.8
+  },
+  "agg": "additive"
+}
