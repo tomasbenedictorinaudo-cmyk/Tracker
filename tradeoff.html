@@ -122,6 +122,11 @@ tbody tr:hover td{background:var(--panel-2)}
 .gate-ico{font-size:13px;opacity:.7}
 .gate select{padding:7px 8px;border:1px solid var(--line-strong);border-radius:8px;background:var(--panel-2);font-size:12.5px}
 .gate input[type=number]{padding:6px 6px;text-align:center}
+.crit-adv{flex-basis:100%;display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-top:9px;padding-top:9px;border-top:1px dashed var(--line);font-size:12.5px}
+.crit-adv select{padding:6px 8px;border:1px solid var(--line-strong);border-radius:8px;background:var(--panel);font-size:12.5px}
+.crit-adv input[type=number]{padding:6px 7px}
+.adv-lbl{color:var(--muted);font-weight:600;font-size:11.5px}
+.adv-sep{flex:1;min-width:6px}
 
 /* results */
 .podium{display:flex;flex-direction:column;gap:10px}
@@ -134,6 +139,9 @@ tbody tr:hover td{background:var(--panel-2)}
 .dq-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px dashed var(--line-strong);border-radius:10px;margin-bottom:7px;flex-wrap:wrap}
 .dq-x{color:var(--bad);font-weight:800}
 .dq-reason{font-size:12px;color:var(--bad);font-weight:600;margin-left:auto}
+.stake-row{display:flex;align-items:center;gap:9px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;margin-bottom:7px}
+.stake-pick{font-weight:650;color:var(--accent);background:var(--accent-soft);padding:2px 9px;border-radius:999px;font-size:12.5px}
+.stake-row .iconbtn{margin-left:auto}
 .winner-card{border:1.5px solid var(--accent);background:linear-gradient(135deg,var(--accent-soft),transparent);border-radius:14px;padding:16px 18px;margin-bottom:18px}
 .winner-card .t{font-size:12px;font-weight:700;color:var(--accent);letter-spacing:.06em;text-transform:uppercase}
 .winner-card .n{font-size:24px;font-weight:750;margin-top:3px}
@@ -333,6 +341,14 @@ svg.chart text{fill:var(--muted);font-size:11px}
       <div class="sub">Contribution of each criterion to every alternative's total.</div>
       <div class="scroll-x"><div id="breakdownTbl"></div></div>
     </div>
+    <div class="panel">
+      <div class="between">
+        <div><h2 style="font-size:16px">Group decision <span class="info" data-tip="Capture several stakeholders' weights and grades, then see the combined ranking and where people disagree. Each capture is a snapshot of the current weights + grades.">i</span></h2>
+          <div class="sub" style="margin-bottom:0">Compare and combine several people's judgments.</div></div>
+        <button class="btn ghost sm" id="btnCapture"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>Add current as stakeholder</button>
+      </div>
+      <div id="panelBox" style="margin-top:14px"></div>
+    </div>
   </section>
 
   <!-- 5 SENSITIVITY -->
@@ -448,11 +464,11 @@ function seed(){
   const sc={};
   const vals=[[4,3,4,3],[2,5,3,4],[5,4,5,5]]; // 1–5 ratings
   a.forEach((al,i)=>{sc[al.id]={};c.forEach((cr,j)=>sc[al.id][cr.id]=vals[i][j])});
-  return {title:'Sample decision',notes:'',criteria:c,alternatives:a,scores:sc,weightMode:'direct',pairwise:{},norm:'scale',agg:'additive'};
+  return {title:'Sample decision',notes:'',criteria:c,alternatives:a,scores:sc,weightMode:'direct',pairwise:{},norm:'scale',agg:'additive',panel:[]};
 }
 function migrate(s){ // fill defaults for older / imported projects
-  if(!s)return s; s.norm=s.norm||'scale'; s.agg=s.agg||'additive'; s.weightMode=s.weightMode||'direct';
-  (s.criteria||[]).forEach(c=>{if(c.gate===undefined)c.gate='off';}); return s;
+  if(!s)return s; s.norm=s.norm||'scale'; s.agg=s.agg||'additive'; s.weightMode=s.weightMode||'direct'; if(!s.panel)s.panel=[];
+  (s.criteria||[]).forEach(c=>{if(c.gate===undefined)c.gate='off'; if(!c.scaleType)c.scaleType='rating'; if(!c.vfn)c.vfn='linear';}); return s;
 }
 function save(){localStorage.setItem('tradeoff_v1',JSON.stringify(S))}
 function load(){try{const r=localStorage.getItem('tradeoff_v1');return r?JSON.parse(r):null}catch(e){return null}}
@@ -491,36 +507,42 @@ function ahpWeights(){
   const cr=n>2&&RI[n]?ci/RI[n]:0;
   return {w,cr,lambda};
 }
-// directional value in [GMIN,GMAX], higher = better (used by weighted-product mode)
-const dval=(g,dir)=>dir==='cost'?(GMIN+GMAX-g):g;
-// normalize one criterion's raw column to 0..1, direction-aware
-function normCol(raw,dir,mode){
-  mode=mode||S.norm||'scale';
-  if(mode==='sum'){
-    if(dir==='cost'){const inv=raw.map(z=>z?1/z:0);const si=inv.reduce((s,z)=>s+z,0)||1;return raw.map(z=>(z?1/z:0)/si);}
-    const sum=raw.reduce((s,v)=>s+Math.abs(v),0);return raw.map(v=>sum?v/sum:0);
-  }
+// per-criterion scale bounds (quantitative criteria declare their own min/max; ratings are 1–5)
+const cMin=c=>c.scaleType==='number'?(+c.smin):GMIN;
+const cMax=c=>c.scaleType==='number'?(+c.smax):GMAX;
+const cStep=c=>c.scaleType==='number'?(+c.sstep||'any'):1;
+const clampG=(c,v)=>{const lo=cMin(c),hi=cMax(c);return Math.max(Math.min(lo,hi),Math.min(Math.max(lo,hi),v));};
+// value functions: warp 0..1 goodness (diminishing / increasing / s-shaped returns)
+const VFN={linear:b=>b, concave:b=>Math.sqrt(Math.max(0,b)), convex:b=>b*b, s:b=>b*b*(3-2*b)};
+const vcurve=c=>VFN[c.vfn]||VFN.linear;
+function sparkVFN(name){const f=VFN[name]||VFN.linear;const W=44,H=18,P=2;let d='';for(let k=0;k<=12;k++){const b=k/12,x=P+b*(W-2*P),y=H-P-f(b)*(H-2*P);d+=(k?'L':'M')+x.toFixed(1)+' '+y.toFixed(1)+' ';}return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="vertical-align:middle;opacity:.85"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.6"/></svg>`;}
+// raw 0..1 goodness for a criterion column (direction-aware, before the value curve)
+function goodCol(c,raw){
+  if(c.scaleType==='number'){const lo=+c.smin,hi=+c.smax;return raw.map(v=>{let b=(hi===lo)?.5:(v-lo)/(hi-lo);b=Math.max(0,Math.min(1,b));return c.dir==='cost'?1-b:b;});}
+  const mode=S.norm||'scale';
+  if(mode==='sum'){if(c.dir==='cost'){const inv=raw.map(z=>z?1/z:0);const si=inv.reduce((s,z)=>s+z,0)||1;return raw.map(z=>(z?1/z:0)/si);}const sum=raw.reduce((s,v)=>s+Math.abs(v),0);return raw.map(v=>sum?v/sum:0);}
   const mx=Math.max(...raw),mn=Math.min(...raw);
   return raw.map(v=>{let nv;
-    if(mode==='minmax'){nv=mx===mn?.5:(v-mn)/(mx-mn);if(dir==='cost')nv=1-nv;}
-    else if(mode==='max'){if(dir==='cost')nv=v===0?1:(mn>0?mn/v:0);else nv=mx?v/mx:0;}
-    else if(mode==='none'){nv=v;if(dir==='cost')nv=-v;}
-    else{nv=(v-GMIN)/(GMAX-GMIN);if(dir==='cost')nv=1-nv;nv=Math.max(0,Math.min(1,nv));} // 'scale' (default)
+    if(mode==='minmax'){nv=mx===mn?.5:(v-mn)/(mx-mn);if(c.dir==='cost')nv=1-nv;}
+    else if(mode==='max'){if(c.dir==='cost')nv=v===0?1:(mn>0?mn/v:0);else nv=mx?v/mx:0;}
+    else if(mode==='none'){nv=v;if(c.dir==='cost')nv=-v;}
+    else{nv=(v-GMIN)/(GMAX-GMIN);if(c.dir==='cost')nv=1-nv;nv=Math.max(0,Math.min(1,nv));}
     return nv;});
 }
-// normalized 0..1 matrix; pass an alternate scores object for what-if recomputation
+const curveApplies=c=>c.scaleType==='number'||(S.norm!=='none'&&S.norm!=='sum');
+// value matrix: 0..1 value per (alt,crit) after direction, normalization and the value curve
 function normMatrix(scores){
   scores=scores||S.scores;const out={};S.alternatives.forEach(a=>out[a.id]={});
   S.criteria.forEach(c=>{const raw=S.alternatives.map(a=>+((scores[a.id]||{})[c.id])||0);
-    const nv=normCol(raw,c.dir,S.norm);S.alternatives.forEach((a,i)=>out[a.id][c.id]=nv[i]);});
+    const g=goodCol(c,raw),f=vcurve(c),apply=curveApplies(c);
+    S.alternatives.forEach((a,i)=>out[a.id][c.id]=apply?f(Math.max(0,Math.min(1,g[i]))):g[i]);});
   return out;
 }
 // aggregate one alternative's overall score in [0,1] under the chosen model
-function altTotal(altId,w,nm,scores){
-  scores=scores||S.scores;
-  if(S.agg==='product'){ // weighted geometric mean of directional 1–5 values (rank-reversal-free, non-compensatory)
-    let p=1;S.criteria.forEach(c=>{const g=clampGrade(+((scores[altId]||{})[c.id])||GMIN);p*=Math.pow(dval(g,c.dir),w[c.id]||0);});
-    return (p-GMIN)/(GMAX-GMIN);
+function altTotal(altId,w,nm){
+  if(S.agg==='product'){ // weighted geometric mean of values mapped to [1,5] (non-compensatory, rank-reversal-free)
+    let p=1;S.criteria.forEach(c=>{const v=Math.max(0,Math.min(1,nm[altId][c.id]||0));p*=Math.pow(1+4*v,w[c.id]||0);});
+    return (p-1)/4;
   }
   let s=0;S.criteria.forEach(c=>s+=(w[c.id]||0)*(nm[altId][c.id]||0));return s; // weighted sum (additive)
 }
@@ -528,15 +550,16 @@ function altTotal(altId,w,nm,scores){
 function gateFails(altId,scores){
   scores=scores||S.scores;const f=[];
   S.criteria.forEach(c=>{const g=+((scores[altId]||{})[c.id]);if(g==null||isNaN(g))return;
-    if(c.gate==='min'&&c.gateV!=null&&g<c.gateV)f.push(`${c.name} ≥ ${c.gateV}`);
-    if(c.gate==='max'&&c.gateV!=null&&g>c.gateV)f.push(`${c.name} ≤ ${c.gateV}`);});
+    if(c.gate==='min'&&c.gateV!=null&&g<c.gateV)f.push(`${c.name} ≥ ${gfmt(c.gateV)}`);
+    if(c.gate==='max'&&c.gateV!=null&&g>c.gateV)f.push(`${c.name} ≤ ${gfmt(c.gateV)}`);});
   return f;
 }
 // dominance: returns name of an alternative that dominates altId (≥ on all, > on ≥1), else null
 function dominatedBy(altId){
-  const dvv=id=>S.criteria.map(c=>dval(clampGrade(+((S.scores[id]||{})[c.id])||GMIN),c.dir));
-  const va=dvv(altId);
-  for(const b of S.alternatives){if(b.id===altId)continue;const vb=dvv(b.id);
+  // range-based goodness, independent of the set (so dominance is stable)
+  const gd=id=>S.criteria.map(c=>{const v=+((S.scores[id]||{})[c.id])||cMin(c);const lo=cMin(c),hi=cMax(c);let b=hi===lo?.5:(v-lo)/(hi-lo);b=Math.max(0,Math.min(1,b));return c.dir==='cost'?1-b:b;});
+  const va=gd(altId);
+  for(const b of S.alternatives){if(b.id===altId)continue;const vb=gd(b.id);
     let ge=true,gt=false;for(let i=0;i<va.length;i++){if(vb[i]<va[i]-1e-9){ge=false;break;}if(vb[i]>va[i]+1e-9)gt=true;}
     if(ge&&gt)return b.name;}
   return null;
@@ -571,7 +594,7 @@ const TRASH='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-w
 const GRIP='<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
 function renderSetup(){
   $('#projTitle').value=S.title||'';$('#projNotes').value=S.notes||'';
-  $('#critList').innerHTML=S.criteria.map((c,i)=>{const gOn=c.gate==='min'||c.gate==='max';return `<div class="item crititem" draggable="true" data-i="${i}" data-type="crit">
+  $('#critList').innerHTML=S.criteria.map((c,i)=>{const gOn=c.gate==='min'||c.gate==='max';const num=c.scaleType==='number';const unit=num?'value':'rating';return `<div class="item crititem" draggable="true" data-i="${i}" data-type="crit">
     <span class="grip">${GRIP}</span>
     <input type="text" value="${esc(c.name)}" data-cid="${c.id}" data-f="cname" placeholder="Criterion name">
     <div class="seg" data-cid="${c.id}">
@@ -582,12 +605,29 @@ function renderSetup(){
       <span class="gate-ico" title="Deal-breaker">⛔</span>
       <select data-gate="${c.id}">
         <option value="off"${!gOn?' selected':''}>no limit</option>
-        <option value="min"${c.gate==='min'?' selected':''}>rating ≥</option>
-        <option value="max"${c.gate==='max'?' selected':''}>rating ≤</option>
+        <option value="min"${c.gate==='min'?' selected':''}>${unit} ≥</option>
+        <option value="max"${c.gate==='max'?' selected':''}>${unit} ≤</option>
       </select>
-      <input type="number" min="1" max="5" step="1" data-gatev="${c.id}" value="${c.gateV==null?3:c.gateV}" style="width:46px;${gOn?'':'display:none'}">
+      <input type="number" min="${cMin(c)}" max="${cMax(c)}" step="${cStep(c)}" data-gatev="${c.id}" value="${c.gateV==null?(num?'':3):c.gateV}" style="width:54px;${gOn?'':'display:none'}">
     </div>
-    <button class="iconbtn" data-del-crit="${c.id}">${TRASH}</button></div>`}).join('')||emptyMsg('No criteria yet');
+    <button class="iconbtn" data-del-crit="${c.id}">${TRASH}</button>
+    <div class="crit-adv">
+      <span class="adv-lbl">Scale</span>
+      <select data-scaletype="${c.id}">
+        <option value="rating"${!num?' selected':''}>Rating 1–5</option>
+        <option value="number"${num?' selected':''}>Quantitative</option>
+      </select>
+      ${num?`<input type="number" data-smin="${c.id}" value="${c.smin==null?0:c.smin}" placeholder="min" style="width:62px"><span class="adv-lbl">to</span><input type="number" data-smax="${c.id}" value="${c.smax==null?100:c.smax}" placeholder="max" style="width:62px">`:''}
+      <span class="adv-sep"></span>
+      <span class="adv-lbl" title="How the rating maps to value — diminishing returns means each extra point is worth less than the last">Value</span>
+      <select data-vfn="${c.id}">
+        <option value="linear"${(c.vfn||'linear')==='linear'?' selected':''}>Linear</option>
+        <option value="concave"${c.vfn==='concave'?' selected':''}>Diminishing returns</option>
+        <option value="convex"${c.vfn==='convex'?' selected':''}>Increasing returns</option>
+        <option value="s"${c.vfn==='s'?' selected':''}>S-curve</option>
+      </select>
+      ${sparkVFN(c.vfn||'linear')}
+    </div></div>`}).join('')||emptyMsg('No criteria yet');
   $('#altList').innerHTML=S.alternatives.map((a,i)=>`<div class="item" draggable="true" data-i="${i}" data-type="alt">
     <span class="grip">${GRIP}</span>
     <input type="text" value="${esc(a.name)}" data-aid="${a.id}" data-f="aname" placeholder="Alternative name">
@@ -664,10 +704,10 @@ function renderScores(){
   if(!S.criteria.length||!S.alternatives.length){$('#scoreGrid').innerHTML=emptyMsg('Add criteria and alternatives first');return;}
   const nm=normMatrix();
   $('#scoreGrid').innerHTML=`<table class="grid-table"><thead><tr><th>Alternative ↓ / Criterion →</th>${
-    S.criteria.map(c=>`<th class="num">${esc(c.name)}<br><span class="chip ${c.dir}" style="font-size:10px">${c.dir}</span></th>`).join('')}</tr></thead>
+    S.criteria.map(c=>`<th class="num">${esc(c.name)}<br><span class="chip ${c.dir}" style="font-size:10px">${c.dir}</span>${c.scaleType==='number'?`<span class="muted tiny" style="display:block">${gfmt(cMin(c))}–${gfmt(cMax(c))}</span>`:''}</th>`).join('')}</tr></thead>
     <tbody>${S.alternatives.map(a=>`<tr><td><b>${esc(a.name)}</b></td>${
       S.criteria.map(c=>{const raw=(S.scores[a.id]||{})[c.id];const nv=nm[a.id][c.id];
-        return `<td class="num"><input type="number" min="${GMIN}" max="${GMAX}" step="1" value="${raw==null?'':raw}" data-sa="${a.id}" data-sc="${c.id}" style="width:64px">
+        return `<td class="num"><input type="number" min="${cMin(c)}" max="${cMax(c)}" step="${cStep(c)}" value="${raw==null?'':raw}" data-sa="${a.id}" data-sc="${c.id}" style="width:${c.scaleType==='number'?78:64}px">
         <div class="tiny muted">${(nv*100).toFixed(0)}</div></td>`}).join('')}</tr>`).join('')}</tbody></table>`;
 }
 
@@ -684,7 +724,7 @@ function renderResults(){
   $('#resultsBody').innerHTML=`<div class="winner-card"><div class="t">Recommended${ok.length?'':' (none meet all deal-breakers)'}</div><div class="n">${esc(win.name)}</div>
     <div class="muted tiny" style="margin-top:4px">Score ${(win.total*100).toFixed(1)} · ${ranked[1]?`leads runner-up by ${((win.total-ranked[1].total)*100).toFixed(1)} pts`:'only eligible option'}${dqNote}</div></div>
     <div class="podium">${ranked.map((r,i)=>{const pct=max?r.total/max*100:0;
-      const tip=S.criteria.map(c=>`${esc(c.name)}: ${gfmt(clampGrade(+((S.scores[r.id]||{})[c.id])||GMIN))}`).join(' · ');
+      const tip=S.criteria.map(c=>{const g=(S.scores[r.id]||{})[c.id];return `${esc(c.name)}: ${g==null||g===''?'–':gfmt(+g)}`;}).join(' · ');
       const domBadge=r.dom?`<span class="dq-tag" title="Worse than ${esc(r.dom)} on every criterion">dominated by ${esc(r.dom)}</span>`:'';
       return `<div class="bar-row" title="${tip}"><div class="bar-rank">${i+1}</div>
       <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${i===0?'linear-gradient(90deg,var(--accent),var(--accent-2))':cv(PALETTE[(i)%8])}">${esc(r.name)}</div></div>
@@ -693,15 +733,37 @@ function renderResults(){
       ${dq.map(r=>`<div class="dq-row"><span class="dq-x">⊘</span><b>${esc(r.name)}</b> <span class="muted tiny">scored ${(r.total*100).toFixed(1)}</span>
         <span class="dq-reason">fails ${r.fails.map(esc).join(', ')}</span></div>`).join('')}</div>`:''}`;
   renderBreakdown(res);
+  renderPanel();
 }
 function renderBreakdown(res){
-  const prod=S.agg==='product';
+  const prod=S.agg==='product', nm=normMatrix();
   const head=`<table><thead><tr><th>Alternative</th>${S.criteria.map((c,i)=>`<th class="num"><span class="dot" style="background:${cv(PALETTE[i%8])};display:inline-block;margin-right:4px"></span>${esc(c.name)}</th>`).join('')}<th class="num">${prod?'Score':'Total'}</th></tr></thead>`;
   const body=`<tbody>${res.map(r=>`<tr style="${r.fails.length?'opacity:.5':''}"><td><b>${esc(r.name)}</b>${r.fails.length?' ⊘':''}</td>${
-    S.criteria.map(c=>{const g=clampGrade(+((S.scores[r.id]||{})[c.id])||GMIN);
-      const v=prod?Math.round((dval(g,c.dir)-GMIN)/(GMAX-GMIN)*100):(r.parts[c.id]*100).toFixed(1);
+    S.criteria.map(c=>{const v=prod?Math.round((nm[r.id][c.id]||0)*100):(r.parts[c.id]*100).toFixed(1);
       return `<td class="num">${v}</td>`;}).join('')}<td class="num"><b>${(r.total*100).toFixed(1)}</b></td></tr>`).join('')}</tbody></table>`;
-  $('#breakdownTbl').innerHTML=head+body+`<div class="tiny muted" style="margin-top:8px">${prod?'Weighted-product mode: cells show each option\'s 0–100 value on that criterion (direction-aware); the score is the weighted geometric mean.':'Cells show each criterion\'s weighted contribution to the total (they sum to it).'}</div>`;
+  $('#breakdownTbl').innerHTML=head+body+`<div class="tiny muted" style="margin-top:8px">${prod?'Weighted-product mode: cells show each option\'s 0–100 value on that criterion (direction- and curve-adjusted); the score is the weighted geometric mean.':'Cells show each criterion\'s weighted contribution to the total (they sum to it).'}</div>`;
+}
+// ---- multi-stakeholder (group) decision ----
+function panelGroup(panel){
+  const aw={};S.criteria.forEach(c=>aw[c.id]=panel.reduce((s,p)=>s+(p.w[c.id]||0),0)/panel.length);
+  const sw=Object.values(aw).reduce((a,b)=>a+b,0)||1;S.criteria.forEach(c=>aw[c.id]/=sw);
+  const as={};S.alternatives.forEach(a=>{as[a.id]={};S.criteria.forEach(c=>{const vs=panel.map(p=>+((p.scores[a.id]||{})[c.id])).filter(v=>!isNaN(v));as[a.id][c.id]=vs.length?vs.reduce((x,y)=>x+y,0)/vs.length:cMin(c);});});
+  const nm=normMatrix(as);
+  const res=S.alternatives.map(a=>({id:a.id,name:a.name,total:altTotal(a.id,aw,nm)})).sort((x,y)=>y.total-x.total);
+  return {res};
+}
+function stakeWinner(p){const nm=normMatrix(p.scores);let best=null,bv=-Infinity;S.alternatives.forEach(a=>{const t=altTotal(a.id,p.w,nm);if(t>bv){bv=t;best=a.id;}});return best;}
+function renderPanel(){
+  const panel=S.panel||[];
+  if(!panel.length){$('#panelBox').innerHTML=`<div class="muted tiny">No stakeholders captured yet. Set one person's weights (step 2) and grades (step 3), then click <b>Add current as stakeholder</b> above. Repeat for each person to see the combined ranking and where they disagree.</div>`;return;}
+  const g=panelGroup(panel),gWin=g.res[0],max=g.res[0].total||1;
+  const winners=panel.map(p=>stakeWinner(p));
+  const agree=winners.filter(id=>id===gWin.id).length/panel.length;
+  $('#panelBox').innerHTML=`
+    <div style="margin-bottom:14px">${panel.map((p,i)=>`<div class="stake-row"><b>${esc(p.name)}</b><span class="muted tiny">prefers</span><span class="stake-pick">${esc(nameById(winners[i]))}</span><button class="iconbtn" data-del-stake="${p.id}" title="Remove">${TRASH}</button></div>`).join('')}</div>
+    <div class="k" style="margin-bottom:7px">Combined ranking · ${panel.length} stakeholder${panel.length>1?'s':''} · <span class="tag-${agree>=.6?'good':'bad'}">${Math.round(agree*100)}% agree on #1</span></div>
+    <div class="podium">${g.res.map((r,i)=>`<div class="bar-row"><div class="bar-rank">${i+1}</div><div class="bar-track"><div class="bar-fill" style="width:${(max?r.total/max*100:0)}%;background:${i===0?'linear-gradient(90deg,var(--accent),var(--accent-2))':cv(PALETTE[i%8])}">${esc(r.name)}</div></div><div class="bar-val">${(r.total*100).toFixed(1)}</div></div>`).join('')}</div>
+    <div class="tiny muted" style="margin-top:8px">Averages everyone's weights and grades. Low agreement on #1 means the choice is contested — worth discussing before deciding.</div>`;
 }
 
 /* ---- sensitivity ---- */
@@ -855,11 +917,11 @@ function renderCritWeights(){
 
 /* ---- grade what-if ---- */
 let gradeCursorX=null; // previewed raw grade value (non-destructive)
-// sweep one alternative's rating on one criterion across 1..5; fully recompute (model + re-normalization aware)
+// sweep one alternative's grade on one criterion across its scale; fully recompute (model + re-normalization aware)
 function gradeSeries(altId,critId){
-  const w=weights();
-  const cur=clampGrade(+((S.scores[altId]||{})[critId])||GMIN);
-  const lo=GMIN,hi=GMAX; // fixed 1–5 rating scale
+  const w=weights();const c=S.criteria.find(z=>z.id===critId);
+  const cur=clampG(c,+((S.scores[altId]||{})[critId])||cMin(c));
+  const lo=Math.min(cMin(c),cMax(c)),hi=Math.max(cMin(c),cMax(c)); // per-criterion scale
   const pts=[];const N=120;
   for(let k=0;k<=N;k++){const x=lo+(hi-lo)*k/N;const tmp=patchScore(altId,critId,x);const nm=normMatrix(tmp);
     const row={x,scores:{}};S.alternatives.forEach(a=>row.scores[a.id]=altTotal(a.id,w,nm,tmp));pts.push(row);}
@@ -878,16 +940,16 @@ function gradeImpact(altId,critId){
     if(dn>=0&&winAt(pts[dn])!==base){near=(pts[dn].x+pts[dn+1].x)/2;newWin=winAt(pts[dn]);break;}
   }
   if(near==null)return {flip:null,cur};
-  const dist=Math.abs(near-cur);
-  return {flip:near,cur,dist,dir:near<cur?-1:1,newWin};
+  const dist=Math.abs(near-cur),range=Math.abs(hi-lo)||1;
+  return {flip:near,cur,dist,frac:dist/range,dir:near<cur?-1:1,newWin};
 }
 const nameById=id=>{const a=S.alternatives.find(x=>x.id===id);return a?a.name:'';};
 function heatBucket(im){
   if(!im.flip)return {bg:'var(--panel-2)',fg:'var(--muted)',txt:'robust',lvl:0};
   const sign=im.dir<0?'−':'+';
-  const txt=`${sign}${im.dist.toFixed(1)}`; // change needed, in rating points
-  if(im.dist<=0.5)return {bg:'#dc2626',fg:'#fff',txt,lvl:3};
-  if(im.dist<=1.5)return {bg:'#e8801c',fg:'#fff',txt,lvl:2};
+  const txt=`${sign}${gfmt(im.dist)}`; // change needed, in the criterion's own units
+  if(im.frac<=0.12)return {bg:'#dc2626',fg:'#fff',txt,lvl:3};
+  if(im.frac<=0.35)return {bg:'#e8801c',fg:'#fff',txt,lvl:2};
   return {bg:'rgba(232,128,28,.26)',fg:'var(--ink)',txt,lvl:1};
 }
 function renderGradeHeat(selAlt,selCrit){
@@ -897,7 +959,7 @@ function renderGradeHeat(selAlt,selCrit){
     h+=`<tr><td class="rowlbl">${esc(a.name)}</td>`;
     S.criteria.forEach(c=>{const im=gradeImpact(a.id,c.id);const b=heatBucket(im);
       const sel=(a.id===selAlt&&c.id===selCrit)?' sel':'';
-      const tip=im.flip!=null?`Winner flips if ${a.name}'s ${c.name} moves ${gfmt(im.cur)} → ${gfmt(im.flip)} (${b.txt} pts); then ${nameById(im.newWin)} wins`:`${a.name}'s ${c.name} can change across the whole 1–5 scale without changing the winner`;
+      const tip=im.flip!=null?`Winner flips if ${a.name}'s ${c.name} moves ${gfmt(im.cur)} → ${gfmt(im.flip)} (${b.txt}); then ${nameById(im.newWin)} wins`:`${a.name}'s ${c.name} can change across its whole scale without changing the winner`;
       h+=`<td><div class="cell${sel}" data-a="${a.id}" data-c="${c.id}" style="background:${b.bg};color:${b.fg}" title="${esc(tip)}">${b.txt}</div></td>`;});
     h+=`</tr>`;});
   h+=`</tbody></table>`;
@@ -906,7 +968,7 @@ function renderGradeHeat(selAlt,selCrit){
     <span><span class="dot" style="background:#e8801c"></span>moderate</span>
     <span><span class="dot" style="background:rgba(232,128,28,.26)"></span>low</span>
     <span><span class="dot" style="background:var(--panel-2);border:1px solid var(--line-strong)"></span>robust</span>
-    <span class="muted">· number = rating-point change needed to flip the winner · click a cell to explore</span>`;
+    <span class="muted">· number = change to that grade (in its own units) needed to flip the winner · click a cell to explore</span>`;
 }
 function renderGradeWhatIf(){
   const aSel=$('#gwAlt'),cSel=$('#gwCrit');
@@ -916,7 +978,8 @@ function renderGradeWhatIf(){
   if([...aSel.options].some(o=>o.value===prevA))aSel.value=prevA;
   if([...cSel.options].some(o=>o.value===prevC))cSel.value=prevC; else{const cost=S.criteria.find(c=>c.dir==='cost');if(cost)cSel.value=cost.id;}
   const altId=aSel.value,critId=cSel.value;
-  const cur=clampGrade(+((S.scores[altId]||{})[critId])||GMIN);
+  const c0=S.criteria.find(z=>z.id===critId);
+  const cur=clampG(c0,+((S.scores[altId]||{})[critId])||cMin(c0));
   gradeCursorX=cur;
   const {lo,hi}=gradeSeries(altId,critId);
   $('#gwSlider').value=Math.round((cur-lo)/(hi-lo)*100);
@@ -941,9 +1004,12 @@ function drawGradeChart(altId,critId){
   const idx=xToIdx(cT);
   let svg=`<svg class="chart" viewBox="0 0 ${W} ${H}" style="width:100%;height:auto">`;
   for(let g=0;g<=4;g++){const y=P.t+g/4*(H-P.t-P.b);svg+=`<line x1="${P.l}" y1="${y}" x2="${W-P.r}" y2="${y}" stroke="${cv('--line')}"/>`;}
-  // integer rating ticks 1..5
-  for(let t=lo;t<=hi;t++){const x=xs(t);svg+=`<line x1="${x}" y1="${P.t}" x2="${x}" y2="${H-P.b}" stroke="${cv('--line')}" stroke-dasharray="1 5" opacity="0.5"/>`;
-    svg+=`<text x="${x}" y="${H-P.b+16}" text-anchor="middle">${t}</text>`;}
+  // scale ticks (ratings: 1..5; quantitative: 5 evenly-spaced)
+  const c0=S.criteria.find(z=>z.id===critId);
+  const ticks=c0.scaleType==='number'?[0,1,2,3,4].map(k=>lo+k*(hi-lo)/4):[];
+  for(let t=lo;t<=hi&&c0.scaleType!=='number';t++)ticks.push(t);
+  ticks.forEach(t=>{const x=xs(t);svg+=`<line x1="${x}" y1="${P.t}" x2="${x}" y2="${H-P.b}" stroke="${cv('--line')}" stroke-dasharray="1 5" opacity="0.5"/>`;
+    svg+=`<text x="${x}" y="${H-P.b+16}" text-anchor="middle">${gfmt(t)}</text>`;});
   // break-even markers
   flips.forEach(f=>{const x=xs(f.x);svg+=`<line x1="${x}" y1="${P.t}" x2="${x}" y2="${H-P.b}" stroke="${cv('--bad')}" stroke-width="1.2" stroke-dasharray="3 3"/>`;
     svg+=`<rect x="${x-18}" y="${P.t-20}" width="36" height="15" rx="4" fill="${cv('--bad')}"/><text x="${x}" y="${P.t-9}" text-anchor="middle" fill="#fff" style="font-weight:700;font-size:10px">${gfmt(f.x)}</text>`;});
@@ -962,7 +1028,7 @@ function drawGradeChart(altId,critId){
     const ey=ys(pts[pts.length-1].scores[a.id]);
     svg+=`<text x="${W-P.r+9}" y="${ey+4}" fill="${cols[a.id]}" style="font-weight:${isSel?700:600};font-size:11.5px">${esc(a.name)}${isSel?' ◆':''}</text>`;
   });
-  svg+=`<text x="${(W-P.r+P.l)/2}" y="${H-4}" text-anchor="middle">${esc(aName)}'s ${esc(cName)} rating (1–5) →</text>`;
+  svg+=`<text x="${(W-P.r+P.l)/2}" y="${H-4}" text-anchor="middle">${esc(aName)}'s ${esc(cName)} ${c0.scaleType==='number'?'value':'rating (1–5)'} →</text>`;
   svg+=`<text x="${P.l}" y="${P.t-6}" style="font-size:10.5px">overall score ↑</text></svg>`;
   $('#gwChart').innerHTML=svg;
   // live readout at cursor
@@ -972,9 +1038,9 @@ function drawGradeChart(altId,critId){
   $('#gwReadout').innerHTML=`at <b>${esc(cName)} = ${gfmt(cT)}</b> → `+rk.map((r,i)=>`${i+1}. ${esc(r.name)}`).join('  ·  ')+`  <span class="tag-${selRank===baseRank?'good':'bad'}">${esc(aName)} is #${selRank}</span>`;
   // plain-English break-even summary
   let msg;
-  if(!flips.length)msg=`<b class="tag-good">${esc(aName)} keeps the same rank</b> for any 1–5 rating on ${esc(cName)} — the result doesn't hinge on this number.`;
+  if(!flips.length)msg=`<b class="tag-good">${esc(aName)} keeps the same rank</b> for any ${c0.scaleType==='number'?'value':'1–5 rating'} on ${esc(cName)} — the result doesn't hinge on this number.`;
   else msg=flips.map(f=>{const dir=f.to>f.from?'drops to':'rises to';const om=f.other&&f.other!==altId?` (${esc(nameOf(f.other))} ${f.to>f.from?'overtakes it':'falls behind'})`:'';
-    return `At a <b>${esc(cName)} rating of ${gfmt(f.x)}</b>, <b class="tag-bad">${esc(aName)} ${dir} #${f.to}</b>${om}.`;}).join(' ');
+    return `At a <b>${esc(cName)} ${c0.scaleType==='number'?'value':'rating'} of ${gfmt(f.x)}</b>, <b class="tag-bad">${esc(aName)} ${dir} #${f.to}</b>${om}.`;}).join(' ');
   $('#gwLegend').innerHTML=`<div style="font-size:13px;width:100%;line-height:1.55">${msg}</div>`;
 }
 function fmtNum(n){if(!isFinite(n))return '0';const a=Math.abs(n);if(a>=1000)return Math.round(n).toLocaleString();if(a>=10)return n.toFixed(0);if(a>=1)return n.toFixed(1);return n.toFixed(2);}
@@ -1006,12 +1072,14 @@ function runMonteCarlo(){
   const wins={},dist={};S.alternatives.forEach(a=>{wins[a.id]=0;dist[a.id]=[];});
   const rnd=mulberry32(12345);let topStaysFirst=0;
   const baseTop=winnerUnder(weights(),normMatrix());
+  // grade noise of guPts rating points scaled to each criterion's own range
+  const noiseScale={};S.criteria.forEach(c=>noiseScale[c.id]=(guPts/(GMAX-GMIN))*Math.abs(cMax(c)-cMin(c)));
   for(let n=0;n<N;n++){
     // perturb weights (±wu, renormalized)
     const pw={};let sw=0;S.criteria.forEach(c=>{const f=1+(rnd()*2-1)*wu;const v=Math.max(0,(baseW[c.id]||0)*f);pw[c.id]=v;sw+=v;});
     S.criteria.forEach(c=>pw[c.id]/=(sw||1));
-    // perturb grades by ±guPts rating points, clamped to 1–5
-    const ps={};S.alternatives.forEach(a=>{ps[a.id]={};S.criteria.forEach(c=>{ps[a.id][c.id]=clampGrade((+((S.scores[a.id]||{})[c.id])||GMIN)+(rnd()*2-1)*guPts);});});
+    // perturb grades by ±(guPts equivalent), clamped to each criterion's scale
+    const ps={};S.alternatives.forEach(a=>{ps[a.id]={};S.criteria.forEach(c=>{ps[a.id][c.id]=clampG(c,(+((S.scores[a.id]||{})[c.id])||cMin(c))+(rnd()*2-1)*noiseScale[c.id]);});});
     const nm=normMatrix(ps);
     let best=null,bv=-Infinity;
     S.alternatives.forEach(a=>{const t=altTotal(a.id,pw,nm,ps);dist[a.id].push(t);if(pool.includes(a.id)&&t>bv){bv=t;best=a.id;}});
@@ -1065,6 +1133,8 @@ document.addEventListener('click',e=>{
   const wm=e.target.closest('#weightMode button'); if(wm){S.weightMode=wm.dataset.m;commit('weights');return;}
   const ag=e.target.closest('#aggSeg button'); if(ag){S.agg=ag.dataset.agg;commit('results');return;}
   if(e.target.closest('#btnReport')){downloadReport();return;}
+  if(e.target.closest('#btnCapture')){if(!S.criteria.length||!S.alternatives.length){toast('Add criteria and alternatives first');return;}const nm=prompt('Stakeholder name:','Stakeholder '+((S.panel?S.panel.length:0)+1));if(nm){if(!S.panel)S.panel=[];S.panel.push({id:uid(),name:nm,w:weights(),scores:JSON.parse(JSON.stringify(S.scores))});save();renderResults();toast('Captured '+nm);}return;}
+  const ds=e.target.closest('[data-del-stake]'); if(ds){S.panel=(S.panel||[]).filter(p=>p.id!==ds.dataset.delStake);save();renderResults();return;}
   // grade heatmap cell → load into the what-if chart
   const hcell=e.target.closest('.heat .cell'); if(hcell){$('#gwAlt').value=hcell.dataset.a;$('#gwCrit').value=hcell.dataset.c;renderGradeWhatIf();return;}
   // pairwise three-way choice (A more / equal / B more)
@@ -1078,16 +1148,20 @@ document.addEventListener('input',e=>{
   else if(t.dataset.f==='aname'){S.alternatives.find(a=>a.id===t.dataset.aid).name=t.value;save();liveLabels();}
   else if(t.id==='projTitle'){S.title=t.value;save();}
   else if(t.id==='projNotes'){S.notes=t.value;save();}
-  else if(t.dataset.gatev){const c=S.criteria.find(x=>x.id===t.dataset.gatev);c.gateV=t.value===''?null:clampGrade(+t.value);save();}
+  else if(t.dataset.gatev){const c=S.criteria.find(x=>x.id===t.dataset.gatev);c.gateV=t.value===''?null:clampG(c,+t.value);save();}
+  else if(t.dataset.smin){const c=S.criteria.find(x=>x.id===t.dataset.smin);c.smin=t.value===''?0:+t.value;save();}
+  else if(t.dataset.smax){const c=S.criteria.find(x=>x.id===t.dataset.smax);c.smax=t.value===''?1:+t.value;save();}
   else if(t.dataset.wid){S.criteria.find(c=>c.id===t.dataset.wid).weight=+t.value||0;save();renderWeightPreview();updateDirectNorm();}
-  else if(t.dataset.sa){if(!S.scores[t.dataset.sa])S.scores[t.dataset.sa]={};S.scores[t.dataset.sa][t.dataset.sc]=t.value===''?0:clampGrade(+t.value);save();updateScoreNorms();}
+  else if(t.dataset.sa){const c=S.criteria.find(x=>x.id===t.dataset.sc);if(!S.scores[t.dataset.sa])S.scores[t.dataset.sa]={};S.scores[t.dataset.sa][t.dataset.sc]=t.value===''?0:clampG(c,+t.value);save();updateScoreNorms();}
   else if(t.id==='sensSlider'){onSensSlider(+t.value);}
   else if(t.id==='gwSlider'){const{lo,hi}=gradeSeries($('#gwAlt').value,$('#gwCrit').value);gradeCursorX=lo+(hi-lo)*(+t.value)/100;drawGradeChart($('#gwAlt').value,$('#gwCrit').value);}
   else if(t.id==='wUnc'){$('#wuLbl').textContent='±'+t.value+'%';}
   else if(t.id==='gUnc'){$('#guLbl').textContent='±'+t.value+' pt'+(t.value==1?'':'s');}
 });
 document.addEventListener('change',e=>{
-  if(e.target.dataset.gate){const c=S.criteria.find(x=>x.id===e.target.dataset.gate);c.gate=e.target.value;if(c.gate!=='off'&&c.gateV==null)c.gateV=3;save();renderSetup();return;}
+  if(e.target.dataset.gate){const c=S.criteria.find(x=>x.id===e.target.dataset.gate);c.gate=e.target.value;if(c.gate!=='off'&&c.gateV==null)c.gateV=c.scaleType==='number'?(cMin(c)+cMax(c))/2:3;save();renderSetup();return;}
+  if(e.target.dataset.scaletype){const c=S.criteria.find(x=>x.id===e.target.dataset.scaletype);c.scaleType=e.target.value;if(c.scaleType==='number'){if(c.smin==null)c.smin=0;if(c.smax==null)c.smax=100;}commit('setup');return;}
+  if(e.target.dataset.vfn){S.criteria.find(x=>x.id===e.target.dataset.vfn).vfn=e.target.value;commit('setup');return;}
   if(e.target.id==='normSel'){S.norm=e.target.value;commit('scores');}
   if(e.target.id==='sensCrit'){const w=weights();sensCursorT=w[e.target.value]||0;$('#sensSlider').value=Math.round(sensCursorT*100);drawSensChart(e.target.value);}
   if(e.target.id==='gwAlt'||e.target.id==='gwCrit'){renderGradeWhatIf();}
@@ -1137,6 +1211,8 @@ const HELP=[
   ['4 · Results','Ranks the eligible options; any that fail a deal-breaker are listed separately with the reason, and options <b>dominated</b> by another (worse on everything) are flagged. <b>Model</b>: <b>Weighted sum</b> lets a strength offset a weakness; <b>Weighted product</b> penalises weak spots and can\'t be fully bought back. <b>Report</b> generates a printable decision summary (Save as PDF) for the record.'],
   ['5 · Sensitivity','Lenses on trust: <b>Weight sensitivity</b> (drag a weight, see where the leader flips) · <b>Grade what-if</b> + impact heatmap (which ratings are decision-critical) · <b>Robustness</b> — Monte-Carlo jiggles weights (±%) and grades (±rating points) thousands of times, showing how often the leader wins, each option\'s <b>score spread</b> (box plots), and how cleanly #1 separates from #2 · <b>Critical weights</b> — the smallest weight nudge that overturns the result.'],
   ['Deal-breakers & dominance','Weighted scoring is <i>compensatory</i> — a 5 on one thing can mask a 1 on another. <b>Deal-breakers</b> (set per criterion in Setup) add hard constraints so unacceptable options are screened out before ranking. <b>Dominance</b> flags any option that another beats on every criterion — it can never be the right choice.'],
+  ['Quantitative scales & value curves','Each criterion (in Setup) can be a <b>1–5 rating</b> or <b>Quantitative</b> with a real min/max (e.g. price 20k–40k) — quantitative criteria are normalized against their declared range, in real units. The <b>Value</b> curve sets how a rating turns into worth: <b>Linear</b>, <b>Diminishing returns</b> (each extra point matters less), <b>Increasing returns</b> (only top scores pay off), or <b>S-curve</b>.'],
+  ['Group decision','In Results, click <b>Add current as stakeholder</b> to snapshot the current weights + grades under a name. Capture each person, and the panel shows everyone\'s top pick, a combined ranking (averaging weights and grades), and <b>how much they agree on #1</b> — low agreement means the choice is contested.'],
   ['Import / Export','Both buttons open a small chooser with two matching formats. <b>CSV spreadsheet</b> holds everything in one sheet — title, each criterion with its direction & weight, the full grade matrix, and the final scores & ranking — and opens cleanly in Excel or Google Sheets. <b>JSON project</b> is a complete save (including pairwise judgments) that re-opens exactly as you left it. A CSV exported here re-imports without any edits.'],
 ];
 function renderHelp(){$('#helpBody').innerHTML=HELP.map((h,i)=>`<div class="help-sec ${i>0?'collapsed':''}"><h4>${h[0]}<span class="muted">›</span></h4><div class="help-body"><p>${h[1]}</p></div></div>`).join('');}
@@ -1235,7 +1311,7 @@ function downloadReport(){
   // most-fragile weight
   let frag=null;S.criteria.forEach(c=>{const f=weightFlip(c.id);if(f&&(!frag||f.delta<frag.delta))frag={name:c.name,...f};});
   const E=esc;
-  const cell=(g)=>gfmt(clampGrade(g));
+  const cell=(g)=>(g==null||isNaN(g))?'–':gfmt(g);
   const html=`<!doctype html><html><head><meta charset=utf-8><title>${E(S.title||'Trade-off')} — decision report</title>
   <style>
    body{font:14px/1.55 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1c2333;max-width:820px;margin:32px auto;padding:0 24px}
