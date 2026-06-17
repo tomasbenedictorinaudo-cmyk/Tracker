@@ -1987,6 +1987,17 @@ body.is-card-dragging * { cursor: grabbing !important; }
   margin-bottom: 6px;
 }
 .card-top-row .component-chip { margin-bottom: 0; }
+.b-legend-chip {
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: filter .12s, opacity .12s;
+  user-select: none;
+}
+.b-legend-chip:hover { filter: brightness(1.15); }
+.b-legend-chip.is-hidden {
+  opacity: .55;
+  text-decoration: line-through;
+}
 .prio-chip {
   display: inline-block;
   font-size: 9.5px;
@@ -2769,9 +2780,52 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .kpi-value.ok { color: var(--ok); }
 .kpi-value.warn { color: var(--warn); }
 .kpi-value.bad { color: var(--bad); }
+.kpi-value.muted { color: var(--text-faint); }
 .kpi-sub {
   margin-top: 4px; font-size: 11px; color: var(--text-dim);
 }
+.kpi-trend {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.04);
+}
+.kpi-trend.ok      { color: var(--ok);      background: rgba(80, 200, 120, 0.10); }
+.kpi-trend.bad     { color: var(--bad);     background: rgba(220, 80, 80, 0.10); }
+.kpi-trend.neutral { color: var(--text-faint); }
+
+/* Schedule-adherence chart */
+.adh-bar-on { fill: var(--ok);  opacity: .65; }
+.adh-bar-sl { fill: var(--bad); opacity: .65; }
+.adh-line {
+  fill: none;
+  stroke: var(--accent-2);
+  stroke-width: 2;
+}
+.adh-line-dot { fill: var(--accent-2); stroke: var(--bg-0); stroke-width: 1; }
+.adh-target {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+  opacity: .5;
+}
+
+/* Productivity chart */
+.prod-bar-pl { fill: var(--accent);   opacity: .55; }
+.prod-bar-lg { fill: var(--accent-2); opacity: .55; }
+.prod-line {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 2;
+}
+.prod-line-dot { fill: var(--ok); stroke: var(--bg-0); stroke-width: 1; }
+.prod-target {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+  opacity: .5;
+}
+.legend-target { color: var(--text-faint); font-family: ui-monospace, monospace; }
 
 .panel {
   grid-column: span 4;
@@ -4354,6 +4408,28 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
 .budget-range input[type="date"]:hover { border-color: var(--line); background: var(--bg-2); }
 .budget-range input[type="date"]:focus { border-color: var(--accent-2); background: var(--bg-2); color: var(--text); outline: none; }
 .budget-range .bc-range-sep { color: var(--text-faint); }
+.budget-head .budget-legend { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.bc-delete-cc {
+  margin-left: auto;
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  width: 22px; height: 22px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .12s, background .12s, border-color .12s;
+}
+.bc-delete-cc:hover {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.4);
+}
 .budget-comps { display: flex; flex-wrap: wrap; gap: 6px; }
 .budget-kpis {
   display: grid;

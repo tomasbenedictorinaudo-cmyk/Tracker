@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-16T22:01:21.432Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-16T22:55:16.021Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -1996,6 +1996,17 @@ body.is-card-dragging * { cursor: grabbing !important; }
   margin-bottom: 6px;
 }
 .card-top-row .component-chip { margin-bottom: 0; }
+.b-legend-chip {
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: filter .12s, opacity .12s;
+  user-select: none;
+}
+.b-legend-chip:hover { filter: brightness(1.15); }
+.b-legend-chip.is-hidden {
+  opacity: .55;
+  text-decoration: line-through;
+}
 .prio-chip {
   display: inline-block;
   font-size: 9.5px;
@@ -2778,9 +2789,52 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .kpi-value.ok { color: var(--ok); }
 .kpi-value.warn { color: var(--warn); }
 .kpi-value.bad { color: var(--bad); }
+.kpi-value.muted { color: var(--text-faint); }
 .kpi-sub {
   margin-top: 4px; font-size: 11px; color: var(--text-dim);
 }
+.kpi-trend {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-weight: 600;
+  background: rgba(255, 255, 255, 0.04);
+}
+.kpi-trend.ok      { color: var(--ok);      background: rgba(80, 200, 120, 0.10); }
+.kpi-trend.bad     { color: var(--bad);     background: rgba(220, 80, 80, 0.10); }
+.kpi-trend.neutral { color: var(--text-faint); }
+
+/* Schedule-adherence chart */
+.adh-bar-on { fill: var(--ok);  opacity: .65; }
+.adh-bar-sl { fill: var(--bad); opacity: .65; }
+.adh-line {
+  fill: none;
+  stroke: var(--accent-2);
+  stroke-width: 2;
+}
+.adh-line-dot { fill: var(--accent-2); stroke: var(--bg-0); stroke-width: 1; }
+.adh-target {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+  opacity: .5;
+}
+
+/* Productivity chart */
+.prod-bar-pl { fill: var(--accent);   opacity: .55; }
+.prod-bar-lg { fill: var(--accent-2); opacity: .55; }
+.prod-line {
+  fill: none;
+  stroke: var(--ok);
+  stroke-width: 2;
+}
+.prod-line-dot { fill: var(--ok); stroke: var(--bg-0); stroke-width: 1; }
+.prod-target {
+  stroke: var(--text-faint);
+  stroke-width: 1;
+  opacity: .5;
+}
+.legend-target { color: var(--text-faint); font-family: ui-monospace, monospace; }
 
 .panel {
   grid-column: span 4;
@@ -4363,6 +4417,28 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
 .budget-range input[type="date"]:hover { border-color: var(--line); background: var(--bg-2); }
 .budget-range input[type="date"]:focus { border-color: var(--accent-2); background: var(--bg-2); color: var(--text); outline: none; }
 .budget-range .bc-range-sep { color: var(--text-faint); }
+.budget-head .budget-legend { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.bc-delete-cc {
+  margin-left: auto;
+  background: transparent;
+  color: var(--text-faint);
+  border: 1px solid transparent;
+  border-radius: 4px;
+  width: 22px; height: 22px;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color .12s, background .12s, border-color .12s;
+}
+.bc-delete-cc:hover {
+  color: #ff6b6b;
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.4);
+}
 .budget-comps { display: flex; flex-wrap: wrap; gap: 6px; }
 .budget-kpis {
   display: grid;
@@ -7455,6 +7531,7 @@ body.is-row-dragging *        { user-select: none !important; }
       <div class="sidebar-foot">
         <button class="icon-btn" id="btnImport" title="Import JSON — replace or merge with current data">↓</button>
         <button class="icon-btn" id="btnExport" title="Export JSON — save current state to a file">↑</button>
+        <button class="icon-btn" id="btnExportXLSX" title="Export project as Excel (.xlsx) — one sheet per data domain (Actions, Open points, Risks, Decisions, Change requests, People, Budgets)">⊞</button>
         <button class="icon-btn" id="btnAutoBackup" title="Auto-backup — pick a folder + frequency">⟳</button>
         <button class="icon-btn danger" id="btnEmpty" title="Start from zero — wipe everything">⊘</button>
         <button class="icon-btn" id="btnTheme" title="Toggle light / dark">◐</button>
@@ -9444,6 +9521,94 @@ body.is-row-dragging *        { user-select: none !important; }
 
   /* --------------------------- KPI engine ---------------------------- */
 
+  /* ─────────────── Delivery metrics: adherence + productivity ───────────────
+   * Adherence: of every action with a "promised" due date that has passed
+   * within the window, what share were marked done on or before that date?
+   * Open-past-due actions count against adherence too (they're not on time
+   * just because they haven't been declared late yet).
+   *
+   * Productivity: planned-hours ÷ logged-hours on actions completed inside
+   * the window. >1 means the team finished faster than the plan said.
+   *
+   * "Promised due" prefers the baseline (frozen commitment) when one was
+   * captured; otherwise the current due date is used so newly-created
+   * actions still get measured. */
+
+  const _doneHistRe = /Status:.*→\s*done/;
+  function actionCompletedAt(a) {
+    if (!a || a.status !== 'done') return null;
+    const entry = (a.history || []).filter((h) => _doneHistRe.test(h.what)).pop();
+    return entry?.at || a.updatedAt || null;
+  }
+  function actionPromisedDue(a) {
+    return a?.baseline?.due || a?.due || null;
+  }
+  function _projectsForDeliveryScope() {
+    if (state.currentProjectId === '__all__') {
+      return state.settings.showArchivedProjects
+        ? state.projects
+        : state.projects.filter((p) => !p.archived);
+    }
+    const cur = state.projects.find((p) => p.id === state.currentProjectId);
+    return cur ? [cur] : [];
+  }
+  // Window is inclusive-inclusive on both ISO dates. Pass `null` to omit
+  // either side; today acts as a soft upper bound for the "still open past
+  // promised" case so future-due open actions don't count as slipped.
+  function deliveryMetricsForWindow(sinceISO, untilISO) {
+    const todayStr = todayISO();
+    const cap = untilISO || todayStr;
+    let onTime = 0, slipped = 0;
+    let plannedHrs = 0, loggedHrs = 0, doneInWindow = 0;
+    _projectsForDeliveryScope().forEach((p) => {
+      (p.actions || []).forEach((a) => {
+        if (a.deletedAt) return;
+        const completedAt = actionCompletedAt(a);
+        const promised = actionPromisedDue(a);
+        const closedHere = completedAt && (!sinceISO || completedAt >= sinceISO) && completedAt <= cap;
+        if (closedHere) {
+          if (promised && completedAt <= promised) onTime++;
+          else if (promised) slipped++;
+          // Productivity contribution
+          const planned = plannedHoursTotal(a);
+          const logged = totalLoggedHours(a);
+          if (planned > 0 && logged > 0) {
+            plannedHrs += planned;
+            loggedHrs += logged;
+            doneInWindow++;
+          }
+        } else if (a.status !== 'done' && promised && promised < todayStr && promised <= cap && (!sinceISO || promised >= sinceISO)) {
+          // Open action whose promised date has lapsed inside the window
+          slipped++;
+        }
+      });
+    });
+    const adherenceN = onTime + slipped;
+    return {
+      adherence: adherenceN ? onTime / adherenceN : null,
+      onTime, slipped, adherenceN,
+      productivity: loggedHrs > 0 ? plannedHrs / loggedHrs : null,
+      plannedHrs, loggedHrs, doneInWindow,
+    };
+  }
+  // 12 trailing ISO-week buckets (Mon-anchored), each carrying the same
+  // metric shape as deliveryMetricsForWindow. Used by the dashboard charts.
+  function deliveryWeeklyBuckets(weeks = 12) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let weekStart = new Date(today);
+    while (weekStart.getDay() !== 1) weekStart = new Date(weekStart.getTime() - dayMs);
+    const start = new Date(weekStart.getTime() - (weeks - 1) * 7 * dayMs);
+    const buckets = Array.from({ length: weeks }, (_, i) => ({
+      start: new Date(start.getTime() + i * 7 * dayMs),
+      end:   new Date(start.getTime() + (i + 1) * 7 * dayMs - 1),
+    })).map((b) => ({
+      ...b,
+      startISO: fmtISO(b.start),
+      endISO:   fmtISO(b.end),
+    }));
+    return buckets.map((b) => ({ ...b, ...deliveryMetricsForWindow(b.startISO, b.endISO) }));
+  }
+
   function kpis() {
     const proj = curProject();
     const acts = (proj.actions || []).filter((a) => !a.deletedAt);
@@ -10976,7 +11141,6 @@ body.is-row-dragging *        { user-select: none !important; }
             <button type="button" class="ghost" id="cloudZoomIn"    title="Zoom in (Ctrl/⌘ + wheel inside the canvas)">+</button>
             <button type="button" class="ghost" id="cloudZoomFit"   title="Fit canvas to width (same effect as 100% in normal layouts)">⤢ Fit</button>
           </div>
-          <button class="ghost" id="cloudCSV" title="Download the cloud's currently-visible actions as CSV">↓ CSV</button>
         </div>
       </div>
       <div class="cloud-filterbar">
@@ -11986,23 +12150,6 @@ body.is-row-dragging *        { user-select: none !important; }
       SVG.style.cursor = '';
       dragState = null;
     });
-    $('#cloudCSV').addEventListener('click', () => {
-      exportCSV(`action-cloud-${(curProjectIsMerged() ? 'all' : curProject().name).replace(/\s+/g, '_')}-${todayISO()}.csv`,
-        allActions, [
-          { header: 'Project',         value: ({ proj }) => proj.name },
-          { header: 'Identifier',      value: ({ a }) => a.identifier || '' },
-          { header: 'Title',           value: ({ a }) => a.title },
-          { header: 'Owner',           value: ({ a }) => personName(a.owner) },
-          { header: 'Status',          value: ({ a }) => a.status },
-          { header: 'Priority',        value: ({ a }) => priorityLevel(a.priorityLevel).label },
-          { header: 'Component',       value: ({ a, proj }) => findComponent(proj, a.component)?.name || '' },
-          { header: 'Due',             value: ({ a }) => a.due || '' },
-          { header: 'Days to due',     value: ({ a }) => actionDaysToDue(a) ?? '' },
-          { header: '% Complete',      value: ({ a }) => percentComplete(a) },
-          { header: 'Composite imp.',  value: ({ a }) => actionImportance(a, ctx).toFixed(2) },
-          { header: 'Selected',        value: ({ a }) => _cloudState.selection.has(a.id) ? 'yes' : '' },
-        ]);
-    });
   }
   /* ─────────────────────── /Action Cloud ─────────────────────────── */
 
@@ -12023,7 +12170,6 @@ body.is-row-dragging *        { user-select: none !important; }
             <button class="seg-btn ${opFilterState.view === 'matrix'  ? 'active' : ''}" data-op-view="matrix" title="4×4 criticality × priority matrix — bubbles sized by age" role="tab">▦ Matrix</button>
             <button class="seg-btn ${opFilterState.view === 'bubbles' ? 'active' : ''}" data-op-view="bubbles" title="Packed bubbles — sized by composite importance, coloured by component" role="tab">◯ Bubbles</button>
           </div>
-          <button class="ghost" id="btnOpCSV" title="Download open points as CSV">↓ CSV</button>
         </div>
       </div>
       <div class="op-quick">
@@ -12464,21 +12610,6 @@ body.is-row-dragging *        { user-select: none !important; }
     $('#opInput').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); addPoint(); }
     });
-    $('#btnOpCSV')?.addEventListener('click', () => {
-      const rows = (proj.openPoints || []).filter(matchesFilters);
-      exportCSV(`open-points-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, rows, [
-        { header: 'Identifier',    value: 'identifier' },
-        { header: 'Title',         value: 'title' },
-        { header: 'Component',     value: (op) => findComponent(proj, op.component)?.name || '' },
-        { header: 'Criticality',   value: (op) => CRITICALITY_LABEL[op.criticality] || op.criticality || '' },
-        { header: 'Priority',      value: (op) => priorityLevel(op.priorityLevel).label },
-        { header: 'Created',       value: 'createdAt' },
-        { header: 'Steps done',    value: (op) => (op.steps || []).filter((s) => s.done).length },
-        { header: 'Steps total',   value: (op) => (op.steps || []).length },
-        { header: 'Notes (plain)', value: (op) => (op.notes || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() },
-      ]);
-    });
-
     // Filter / sort wiring
     const fq = $('#opFilterQ');
     if (fq) fq.addEventListener('input', () => { opFilterState.q = fq.value; draw(); });
@@ -12955,7 +13086,6 @@ body.is-row-dragging *        { user-select: none !important; }
           <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters. Click the row checkbox or shift-click rows to select multiple, then use the bulk toolbar.</div>
         </div>
         <div class="page-actions">
-          <button class="ghost" id="btnRegCSV" title="Download the currently visible rows as a CSV file">↓ CSV</button>
           <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${(proj.actions || []).filter((a) => a.deletedAt).length ? ` <span class="badge-count">${(proj.actions || []).filter((a) => a.deletedAt).length}</span>` : ''}</button>
           <button class="ghost" id="btnArchiveDone" title="Move all currently visible done actions to Archive">⌫ Archive done</button>
           <button class="ghost" id="btnAddAction">+ Action</button>
@@ -13518,44 +13648,6 @@ body.is-row-dragging *        { user-select: none !important; }
     $('#btnOpenArchive').addEventListener('click', () => {
       state.currentView = 'archive';
       saveState(); render();
-    });
-
-    // CSV export — currently visible (filter-respecting) rows.
-    $('#btnRegCSV')?.addEventListener('click', () => {
-      const acts = (proj.actions || []).filter(actionMatchesFilters);
-      const stack = regState.sortStack || [];
-      const sorted = stack.length ? acts.slice().sort((a, b) => {
-        for (const s of stack) {
-          const av = regSortValue(a, s.col, proj);
-          const bv = regSortValue(b, s.col, proj);
-          if (av < bv) return s.dir === 'asc' ? -1 : 1;
-          if (av > bv) return s.dir === 'asc' ?  1 : -1;
-        }
-        return 0;
-      }) : acts;
-      exportCSV(`register-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, sorted, [
-        { header: 'ID',                value: 'id' },
-        { header: 'Title',             value: 'title' },
-        { header: 'Component',         value: (a) => findComponent(proj, a.component)?.name || '' },
-        { header: 'Owner',             value: (a) => personName(a.owner) },
-        { header: 'Status',            value: (a) => (STATUSES.find((s) => s.id === a.status) || {}).name || a.status },
-        { header: 'Priority',          value: (a) => priorityLevel(a.priorityLevel).label },
-        { header: 'Commitment %',      value: 'commitment' },
-        { header: 'Start',             value: 'startDate' },
-        { header: 'Due',               value: 'due' },
-        { header: 'Predicted',         value: (a) => predictedCompletion(a) },
-        { header: 'Originator',        value: (a) => personName(a.originator) },
-        { header: 'Originator date',   value: (a) => a.originatorDate || a.createdAt || '' },
-        { header: 'Baseline due',      value: (a) => a.baseline?.due || '' },
-        { header: 'Variance days',     value: (a) => baselineSlipDays(a) ?? '' },
-        { header: 'Logged hours',      value: (a) => totalLoggedHours(a).toFixed(2) },
-        { header: 'Planned hours',     value: (a) => plannedHoursTotal(a).toFixed(2) },
-        { header: '% Complete',        value: (a) => percentComplete(a) },
-        { header: 'Tags',              value: (a) => (a.tags || []).map((tid) => (proj.tags || []).find((t) => t.id === tid)?.name || '').filter(Boolean).join('; ') },
-        { header: 'Depends on',        value: (a) => (a.dependsOn || []).join('; ') },
-        { header: 'Created',           value: 'createdAt' },
-        { header: 'Updated',           value: 'updatedAt' },
-      ]);
     });
 
     // Bulk select / bulk-actions wiring. The selection is module-scoped
@@ -14695,6 +14787,242 @@ body.is-row-dragging *        { user-select: none !important; }
       </div>`;
   }
 
+  // Tile helpers — used by the Schedule adherence + Productivity dashboard
+  // tiles. Format the headline, choose a colour band, and pick a friendly
+  // trend arrow vs the previous equal-length window.
+  function _trendArrow(curr, prev, opts = {}) {
+    if (curr == null || prev == null) return { html: '', cls: '' };
+    const delta = curr - prev;
+    const eps = opts.eps ?? 0.005;
+    if (Math.abs(delta) < eps) return { html: '→ flat vs prior 30d', cls: 'neutral' };
+    const arrow = delta > 0 ? '↑' : '↓';
+    const isImprovement = (opts.higherIsBetter ?? true) ? delta > 0 : delta < 0;
+    return {
+      html: `${arrow} ${opts.fmt ? opts.fmt(delta) : Math.abs(delta).toFixed(2)} vs prior 30d`,
+      cls: isImprovement ? 'ok' : 'bad',
+    };
+  }
+
+  function deliveryTileHTML() {
+    // Two 30-day windows: current and prior — same width so the trend is
+    // apples-to-apples. Thirty days is short enough to feel "now" yet long
+    // enough that one slow day doesn't whip the number around.
+    const today = new Date(); today.setHours(0,0,0,0);
+    const day = (n) => fmtISO(new Date(today.getTime() - n * dayMs));
+    const curr = deliveryMetricsForWindow(day(30), fmtISO(today));
+    const prev = deliveryMetricsForWindow(day(60), day(31));
+    const MIN_SAMPLE = 5;
+
+    // Adherence tile
+    let adhTile;
+    if (curr.adherenceN < MIN_SAMPLE) {
+      adhTile = `
+        <div class="kpi" data-tile="adherence" title="Need at least ${MIN_SAMPLE} due-by-now actions to compute. Currently ${curr.adherenceN}.">
+          <div class="kpi-label">Schedule adherence</div>
+          <div class="kpi-value muted">—</div>
+          <div class="kpi-sub">Not enough data (${curr.adherenceN}/${MIN_SAMPLE})</div>
+        </div>`;
+    } else {
+      const pct = Math.round(curr.adherence * 100);
+      const band = pct >= 85 ? 'ok' : pct >= 70 ? 'warn' : 'bad';
+      const trend = _trendArrow(curr.adherence, prev.adherence, {
+        eps: 0.01, higherIsBetter: true,
+        fmt: (d) => `${d > 0 ? '+' : '−'}${Math.abs(Math.round(d * 100))} pts`,
+      });
+      adhTile = `
+        <div class="kpi" data-tile="adherence" title="Last 30 days — ${curr.onTime} delivered on or before promised due, ${curr.slipped} slipped or open past due. Promised = baseline if set, else current due.">
+          <div class="kpi-label">Schedule adherence</div>
+          <div class="kpi-value ${band}">${pct}%</div>
+          <div class="kpi-sub">${curr.onTime} on time / ${curr.adherenceN} due
+            ${trend.html ? `<span class="kpi-trend ${trend.cls}">${trend.html}</span>` : ''}
+          </div>
+        </div>`;
+    }
+
+    // Productivity tile
+    let prodTile;
+    if (curr.doneInWindow < MIN_SAMPLE) {
+      prodTile = `
+        <div class="kpi" data-tile="productivity" title="Need at least ${MIN_SAMPLE} completed actions with both planned and logged hours. Currently ${curr.doneInWindow}.">
+          <div class="kpi-label">Productivity</div>
+          <div class="kpi-value muted">—</div>
+          <div class="kpi-sub">Not enough data (${curr.doneInWindow}/${MIN_SAMPLE})</div>
+        </div>`;
+    } else {
+      const ratio = curr.productivity;
+      const band = ratio >= 1.0 ? 'ok' : ratio >= 0.85 ? 'warn' : 'bad';
+      const trend = _trendArrow(curr.productivity, prev.productivity, {
+        eps: 0.02, higherIsBetter: true,
+        fmt: (d) => `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(2)}×`,
+      });
+      prodTile = `
+        <div class="kpi" data-tile="productivity" title="Last 30 days — ${Math.round(curr.plannedHrs)}h planned vs ${Math.round(curr.loggedHrs)}h logged across ${curr.doneInWindow} completed actions. >1× = faster than plan.">
+          <div class="kpi-label">Productivity</div>
+          <div class="kpi-value ${band}">${ratio.toFixed(2)}×</div>
+          <div class="kpi-sub">${Math.round(curr.plannedHrs)}h planned / ${Math.round(curr.loggedHrs)}h logged
+            ${trend.html ? `<span class="kpi-trend ${trend.cls}">${trend.html}</span>` : ''}
+          </div>
+        </div>`;
+    }
+    return adhTile + prodTile;
+  }
+
+  // --- Detailed weekly charts for the two delivery KPIs ---
+  function chartAdherenceTrend(weeks = 12) {
+    const W = 600, H = 220;
+    const padL = 38, padR = 38, padT = 14, padB = 26;
+    const innerW = W - padL - padR, innerH = H - padT - padB;
+    const buckets = deliveryWeeklyBuckets(weeks);
+    const counts = buckets.map((b) => b.onTime + b.slipped);
+    const maxCount = Math.max(4, ...counts);
+    const groupW = innerW / weeks;
+    const barW = (groupW - 4) / 2;
+    const xFor = (i) => padL + i * groupW;
+    const yForC = (v) => padT + innerH - (v / maxCount) * innerH;
+    const yForP = (v) => padT + innerH - v * innerH;
+
+    const bars = buckets.map((b, i) => {
+      const xBase = xFor(i) + 2;
+      const yOn = yForC(b.onTime);
+      const ySl = yForC(b.slipped);
+      const baseLine = padT + innerH;
+      return `
+        <rect class="adh-bar-on" x="${xBase}" y="${yOn}" width="${barW}" height="${Math.max(0, baseLine - yOn)}" rx="2">
+          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.onTime} on time</title>
+        </rect>
+        <rect class="adh-bar-sl" x="${xBase + barW}" y="${ySl}" width="${barW}" height="${Math.max(0, baseLine - ySl)}" rx="2">
+          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.slipped} slipped</title>
+        </rect>`;
+    }).join('');
+
+    // Adherence ratio overlay (right-axis scale). Connect only buckets that
+    // have enough data to be meaningful — gaps over empty weeks.
+    const pts = buckets.map((b, i) => b.adherence == null ? null
+      : { x: xFor(i) + groupW / 2, y: yForP(b.adherence), pct: b.adherence });
+    let pathD = '';
+    pts.forEach((p, i) => {
+      if (!p) return;
+      pathD += (pathD.endsWith('M') || pathD === '' ? `M ${p.x.toFixed(1)} ${p.y.toFixed(1)}` : ` L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
+    });
+    const dots = pts.map((p, i) => !p ? '' :
+      `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" class="adh-line-dot">
+         <title>Week of ${buckets[i].start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${Math.round(p.pct * 100)}% on time</title>
+       </circle>`).join('');
+
+    const months = buckets.map((b, i) => {
+      if (b.start.getDate() > 7) return '';
+      return `<text class="chart-tick" x="${(xFor(i) + groupW/2)}" y="${H - 6}" text-anchor="middle">${b.start.toLocaleDateString(undefined, { month: 'short' })}</text>`;
+    }).join('');
+    const yTicksL = [0, Math.round(maxCount / 2), maxCount].map((v) =>
+      `<g class="ytick"><line x1="${padL - 3}" x2="${padL}" y1="${yForC(v)}" y2="${yForC(v)}"/><text x="${padL - 6}" y="${yForC(v) + 3}" text-anchor="end">${v}</text></g>`).join('');
+    const yTicksR = [0, 0.5, 1].map((v) =>
+      `<g class="ytick"><line x1="${W - padR}" x2="${W - padR + 3}" y1="${yForP(v)}" y2="${yForP(v)}"/><text x="${W - padR + 6}" y="${yForP(v) + 3}" text-anchor="start">${Math.round(v * 100)}%</text></g>`).join('');
+    const target = `<line class="adh-target" x1="${padL}" x2="${W - padR}" y1="${yForP(0.85)}" y2="${yForP(0.85)}" stroke-dasharray="3 4"/>`;
+
+    const totals = buckets.reduce((a, b) => ({
+      onTime: a.onTime + b.onTime, slipped: a.slipped + b.slipped,
+    }), { onTime: 0, slipped: 0 });
+    const overall = totals.onTime + totals.slipped;
+    const overallPct = overall ? Math.round(totals.onTime / overall * 100) : null;
+
+    return `
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
+        ${yTicksL}${yTicksR}
+        ${target}
+        ${bars}
+        <path d="${pathD}" class="adh-line"/>
+        ${dots}
+        ${months}
+      </svg>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="dot" style="background:var(--ok)"></span>On time</span>
+        <span class="legend-item"><span class="dot" style="background:var(--bad)"></span>Slipped</span>
+        <span class="legend-item"><span class="dot" style="background:var(--accent-2)"></span>Adherence %</span>
+        <span class="legend-item legend-target">— — target 85%</span>
+      </div>
+      <div class="chart-foot">
+        Last ${weeks}w — <b>${totals.onTime}</b> on time, <b>${totals.slipped}</b> slipped, overall <b class="${overallPct == null ? '' : overallPct >= 85 ? 'ok' : overallPct >= 70 ? 'warn' : 'bad'}">${overallPct == null ? '—' : overallPct + '%'}</b>
+      </div>`;
+  }
+
+  function chartProductivityTrend(weeks = 12) {
+    const W = 600, H = 220;
+    const padL = 42, padR = 42, padT = 14, padB = 26;
+    const innerW = W - padL - padR, innerH = H - padT - padB;
+    const buckets = deliveryWeeklyBuckets(weeks);
+    const hourMax = Math.max(20, ...buckets.flatMap((b) => [b.plannedHrs, b.loggedHrs]));
+    // Ratio axis uses a symmetric clamp around 1× so over/underperformance
+    // are both readable; cap at ~2× so a single outlier doesn't squash the
+    // line to nothing.
+    const ratios = buckets.map((b) => b.productivity).filter((r) => r != null);
+    const ratioCap = Math.min(2, Math.max(1.5, ...ratios.map((r) => r + 0.1)));
+    const groupW = innerW / weeks;
+    const barW = (groupW - 4) / 2;
+    const xFor = (i) => padL + i * groupW;
+    const yForH = (v) => padT + innerH - (v / hourMax) * innerH;
+    const yForR = (v) => padT + innerH - (v / ratioCap) * innerH;
+
+    const bars = buckets.map((b, i) => {
+      const xBase = xFor(i) + 2;
+      const yP = yForH(b.plannedHrs);
+      const yL = yForH(b.loggedHrs);
+      const baseLine = padT + innerH;
+      return `
+        <rect class="prod-bar-pl" x="${xBase}" y="${yP}" width="${barW}" height="${Math.max(0, baseLine - yP)}" rx="2">
+          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${Math.round(b.plannedHrs)}h planned</title>
+        </rect>
+        <rect class="prod-bar-lg" x="${xBase + barW}" y="${yL}" width="${barW}" height="${Math.max(0, baseLine - yL)}" rx="2">
+          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${Math.round(b.loggedHrs)}h logged</title>
+        </rect>`;
+    }).join('');
+
+    const pts = buckets.map((b, i) => b.productivity == null ? null
+      : { x: xFor(i) + groupW / 2, y: yForR(Math.min(ratioCap, b.productivity)), r: b.productivity });
+    let pathD = '';
+    pts.forEach((p) => {
+      if (!p) return;
+      pathD += (pathD === '' ? `M ${p.x.toFixed(1)} ${p.y.toFixed(1)}` : ` L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`);
+    });
+    const dots = pts.map((p, i) => !p ? '' :
+      `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="3" class="prod-line-dot">
+         <title>Week of ${buckets[i].start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${p.r.toFixed(2)}× productivity</title>
+       </circle>`).join('');
+
+    const months = buckets.map((b, i) => {
+      if (b.start.getDate() > 7) return '';
+      return `<text class="chart-tick" x="${(xFor(i) + groupW/2)}" y="${H - 6}" text-anchor="middle">${b.start.toLocaleDateString(undefined, { month: 'short' })}</text>`;
+    }).join('');
+    const yTicksL = [0, Math.round(hourMax / 2), Math.round(hourMax)].map((v) =>
+      `<g class="ytick"><line x1="${padL - 3}" x2="${padL}" y1="${yForH(v)}" y2="${yForH(v)}"/><text x="${padL - 6}" y="${yForH(v) + 3}" text-anchor="end">${v}h</text></g>`).join('');
+    const yTicksR = [0, 1, ratioCap].map((v) =>
+      `<g class="ytick"><line x1="${W - padR}" x2="${W - padR + 3}" y1="${yForR(v)}" y2="${yForR(v)}"/><text x="${W - padR + 6}" y="${yForR(v) + 3}" text-anchor="start">${v.toFixed(1)}×</text></g>`).join('');
+    const onePar = `<line class="prod-target" x1="${padL}" x2="${W - padR}" y1="${yForR(1)}" y2="${yForR(1)}" stroke-dasharray="3 4"/>`;
+
+    const totals = buckets.reduce((a, b) => ({
+      planned: a.planned + b.plannedHrs, logged: a.logged + b.loggedHrs, done: a.done + b.doneInWindow,
+    }), { planned: 0, logged: 0, done: 0 });
+    const overall = totals.logged > 0 ? totals.planned / totals.logged : null;
+
+    return `
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
+        ${yTicksL}${yTicksR}
+        ${onePar}
+        ${bars}
+        <path d="${pathD}" class="prod-line"/>
+        ${dots}
+        ${months}
+      </svg>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="dot" style="background:var(--accent)"></span>Planned hours</span>
+        <span class="legend-item"><span class="dot" style="background:var(--accent-2)"></span>Logged hours</span>
+        <span class="legend-item"><span class="dot" style="background:var(--ok)"></span>Productivity ×</span>
+        <span class="legend-item legend-target">— — par 1.0×</span>
+      </div>
+      <div class="chart-foot">
+        Last ${weeks}w — <b>${Math.round(totals.planned)}h</b> planned / <b>${Math.round(totals.logged)}h</b> logged across <b>${totals.done}</b> done actions, overall <b class="${overall == null ? '' : overall >= 1 ? 'ok' : overall >= 0.85 ? 'warn' : 'bad'}">${overall == null ? '—' : overall.toFixed(2) + '×'}</b>
+      </div>`;
+  }
+
   function renderDashboard(root) {
     const proj = curProject();
     const k = kpis();
@@ -14733,6 +15061,7 @@ body.is-row-dragging *        { user-select: none !important; }
           <div class="kpi-value ${k.completionRate >= 70 ? 'ok' : ''}">${k.completionRate}%</div>
           <div class="kpi-sub">${k.done} / ${k.total} done • throughput ${k.throughput}/2w</div>
         </div>
+        ${deliveryTileHTML()}
 
         <div class="panel half">
           <div class="panel-title">Critical focus</div>
@@ -14764,6 +15093,14 @@ body.is-row-dragging *        { user-select: none !important; }
         <div class="dashboard-section-sub">Trends and projections across the portfolio</div>
       </div>
       <div class="charts-grid">
+        <div class="panel chart-panel half">
+          <div class="panel-title">Schedule adherence trend <span class="legend">last 12 weeks • bars = closed actions per week • line = % on-time</span></div>
+          ${chartAdherenceTrend(12)}
+        </div>
+        <div class="panel chart-panel half">
+          <div class="panel-title">Productivity trend <span class="legend">last 12 weeks • bars = hours per week • line = planned ÷ logged</span></div>
+          ${chartProductivityTrend(12)}
+        </div>
         <div class="panel chart-panel">
           <div class="panel-title">Schedule deviation waterfall <span class="legend">x = when forecast was made • y = forecast due • diagonal = delivered now</span></div>
           ${chartWaterfall()}
@@ -16495,7 +16832,6 @@ body.is-row-dragging *        { user-select: none !important; }
             <button class="seg-btn ${roState.kind === 'risk' ? 'active' : ''}" data-kind="risk">Risks</button>
             <button class="seg-btn ${roState.kind === 'opportunity' ? 'active' : ''}" data-kind="opportunity">Opportunities</button>
           </div>
-          <button class="ghost" id="btnRiskCSV" title="Download risks &amp; opportunities as CSV">↓ CSV</button>
           <button class="ghost" id="btnAddRisk">+ Risk</button>
           <button class="ghost" id="btnAddOpp">+ Opportunity</button>
         </div>
@@ -16641,25 +16977,6 @@ body.is-row-dragging *        { user-select: none !important; }
     });
     $('#btnAddRisk').addEventListener('click', () => openQuickAdd('risk', { kind: 'risk' }));
     $('#btnAddOpp').addEventListener('click', () => openQuickAdd('risk', { kind: 'opportunity' }));
-    $('#btnRiskCSV')?.addEventListener('click', () => {
-      const rows = proj.risks
-        .filter((r) => roState.kind === 'all' || (r.kind || 'risk') === roState.kind)
-        .filter((r) => matchesSearch(r.title, r.identifier, r.mitigation, personName(r.owner)));
-      exportCSV(`risks-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, rows, [
-        { header: 'Identifier',         value: 'identifier' },
-        { header: 'Kind',               value: (r) => r.kind || 'risk' },
-        { header: 'Title',              value: 'title' },
-        { header: 'Owner',              value: (r) => personName(r.owner) },
-        { header: 'Inherent probability', value: (r) => getInherent(r).probability },
-        { header: 'Inherent impact',      value: (r) => getInherent(r).impact },
-        { header: 'Inherent score',       value: (r) => { const i = getInherent(r); return i.probability * i.impact; } },
-        { header: 'Residual probability', value: (r) => getResidual(r).probability },
-        { header: 'Residual impact',      value: (r) => getResidual(r).impact },
-        { header: 'Residual score',       value: (r) => { const i = getResidual(r); return i.probability * i.impact; } },
-        { header: 'Mitigation / Capture', value: 'mitigation' },
-        { header: 'Linked action',        value: (r) => r.actionId || '' },
-      ]);
-    });
     draw();
   }
 
@@ -16671,7 +16988,6 @@ body.is-row-dragging *        { user-select: none !important; }
       <div class="page-head">
         <div><div class="page-title">Decisions</div><div class="page-sub">Capture key choices and their rationale.</div></div>
         <div class="page-actions">
-          <button class="ghost" id="btnDecCSV" title="Download decision log as CSV">↓ CSV</button>
           <button class="ghost" id="btnAddDec">+ Decision</button>
         </div>
       </div>
@@ -16785,18 +17101,6 @@ body.is-row-dragging *        { user-select: none !important; }
         }));
     }
     $('#btnAddDec').addEventListener('click', () => openQuickAdd('decision'));
-    $('#btnDecCSV')?.addEventListener('click', () => {
-      exportCSV(`decisions-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, filteredDecisions, [
-        { header: 'ID',         value: 'id' },
-        { header: 'Title',      value: 'title' },
-        { header: 'Rationale',  value: 'rationale' },
-        { header: 'Owner',      value: (d) => personName(d.owner) },
-        { header: 'Date',       value: 'date' },
-        { header: 'Component',  value: (d) => findComponent(proj, d.component)?.name || '' },
-        { header: 'Status',     value: (d) => d.status || '' },
-        { header: 'Trigger',    value: (d) => d.triggerRef || '' },
-      ]);
-    });
   }
 
   function openDecisionEditor(decisionId) {
@@ -17013,7 +17317,6 @@ body.is-row-dragging *        { user-select: none !important; }
             <button class="seg-btn ${crFilterState.status === 'all' ? 'active' : ''}" data-cr-filter="all">All</button>
             ${CR_STATUSES.map((s) => `<button class="seg-btn ${crFilterState.status === s.id ? 'active' : ''}" data-cr-filter="${s.id}">${s.label}</button>`).join('')}
           </div>
-          <button class="ghost" id="btnCRCSV" title="Download change requests as CSV">↓ CSV</button>
           <button class="ghost" id="btnAddCR">+ Change request</button>
         </div>
       </div>
@@ -17244,31 +17547,6 @@ body.is-row-dragging *        { user-select: none !important; }
     $('#btnAddCR').addEventListener('click', () => {
       if (curProjectIsMerged()) { toast('Pick a single project to add items.'); return; }
       openChangeRequestEditor(newChangeRequestDraft());
-    });
-    $('#btnCRCSV')?.addEventListener('click', () => {
-      const rows = (proj.changes || []).filter((c) =>
-        (crFilterState.status === 'all' || c.status === crFilterState.status) &&
-        matchesSearch(c.title, c.rationale, c.description, c.analysis)
-      );
-      exportCSV(`change-requests-${proj.name.replace(/\s+/g,'_')}-${todayISO()}.csv`, rows, [
-        { header: 'ID',                  value: 'id' },
-        { header: 'Title',               value: 'title' },
-        { header: 'Status',              value: (c) => (CR_STATUSES.find((s) => s.id === c.status) || {}).label || c.status },
-        { header: 'Priority',            value: (c) => priorityLevel(c.priorityLevel).label },
-        { header: 'Originator',          value: (c) => personName(c.originator) },
-        { header: 'Originated',          value: 'originatedDate' },
-        { header: 'Decision by',         value: (c) => personName(c.decisionBy) },
-        { header: 'Decision date',       value: 'decisionDate' },
-        { header: 'Component',           value: (c) => findComponent(proj, c.component)?.name || '' },
-        { header: 'Impact: schedule (d)', value: (c) => c.impact?.schedule ?? '' },
-        { header: 'Impact: cost (€)',     value: (c) => c.impact?.cost ?? '' },
-        { header: 'Impact: scope',        value: (c) => c.impact?.scope || '' },
-        { header: 'Impact: risk',         value: (c) => c.impact?.risk || '' },
-        { header: 'Rationale',           value: 'rationale' },
-        { header: 'Description',         value: 'description' },
-        { header: 'Analysis',            value: 'analysis' },
-        { header: 'Link',                value: 'linkUrl' },
-      ]);
     });
     draw();
   }
@@ -18250,6 +18528,20 @@ body.is-row-dragging *        { user-select: none !important; }
   }
   function fmtMoney(v) { return fmtBudgetVal(v, 'cost'); }
 
+  // Per-cost-centre legend filter — Set of entity IDs (component or
+  // person) that are currently HIDDEN in that cost centre's chart.
+  // Session-local: not persisted to state, resets when the user
+  // reloads the app. The map is keyed by cc code; the inner Set is
+  // shared between component and person mode for that CC since the
+  // entity id namespaces don't overlap.
+  const _budgetHidden = {};
+  const isBudgetHidden = (cc, id) => !!_budgetHidden[cc]?.has(id);
+  const toggleBudgetHidden = (cc, id) => {
+    if (!_budgetHidden[cc]) _budgetHidden[cc] = new Set();
+    if (_budgetHidden[cc].has(id)) _budgetHidden[cc].delete(id);
+    else _budgetHidden[cc].add(id);
+  };
+
   function renderBudgets(root) {
     state.budgets = state.budgets || {};
     state.settings = state.settings || {};
@@ -18386,6 +18678,7 @@ body.is-row-dragging *        { user-select: none !important; }
                 <input type="date" class="bc-end"   data-cc="${escapeHTML(cc)}" value="${range.end}" />
               </span>
               <div class="budget-legend" id="legend-${safe}"></div>
+              <button type="button" class="bc-delete-cc" data-cc="${escapeHTML(cc)}" title="Delete this cost centre" aria-label="Delete cost centre ${escapeHTML(cc)}">×</button>
             </div>
             <div class="budget-kpis" id="kpis-${safe}"></div>
             <div class="budget-chart-wrap"><svg class="budget-chart" id="chart-${safe}"></svg></div>
@@ -18418,6 +18711,56 @@ body.is-row-dragging *        { user-select: none !important; }
           endInp.value   = eff.end;
           const weeks = weekStartsForRange(eff);
           drawChart(cc, weeks);
+        });
+      });
+      // Wire per-CC delete buttons. Counts linked components + actions
+      // across ALL projects (not just the scoped one — a CC is portfolio
+      // level), spells the impact out in the confirm, and on yes drops
+      // every reference: budgets, range, project lists, and component
+      // costCenter pointers. Components and actions themselves stay.
+      $$('.bc-delete-cc', list).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const cc = btn.dataset.cc;
+          if (!cc) return;
+          let linkedComponents = 0;
+          let projectsTouching = 0;
+          const compIds = new Set();
+          state.projects.forEach((p) => {
+            let projHasLink = false;
+            (p.components || []).forEach((c) => {
+              if (c.costCenter === cc) {
+                linkedComponents++;
+                compIds.add(c.id);
+                projHasLink = true;
+              }
+            });
+            if ((p.costCenters || []).includes(cc)) projHasLink = true;
+            if (projHasLink) projectsTouching++;
+          });
+          let linkedActions = 0;
+          state.projects.forEach((p) => (p.actions || []).forEach((a) => {
+            if (a.deletedAt) return;
+            if (compIds.has(a.component)) linkedActions++;
+          }));
+          const weekRows = Object.values(state.budgets?.[cc] || {}).filter((v) => Number(v) > 0).length;
+          const lines = [`Delete cost centre "${cc}"?`, ''];
+          if (weekRows)         lines.push(`• ${weekRows} week${weekRows === 1 ? '' : 's'} of budget data will be removed.`);
+          if (linkedComponents) lines.push(`• ${linkedComponents} component${linkedComponents === 1 ? '' : 's'} in ${projectsTouching} project${projectsTouching === 1 ? '' : 's'} will be unlinked from this cost centre.`);
+          if (linkedActions)    lines.push(`• ${linkedActions} action${linkedActions === 1 ? '' : 's'} on those components will keep working but no longer roll up to this CC.`);
+          if (!weekRows && !linkedComponents) lines.push('No linked data — safe to delete.');
+          lines.push('', 'This cannot be undone (except via the in-session undo). Continue?');
+          if (!confirm(lines.join('\n'))) return;
+          // Mutate
+          if (state.budgets) delete state.budgets[cc];
+          if (state.settings?.budgetRanges) delete state.settings.budgetRanges[cc];
+          state.projects.forEach((p) => {
+            if (Array.isArray(p.costCenters)) p.costCenters = p.costCenters.filter((x) => x !== cc);
+            (p.components || []).forEach((c) => { if (c.costCenter === cc) c.costCenter = null; });
+          });
+          // Forget session-local legend hidden state for this CC
+          delete _budgetHidden[cc];
+          saveState();
+          renderBudgets(root);
         });
       });
     }
@@ -18503,10 +18846,12 @@ body.is-row-dragging *        { user-select: none !important; }
       const groupBy = state.settings.budgetGroupBy;
 
       // Build the layer entities (component or person), per-week values, and color.
-      let layerEntities;
+      // allLayerEntities = full list for legend rendering (so the user can
+      // click to unhide). layerEntities = visible-only subset used by chart.
+      let allLayerEntities;
       if (groupBy === 'person') {
         const ppl = peopleForCC(cc);
-        layerEntities = ppl.map((person, idx) => {
+        allLayerEntities = ppl.map((person, idx) => {
           const series = weeks.map((w) => {
             const ent = _ccPersonBreakdownForWeek(cc, w.isoStart)[person.id];
             if (!ent) return 0;
@@ -18516,7 +18861,7 @@ body.is-row-dragging *        { user-select: none !important; }
         });
       } else {
         const comps = componentsForCC(cc).map(({ component }) => component);
-        layerEntities = comps.map((component) => {
+        allLayerEntities = comps.map((component) => {
           const series = weeks.map((w) => {
             const ent = _ccComponentBreakdownForWeek(cc, w.isoStart)[component.id];
             if (!ent) return 0;
@@ -18525,6 +18870,9 @@ body.is-row-dragging *        { user-select: none !important; }
           return { kind: 'component', id: component.id, name: component.name, series, color: componentColor(component.color) };
         });
       }
+      // Filter hidden entities out of the drawn stack — legend still shows
+      // them (with a muted style) so they can be re-enabled.
+      const layerEntities = allLayerEntities.filter((ent) => !isBudgetHidden(cc, ent.id));
 
       // Aggregate each layer's per-week series to monthly totals so they
       // share Y units with the budget step line. Stacking is done at the
@@ -18589,13 +18937,23 @@ body.is-row-dragging *        { user-select: none !important; }
           stroke-width="0.7"><title>${escapeHTML(l.ent.name)}</title></path>`;
       }).join('');
 
-      // Populate the chip legend with entities matching the current group-by mode
+      // Populate the chip legend with EVERY entity (including hidden
+      // ones, styled muted) so the user can toggle each on / off.
       const legendEl = document.getElementById(`legend-${safe}`);
       if (legendEl) {
-        legendEl.innerHTML = layerEntities.map((ent) => {
+        legendEl.innerHTML = allLayerEntities.map((ent) => {
           const c = ent.color;
-          return `<span class="component-chip" style="background:rgba(${c.rgb},.2);color:rgb(${c.rgb})" title="${escapeHTML(ent.kind)}">${escapeHTML(ent.name)}</span>`;
+          const hidden = isBudgetHidden(cc, ent.id);
+          return `<button type="button" class="component-chip b-legend-chip${hidden ? ' is-hidden' : ''}" data-cc="${escapeHTML(cc)}" data-ent-id="${escapeHTML(ent.id)}" style="background:rgba(${c.rgb},${hidden ? .06 : .2});color:rgb(${c.rgb});border-color:rgba(${c.rgb},${hidden ? .35 : .6})" title="Click to ${hidden ? 'show' : 'hide'} ${escapeHTML(ent.name)} in this chart">${escapeHTML(ent.name)}</button>`;
         }).join('');
+        // Wire clicks — toggle the entity's hidden state and redraw
+        // only this chart (other cost centres are untouched).
+        legendEl.querySelectorAll('.b-legend-chip').forEach((chip) => {
+          chip.addEventListener('click', () => {
+            toggleBudgetHidden(cc, chip.dataset.entId);
+            drawChart(cc, weeks);
+          });
+        });
       }
 
       // monthGroups is precomputed at the top of drawChart so the Y-axis
@@ -19128,7 +19486,6 @@ body.is-row-dragging *        { user-select: none !important; }
       <div class="page-head">
         <div><div class="page-title">People</div><div class="page-sub">${state.people.length} members • capacity in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year) • workload across all projects, projected over the next 12 weeks</div></div>
         <div class="page-actions">
-          <button class="ghost" id="btnPeopleCSV" title="Download the roster + current load as CSV">↓ CSV</button>
           <button class="ghost" id="btnNewPerson">+ Person</button>
         </div>
       </div>
@@ -19177,21 +19534,6 @@ body.is-row-dragging *        { user-select: none !important; }
       </div>`;
     root.appendChild(view);
     $('#btnNewPerson').addEventListener('click', () => openQuickAdd('person'));
-    $('#btnPeopleCSV')?.addEventListener('click', () => {
-      // One row per person with current load + peak across the 12-week horizon.
-      const rows = wl.filter(({ p }) => matchesSearch(p.name, p.role));
-      exportCSV(`people-${todayISO()}.csv`, rows, [
-        { header: 'ID',            value: ({ p }) => p.id },
-        { header: 'Name',          value: ({ p }) => p.name },
-        { header: 'Role',          value: ({ p }) => p.role || '' },
-        { header: 'Capacity %',    value: ({ p }) => p.capacity || 100 },
-        { header: 'Hourly rate',   value: ({ p }) => p.hourlyRate || '' },
-        { header: 'Open actions',  value: ({ open }) => open },
-        { header: 'Current load %', value: ({ series }) => series[0]?.count ?? 0 },
-        { header: 'Peak load %',   value: ({ peakWeek }) => peakWeek?.count ?? 0 },
-        { header: 'Peak week',     value: ({ peakWeek }) => peakWeek?.weekStart ? fmtISO(peakWeek.weekStart) : '' },
-      ]);
-    });
     wireListReorder(view.querySelector('#peopleWl'), {
       rowSelector: '.person-row[data-owner-id]',
       idAttr: 'ownerId',
@@ -21903,30 +22245,424 @@ body.is-row-dragging *        { user-select: none !important; }
   // function (row) => any. Numbers serialise unquoted, everything
   // else as a CSV-escaped string. Uses CRLF line endings + UTF-8 BOM
   // so Excel/Numbers open it without prompting for encoding.
-  function exportCSV(filename, rows, columns) {
-    const esc = (v) => {
-      if (v == null) return '';
-      if (typeof v === 'number' && Number.isFinite(v)) return String(v);
-      const s = String(v);
-      if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
-      return s;
-    };
-    const lines = [];
-    lines.push(columns.map((c) => esc(c.header)).join(','));
-    rows.forEach((r) => {
-      lines.push(columns.map((c) => {
-        const v = typeof c.value === 'function' ? c.value(r) : r?.[c.value];
-        return esc(v);
-      }).join(','));
+  /* ────────────────── Project export (.xlsx with tabs) ──────────────────
+   * Single download that bundles Actions, Open points, Risks & Opps,
+   * Decisions, Change requests, People, and Budgets — one sheet per
+   * domain — into one Excel file. The xlsx is OOXML inside a PKZIP, and
+   * we write both ourselves so the app stays dependency-free.
+   *
+   * Compression mode is "store" (no DEFLATE) — Excel still opens it, the
+   * code is ~80 lines instead of bundling a deflate implementation, and
+   * project-sized payloads (a few thousand rows) stay well under a few
+   * MB. CRC32 is computed per entry as the spec requires.
+   */
+
+  // CRC32 with cached table — needed for every zip entry's checksum.
+  function _crc32(buf) {
+    let table = _crc32._t;
+    if (!table) {
+      table = new Uint32Array(256);
+      for (let i = 0; i < 256; i++) {
+        let c = i;
+        for (let j = 0; j < 8; j++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+        table[i] = c;
+      }
+      _crc32._t = table;
+    }
+    let c = 0xffffffff;
+    for (let i = 0; i < buf.length; i++) c = table[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  }
+
+  // Minimal store-only PKZIP writer. `entries` is [{name, data:Uint8Array}].
+  function _zipStore(entries) {
+    const enc = new TextEncoder();
+    const parts = [];
+    const central = [];
+    let offset = 0;
+    for (const ent of entries) {
+      const nameB = enc.encode(ent.name);
+      const data = ent.data;
+      const crc = _crc32(data);
+      const lfh = new Uint8Array(30 + nameB.length);
+      const dv = new DataView(lfh.buffer);
+      dv.setUint32(0, 0x04034b50, true);
+      dv.setUint16(4, 20, true);      // version needed
+      dv.setUint16(6, 0x0800, true);  // utf-8 flag
+      dv.setUint16(8, 0, true);       // method: store
+      dv.setUint16(10, 0, true);      // mod time
+      dv.setUint16(12, 0, true);      // mod date
+      dv.setUint32(14, crc, true);
+      dv.setUint32(18, data.length, true);
+      dv.setUint32(22, data.length, true);
+      dv.setUint16(26, nameB.length, true);
+      dv.setUint16(28, 0, true);
+      lfh.set(nameB, 30);
+      parts.push(lfh, data);
+
+      const cdh = new Uint8Array(46 + nameB.length);
+      const cv = new DataView(cdh.buffer);
+      cv.setUint32(0, 0x02014b50, true);
+      cv.setUint16(4, 20, true);
+      cv.setUint16(6, 20, true);
+      cv.setUint16(8, 0x0800, true);
+      cv.setUint16(10, 0, true);
+      cv.setUint16(12, 0, true);
+      cv.setUint16(14, 0, true);
+      cv.setUint32(16, crc, true);
+      cv.setUint32(20, data.length, true);
+      cv.setUint32(24, data.length, true);
+      cv.setUint16(28, nameB.length, true);
+      cv.setUint16(30, 0, true);
+      cv.setUint16(32, 0, true);
+      cv.setUint16(34, 0, true);
+      cv.setUint16(36, 0, true);
+      cv.setUint32(38, 0, true);
+      cv.setUint32(42, offset, true);
+      cdh.set(nameB, 46);
+      central.push(cdh);
+
+      offset += lfh.length + data.length;
+    }
+    const cdOffset = offset;
+    const cdLen = central.reduce((s, p) => s + p.length, 0);
+    const eocd = new Uint8Array(22);
+    const ev = new DataView(eocd.buffer);
+    ev.setUint32(0, 0x06054b50, true);
+    ev.setUint16(4, 0, true);
+    ev.setUint16(6, 0, true);
+    ev.setUint16(8, entries.length, true);
+    ev.setUint16(10, entries.length, true);
+    ev.setUint32(12, cdLen, true);
+    ev.setUint32(16, cdOffset, true);
+    ev.setUint16(20, 0, true);
+    const totalLen = offset + cdLen + 22;
+    const out = new Uint8Array(totalLen);
+    let pos = 0;
+    for (const p of parts) { out.set(p, pos); pos += p.length; }
+    for (const p of central) { out.set(p, pos); pos += p.length; }
+    out.set(eocd, pos);
+    return out;
+  }
+
+  // Tiny XML escape + column-letter helper for cell refs (A, B, …, Z, AA, AB…).
+  function _xmlEsc(s) {
+    return String(s).replace(/[<>&"']/g, (c) => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&apos;'}[c]));
+  }
+  function _colLetter(i) {
+    let s = '';
+    i++;
+    while (i > 0) { i--; s = String.fromCharCode(65 + (i % 26)) + s; i = Math.floor(i / 26); }
+    return s;
+  }
+
+  // Build the OOXML for one worksheet. Numbers go as <c t="n"><v>…</v>,
+  // everything else as inline strings. Empty cells are omitted entirely
+  // (xlsx supports sparse rows and that keeps the file small).
+  function _buildSheetXml(headers, rows) {
+    let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    xml += '<sheetData>';
+    xml += '<row r="1">';
+    headers.forEach((h, i) => {
+      xml += `<c r="${_colLetter(i)}1" t="inlineStr"><is><t>${_xmlEsc(h)}</t></is></c>`;
     });
-    const csv = '﻿' + lines.join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    xml += '</row>';
+    rows.forEach((row, rIdx) => {
+      const r = rIdx + 2;
+      xml += `<row r="${r}">`;
+      row.forEach((v, cIdx) => {
+        if (v == null || v === '') return;
+        const ref = `${_colLetter(cIdx)}${r}`;
+        if (typeof v === 'number' && Number.isFinite(v)) {
+          xml += `<c r="${ref}" t="n"><v>${v}</v></c>`;
+        } else {
+          xml += `<c r="${ref}" t="inlineStr"><is><t>${_xmlEsc(String(v))}</t></is></c>`;
+        }
+      });
+      xml += '</row>';
+    });
+    xml += '</sheetData></worksheet>';
+    return xml;
+  }
+
+  // Assemble the full xlsx archive. Sheet names are sanitised to Excel's
+  // 31-char limit and stripped of disallowed characters.
+  function _buildXLSX(sheets) {
+    const enc = new TextEncoder();
+    const safeName = (n) => n.replace(/[\\\/?*[\]:]/g, '_').slice(0, 31);
+    const sheetItems = sheets.map((s, i) => ({
+      name: safeName(s.name) || `Sheet${i + 1}`,
+      xml: _buildSheetXml(s.headers, s.rows),
+    }));
+    let wb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    wb += '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+    wb += '<sheets>';
+    sheetItems.forEach((s, i) => {
+      wb += `<sheet name="${_xmlEsc(s.name)}" sheetId="${i + 1}" r:id="rId${i + 1}"/>`;
+    });
+    wb += '</sheets></workbook>';
+    let wbRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    wbRels += '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">';
+    sheetItems.forEach((s, i) => {
+      wbRels += `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`;
+    });
+    wbRels += '</Relationships>';
+    const rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+      + '</Relationships>';
+    let ct = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    ct += '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">';
+    ct += '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>';
+    ct += '<Default Extension="xml" ContentType="application/xml"/>';
+    ct += '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
+    sheetItems.forEach((s, i) => {
+      ct += `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`;
+    });
+    ct += '</Types>';
+
+    const entries = [
+      { name: '[Content_Types].xml', data: enc.encode(ct) },
+      { name: '_rels/.rels', data: enc.encode(rootRels) },
+      { name: 'xl/workbook.xml', data: enc.encode(wb) },
+      { name: 'xl/_rels/workbook.xml.rels', data: enc.encode(wbRels) },
+      ...sheetItems.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: enc.encode(s.xml) })),
+    ];
+    return _zipStore(entries);
+  }
+
+  // ── Sheet builders — each produces { name, headers, rows } from current
+  // project scope. `projects` is the list to walk (one project, or every
+  // non-archived project for the All-projects view).
+  function _buildProjectExportSheets(projects, multiProject) {
+    const projLabel = (p) => p?.name || '';
+    const sheets = [];
+
+    // 1) Actions — register-style columns
+    const actionRows = [];
+    projects.forEach((p) => {
+      (p.actions || []).filter((a) => !a.deletedAt).forEach((a) => {
+        actionRows.push([
+          ...(multiProject ? [projLabel(p)] : []),
+          a.id,
+          a.title,
+          findComponent(p, a.component)?.name || '',
+          personName(a.owner),
+          (STATUSES.find((s) => s.id === a.status) || {}).name || a.status,
+          priorityLevel(a.priorityLevel).label,
+          (typeof a.commitment === 'number') ? a.commitment : '',
+          a.startDate || '',
+          a.due || '',
+          predictedCompletion(a) || '',
+          personName(a.originator),
+          a.originatorDate || a.createdAt || '',
+          a.baseline?.due || '',
+          baselineSlipDays(a) ?? '',
+          Number(totalLoggedHours(a).toFixed(2)),
+          Number(plannedHoursTotal(a).toFixed(2)),
+          percentComplete(a),
+          (a.tags || []).map((tid) => (p.tags || []).find((t) => t.id === tid)?.name || '').filter(Boolean).join('; '),
+          (a.dependsOn || []).join('; '),
+          a.createdAt || '',
+          a.updatedAt || '',
+        ]);
+      });
+    });
+    sheets.push({
+      name: 'Actions',
+      headers: [
+        ...(multiProject ? ['Project'] : []),
+        'ID', 'Title', 'Component', 'Owner', 'Status', 'Priority', 'Commitment %',
+        'Start', 'Due', 'Predicted', 'Originator', 'Originator date',
+        'Baseline due', 'Variance days', 'Logged hours', 'Planned hours',
+        '% Complete', 'Tags', 'Depends on', 'Created', 'Updated',
+      ],
+      rows: actionRows,
+    });
+
+    // 2) Open points
+    const opRows = [];
+    projects.forEach((p) => {
+      (p.openPoints || []).forEach((op) => {
+        opRows.push([
+          ...(multiProject ? [projLabel(p)] : []),
+          op.identifier || '',
+          op.title || '',
+          findComponent(p, op.component)?.name || '',
+          CRITICALITY_LABEL[op.criticality] || op.criticality || '',
+          priorityLevel(op.priorityLevel).label,
+          op.createdAt || '',
+          (op.steps || []).filter((s) => s.done).length,
+          (op.steps || []).length,
+          (op.notes || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(),
+        ]);
+      });
+    });
+    sheets.push({
+      name: 'Open points',
+      headers: [
+        ...(multiProject ? ['Project'] : []),
+        'Identifier', 'Title', 'Component', 'Criticality', 'Priority',
+        'Created', 'Steps done', 'Steps total', 'Notes (plain)',
+      ],
+      rows: opRows,
+    });
+
+    // 3) Risks & opportunities
+    const riskRows = [];
+    projects.forEach((p) => {
+      (p.risks || []).forEach((r) => {
+        const inh = getInherent(r), res = getResidual(r);
+        riskRows.push([
+          ...(multiProject ? [projLabel(p)] : []),
+          r.identifier || '',
+          r.kind || 'risk',
+          r.title || '',
+          personName(r.owner),
+          inh.probability, inh.impact, inh.probability * inh.impact,
+          res.probability, res.impact, res.probability * res.impact,
+          r.mitigation || '',
+          r.actionId || '',
+        ]);
+      });
+    });
+    sheets.push({
+      name: 'Risks & Opps',
+      headers: [
+        ...(multiProject ? ['Project'] : []),
+        'Identifier', 'Kind', 'Title', 'Owner',
+        'Inherent probability', 'Inherent impact', 'Inherent score',
+        'Residual probability', 'Residual impact', 'Residual score',
+        'Mitigation / Capture', 'Linked action',
+      ],
+      rows: riskRows,
+    });
+
+    // 4) Decisions
+    const decRows = [];
+    projects.forEach((p) => {
+      (p.decisions || []).forEach((d) => {
+        decRows.push([
+          ...(multiProject ? [projLabel(p)] : []),
+          d.id,
+          d.title || '',
+          d.rationale || '',
+          personName(d.owner),
+          d.date || '',
+          findComponent(p, d.component)?.name || '',
+          d.status || '',
+          d.triggerRef || '',
+        ]);
+      });
+    });
+    sheets.push({
+      name: 'Decisions',
+      headers: [
+        ...(multiProject ? ['Project'] : []),
+        'ID', 'Title', 'Rationale', 'Owner', 'Date', 'Component', 'Status', 'Trigger',
+      ],
+      rows: decRows,
+    });
+
+    // 5) Change requests
+    const crRows = [];
+    projects.forEach((p) => {
+      (p.changes || []).forEach((c) => {
+        crRows.push([
+          ...(multiProject ? [projLabel(p)] : []),
+          c.id,
+          c.title || '',
+          (CR_STATUSES.find((s) => s.id === c.status) || {}).label || c.status || '',
+          priorityLevel(c.priorityLevel).label,
+          personName(c.originator),
+          c.originatedDate || '',
+          personName(c.decisionBy),
+          c.decisionDate || '',
+          findComponent(p, c.component)?.name || '',
+          c.impact?.schedule ?? '',
+          c.impact?.cost ?? '',
+          c.impact?.scope || '',
+          c.impact?.risk || '',
+          c.rationale || '',
+          c.description || '',
+          c.analysis || '',
+          c.linkUrl || '',
+        ]);
+      });
+    });
+    sheets.push({
+      name: 'Change requests',
+      headers: [
+        ...(multiProject ? ['Project'] : []),
+        'ID', 'Title', 'Status', 'Priority', 'Originator', 'Originated',
+        'Decision by', 'Decision date', 'Component',
+        'Impact: schedule (d)', 'Impact: cost (€)', 'Impact: scope', 'Impact: risk',
+        'Rationale', 'Description', 'Analysis', 'Link',
+      ],
+      rows: crRows,
+    });
+
+    // 6) People — always portfolio-wide; no Project column.
+    const peopleRows = state.people.map((p) => [
+      p.id,
+      p.name || '',
+      p.role || '',
+      p.capacity || 100,
+      p.hourlyRate || '',
+    ]);
+    sheets.push({
+      name: 'People',
+      headers: ['ID', 'Name', 'Role', 'Capacity %', 'Hourly rate'],
+      rows: peopleRows,
+    });
+
+    // 7) Budgets — one row per (cost-centre, week-start) with the weekly
+    // budget figure. Cost centres are project-level but the budget map is
+    // portfolio-level, so we list the projects each CC appears under.
+    const budgetRows = [];
+    if (state.budgets) {
+      const ccProjects = (cc) => state.projects
+        .filter((pp) => (pp.costCenters || []).includes(cc) || (pp.components || []).some((c) => c.costCenter === cc))
+        .map((pp) => pp.name)
+        .join('; ');
+      Object.keys(state.budgets).sort().forEach((cc) => {
+        const byWeek = state.budgets[cc] || {};
+        Object.keys(byWeek).sort().forEach((iso) => {
+          const v = Number(byWeek[iso]);
+          if (!Number.isFinite(v) || v === 0) return;
+          budgetRows.push([cc, ccProjects(cc), iso, v]);
+        });
+      });
+    }
+    sheets.push({
+      name: 'Budgets',
+      headers: ['Cost centre', 'Projects', 'Week start (ISO)', 'Budget hours'],
+      rows: budgetRows,
+    });
+
+    return sheets;
+  }
+
+  // Public entry point — wired to the sidebar's spreadsheet button.
+  function exportProjectXLSX() {
+    flushPendingSaves();
+    const merged = curProjectIsMerged();
+    const projects = merged
+      ? (state.settings.showArchivedProjects ? state.projects : state.projects.filter((p) => !p.archived))
+      : [curProject()];
+    const sheets = _buildProjectExportSheets(projects, merged);
+    const bytes = _buildXLSX(sheets);
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = filename;
+    const label = merged ? 'portfolio' : (curProject()?.name || 'project').replace(/\s+/g, '_');
+    a.href = url;
+    a.download = `cockpit-${label}-${todayISO()}.xlsx`;
     a.click();
     URL.revokeObjectURL(url);
-    toast(`Exported ${rows.length} row${rows.length === 1 ? '' : 's'} → ${filename}`);
+    const totalRows = sheets.reduce((s, sh) => s + sh.rows.length, 0);
+    toast(`Exported ${sheets.length} sheets · ${totalRows} rows → ${a.download}`);
   }
 
   function exportJSON() {
@@ -26332,6 +27068,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     wirePalette();
 
     $('#btnExport').addEventListener('click', exportJSON);
+    $('#btnExportXLSX')?.addEventListener('click', exportProjectXLSX);
     // Single Import button now hosts both replace + merge — picker chooses.
     $('#btnImport').addEventListener('click', openImportPicker);
     $('#btnEmpty').addEventListener('click', () => {
