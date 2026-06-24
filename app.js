@@ -15959,10 +15959,18 @@
 
       // ── Delivery KPIs ────────────────────────────────────────────────
       // Adherence: on-time done in the 30-day window ÷ all done in window.
-      // Promised due = baseline if set, else current due.
-      const adherenceF =
-        `IFERROR(SUMPRODUCT(${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*(${_r(aCompleted)}<=IF(${_r(aBaseline)}<>"",${_r(aBaseline)},${_r(aDue)})))`
-        + ` / SUMPRODUCT(${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))) * 100, "")`;
+      // Promised due = baseline if set, else current due. We can't fold
+      // that condition into a single SUMPRODUCT via IF() — Excel doesn't
+      // apply IF element-wise inside SUMPRODUCT unless the cell is
+      // entered as an array formula, and IFERROR then swallows the
+      // resulting #VALUE!, leaving the cell blank. Splitting into two
+      // SUMPRODUCTs (with-baseline vs without) keeps the formula purely
+      // boolean-arithmetic and works in every Excel.
+      const adhWindow = `${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))`;
+      const adhNumA   = `SUMPRODUCT(${adhWindow}*(${_r(aBaseline)}<>"")*(${_r(aCompleted)}<=${_r(aBaseline)}))`;
+      const adhNumB   = `SUMPRODUCT(${adhWindow}*(${_r(aBaseline)}="")*(${_r(aCompleted)}<=${_r(aDue)}))`;
+      const adhDen    = `SUMPRODUCT(${adhWindow})`;
+      const adherenceF = `IFERROR((${adhNumA}+${adhNumB})/${adhDen}*100, "")`;
       pushF(p, 'Schedule adherence (30d)', adherenceF,
         (delivery.adherenceN >= 5 && delivery.adherence != null) ? Number((delivery.adherence * 100).toFixed(1)) : '',
         '%',
@@ -16087,7 +16095,14 @@
       const fTodo      = `COUNTIF(Actions!${aSt}:${aSt},"Not started")`;
       const fDoing     = `COUNTIF(Actions!${aSt}:${aSt},"In progress")`;
       const fCancelled = `COUNTIF(Actions!${aSt}:${aSt},"Cancelled")`;
-      const fAdherence = `IFERROR(SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*(${_ref(aCm)}<=IF(${_ref(aBl)}<>"",${_ref(aBl)},${_ref(aDu)})))/SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd")))*100, "")`;
+      // Split into with-baseline vs without — see comment on adherenceF
+      // in the KPI builder for why IF inside SUMPRODUCT is unsafe here.
+      const dashAdhWindow = `(${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))`;
+      const fAdherence =
+        `IFERROR(`
+        + `(SUMPRODUCT(${dashAdhWindow}*(${_ref(aBl)}<>"")*(${_ref(aCm)}<=${_ref(aBl)}))`
+        + `+SUMPRODUCT(${dashAdhWindow}*(${_ref(aBl)}="")*(${_ref(aCm)}<=${_ref(aDu)})))`
+        + `/SUMPRODUCT(${dashAdhWindow})*100, "")`;
       const fProductivity = `IFERROR(SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*${_ref(aPl)})/SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*${_ref(aLg)}), "")`;
       const fBac = `SUMPRODUCT((${_ref(aSt)}<>"Cancelled")*(${_ref(aSt)}<>"")*${_ref(aPl)}*${_ref(aRt)})`;
       const fPv  = `SUMPRODUCT((${_ref(aSt)}<>"Cancelled")*(${_ref(aSt)}<>"")*${_ref(aPv)}*${_ref(aRt)})`;
