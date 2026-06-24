@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-16T22:55:16.021Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-22T21:52:19.378Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -9858,7 +9858,30 @@ body.is-row-dragging *        { user-select: none !important; }
     view.appendChild(zones);
 
     const board = document.createElement('div');
-    board.className = 'board';
+    board.className = 'board copyable-chart';
+    board.dataset.chart = 'kanban-board';
+    // Tell the PNG capturer to relax column scroll constraints so the
+    // exported image contains every card, not just what's visible.
+    registerChartCapture('kanban-board', { expandSelectors: ['.col-body', '.board'] });
+    registerChartData('kanban-board', () => {
+      const rows = [];
+      STATUSES.forEach((s) => {
+        (proj.actions || [])
+          .filter((a) => a.status === s.id && actionMatchesFilters(a) && !a.deletedAt)
+          .forEach((a) => rows.push([
+            s.name, a.id, a.title,
+            findComponent(proj, a.component)?.name || '',
+            personName(a.owner),
+            priorityLevel(a.priorityLevel).label,
+            a.due || '',
+            percentComplete(a),
+          ]));
+      });
+      return {
+        headers: ['Column', 'ID', 'Title', 'Component', 'Owner', 'Priority', 'Due', '% Complete'],
+        rows,
+      };
+    });
     STATUSES.forEach((s) => {
       const items = (proj.actions || [])
         .filter((a) => a.status === s.id && actionMatchesFilters(a))
@@ -11121,6 +11144,18 @@ body.is-row-dragging *        { user-select: none !important; }
       .filter((a) => !_cloudState.priorityFilter || (a.priorityLevel || 'med') === _cloudState.priorityFilter)
       .map((a) => ({ a, proj: p })));
 
+    registerChartData('action-cloud', () => ({
+      headers: ['Project', 'Identifier', 'Title', 'Owner', 'Status', 'Priority', 'Component', 'Due', 'Days to due', '% Complete', 'Composite importance', 'Selected'],
+      rows: allActions.map(({ a, proj }) => [
+        proj.name, a.identifier || '', a.title,
+        personName(a.owner), a.status, priorityLevel(a.priorityLevel).label,
+        findComponent(proj, a.component)?.name || '',
+        a.due || '', actionDaysToDue(a) ?? '',
+        percentComplete(a), Number(actionImportance(a, ctx).toFixed(2)),
+        _cloudState.selection.has(a.id) ? 'yes' : '',
+      ]),
+    }));
+
     const view = document.createElement('div');
     view.className = 'view';
     view.innerHTML = `
@@ -11148,7 +11183,7 @@ body.is-row-dragging *        { user-select: none !important; }
       </div>
       <div class="cloud-canvas-wrap">
         <div class="cloud-canvas-scroll" id="cloudScroll">
-          <svg id="cloudSvg" class="cloud-svg" preserveAspectRatio="xMidYMid meet"></svg>
+          <svg id="cloudSvg" class="cloud-svg copyable-chart" data-chart="action-cloud" preserveAspectRatio="xMidYMid meet"></svg>
         </div>
         <div class="cloud-legend" id="cloudLegend">
           <!-- Legend items are clickable filter toggles. Status items
@@ -12742,11 +12777,40 @@ body.is-row-dragging *        { user-select: none !important; }
       });
       wireBubbleClicks(list);
       wireOpHoverCards(list);
+
+      // Make the whole matrix (an HTML grid) right-click copyable.
+      const matrixEl = list.querySelector('.op-matrix');
+      if (matrixEl) {
+        matrixEl.classList.add('copyable-chart');
+        matrixEl.dataset.chart = 'op-matrix';
+        registerChartData('op-matrix', () => ({
+          headers: ['Criticality', 'Priority', 'Identifier', 'Title', 'Component', 'Age (days)'],
+          rows: items.map((op) => [
+            CRITICALITY_LABEL[op.criticality] || op.criticality || '',
+            priorityLevel(op.priorityLevel).label,
+            op.identifier || '',
+            op.title || '',
+            findComponent(proj, op.component)?.name || '',
+            _opAgeDays(op),
+          ]),
+        }));
+      }
     }
 
     // ─── Bubbles view: single packed circle pile, importance-sized ────
     function drawBubblesView(items) {
       const list = $('#opList');
+      registerChartData('op-bubbles', () => ({
+        headers: ['Identifier', 'Title', 'Criticality', 'Priority', 'Component', 'Composite importance', 'Age (days)'],
+        rows: items.map((op) => [
+          op.identifier || '', op.title || '',
+          CRITICALITY_LABEL[op.criticality] || op.criticality || '',
+          priorityLevel(op.priorityLevel).label,
+          findComponent(proj, op.component)?.name || '',
+          Number(_opImportance(op).toFixed(2)),
+          _opAgeDays(op),
+        ]),
+      }));
       // Bigger natural canvas (1600 × 900) than before so bubbles have
       // room to breathe; the wrapper scrolls horizontally + vertically
       // when the zoomed SVG exceeds the visible area. Sort largest first
@@ -12811,7 +12875,7 @@ body.is-row-dragging *        { user-select: none !important; }
             <span class="op-leg-hint" style="margin-left: 10px;">Bubble size = composite importance · Colour = component · Click any bubble to jump to its row</span>
           </div>
           <div class="op-bubbles-scroll" id="opBubblesScroll">
-            <svg class="op-bubbles-svg" id="opBubblesSvg" viewBox="0 0 ${baseW} ${baseH}" width="${renderW}" height="${renderH}">
+            <svg class="op-bubbles-svg copyable-chart" data-chart="op-bubbles" id="opBubblesSvg" viewBox="0 0 ${baseW} ${baseH}" width="${renderW}" height="${renderH}">
               ${bubbles.map((b) => {
                 let labelSvg = '';
                 if (b.r > 14) {
@@ -13845,7 +13909,7 @@ body.is-row-dragging *        { user-select: none !important; }
           <button class="ghost" id="btnTLToday">Today</button>
         </div>
       </div>
-      <div class="timeline">
+      <div class="timeline copyable-chart" data-chart="gantt">
         <div class="tl-lanes" id="tlLanes"></div>
         <div class="tl-grid-wrap" id="tlGridWrap">
           <div class="tl-axis" id="tlAxis"></div>
@@ -13854,6 +13918,23 @@ body.is-row-dragging *        { user-select: none !important; }
         </div>
       </div>`;
     root.appendChild(view);
+    // Relax the horizontal scroll so the PNG capture includes the full
+    // timeline width, not just the current viewport.
+    registerChartCapture('gantt', { expandSelectors: ['.tl-grid-wrap', '.timeline'] });
+    registerChartData('gantt', () => ({
+      headers: ['ID', 'Title', 'Component', 'Owner', 'Status', 'Start', 'Due', 'Baseline due', '% Complete', 'Logged hours', 'Planned hours'],
+      rows: acts.filter((a) => !a.deletedAt).map((a) => [
+        a.id, a.title,
+        findComponent(proj, a.component)?.name || '',
+        personName(a.owner),
+        (STATUSES.find((s) => s.id === a.status) || {}).name || a.status,
+        a.startDate || '', a.due || '',
+        a.baseline?.due || '',
+        percentComplete(a),
+        Number(totalLoggedHours(a).toFixed(2)),
+        Number(plannedHoursTotal(a).toFixed(2)),
+      ]),
+    }));
 
     if (!tlState) tlState = { granularity: 'day', dayWidth: GRANULARITIES.day.defaultDw, startOffsetDays: -14 };
     if (!state.settings) state.settings = { holidayCountries: [] };
@@ -14925,8 +15006,16 @@ body.is-row-dragging *        { user-select: none !important; }
     const overall = totals.onTime + totals.slipped;
     const overallPct = overall ? Math.round(totals.onTime / overall * 100) : null;
 
+    registerChartData('adherence-trend', () => ({
+      headers: ['Week start', 'On time', 'Slipped', 'Adherence %'],
+      rows: buckets.map((b) => [
+        b.startISO, b.onTime, b.slipped,
+        b.adherence == null ? '' : Math.round(b.adherence * 100),
+      ]),
+    }));
+
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="adherence-trend" preserveAspectRatio="xMidYMid meet">
         ${yTicksL}${yTicksR}
         ${target}
         ${bars}
@@ -15003,8 +15092,19 @@ body.is-row-dragging *        { user-select: none !important; }
     }), { planned: 0, logged: 0, done: 0 });
     const overall = totals.logged > 0 ? totals.planned / totals.logged : null;
 
+    registerChartData('productivity-trend', () => ({
+      headers: ['Week start', 'Planned hours', 'Logged hours', 'Done actions', 'Productivity ×'],
+      rows: buckets.map((b) => [
+        b.startISO,
+        Number(b.plannedHrs.toFixed(2)),
+        Number(b.loggedHrs.toFixed(2)),
+        b.doneInWindow,
+        b.productivity == null ? '' : Number(b.productivity.toFixed(3)),
+      ]),
+    }));
+
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="productivity-trend" preserveAspectRatio="xMidYMid meet">
         ${yTicksL}${yTicksR}
         ${onePar}
         ${bars}
@@ -15251,7 +15351,16 @@ body.is-row-dragging *        { user-select: none !important; }
       const innerH = H - padT - padB;
       const cellW = innerW / 5;
       const cellH = innerH / 5;
-      let svg = `<svg class="risk-heat-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+      registerChartData('risk-heatmap', () => {
+        const rows = [];
+        for (let p = 1; p <= 5; p++) for (let i = 1; i <= 5; i++) {
+          const cell = cells.get(`${p}-${i}`) || [];
+          const tot = cell.reduce((s, x) => s + (getResidual(x.r).probability || 0) * (getResidual(x.r).impact || 0), 0);
+          rows.push([p, i, p * i, cell.length, tot]);
+        }
+        return { headers: ['Probability', 'Impact', 'Base score', 'Items in cell', 'Sum of residual scores'], rows };
+      });
+      let svg = `<svg class="risk-heat-svg copyable-chart" data-chart="risk-heatmap" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
       // Axis labels
       svg += `<text class="rh-axis" x="${padL + innerW/2}" y="${H - 6}" text-anchor="middle">Probability →</text>`;
       svg += `<text class="rh-axis" transform="translate(10, ${padT + innerH/2}) rotate(-90)" text-anchor="middle">Impact →</text>`;
@@ -15525,8 +15634,19 @@ body.is-row-dragging *        { user-select: none !important; }
          <text class="chart-label" x="${W - padR - 4}" y="${Math.max(11, yFor(visibleCap) - 3)}" text-anchor="end">cap ${visibleCap}</text>`
       : '';
 
+    registerChartData('cumulative-workload', () => {
+      const seriesPeople = allPeople.filter((ps) => !ps.hidden);
+      const headers = ['Week start', ...seriesPeople.map((ps) => ps.person.name), 'Total %', 'Cap %'];
+      const rows = (seriesPeople[0]?.series || []).map((s, i) => {
+        const perPerson = seriesPeople.map((ps) => ps.series[i]?.count ?? 0);
+        const tot = perPerson.reduce((a, b) => a + b, 0);
+        return [fmtISO(s.weekStart), ...perPerson, tot, visibleCap];
+      });
+      return { headers, rows };
+    });
+
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="cumulative-workload" preserveAspectRatio="xMidYMid meet">
         ${minorLines.join('')}
         ${capLine}
         ${layers.map((l) => `<path d="${l.path}" fill="rgba(${l.ps.color.rgb},.65)" stroke="rgba(${l.ps.color.rgb},.95)" stroke-width="0.7"><title>${escapeHTML(l.ps.person.name)}</title></path>`).join('')}
@@ -15660,8 +15780,13 @@ body.is-row-dragging *        { user-select: none !important; }
     const net = totals.done - totals.created;
     const netCls = net >= 0 ? 'ok' : 'bad';
 
+    registerChartData('flow', () => ({
+      headers: ['Week start', 'Created', 'Done', 'Slipped', 'Pulled in'],
+      rows: buckets.map((b) => [fmtISO(b.start), b.created, b.done, b.slipped, b.pullIn]),
+    }));
+
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="flow" preserveAspectRatio="xMidYMid meet">
         ${yTicks}
         ${bars}
         <path d="${linePath}" class="line-created" />
@@ -15760,8 +15885,19 @@ body.is-row-dragging *        { user-select: none !important; }
       dt = new Date(dt.getFullYear(), dt.getMonth() + 1, 1);
     }
 
+    registerChartData('waterfall', () => {
+      const rows = [];
+      top.forEach(({ proj, a, hist }) => {
+        hist.forEach(({ at, due }) => rows.push([a.id, a.title, proj.name, at, due]));
+      });
+      return {
+        headers: ['Action ID', 'Action title', 'Project', 'Snapshot date', 'Forecast due'],
+        rows,
+      };
+    });
+
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="waterfall" preserveAspectRatio="xMidYMid meet">
         ${xTicks.join('')}
         ${yTicks.join('')}
         ${diag}
@@ -16650,6 +16786,18 @@ body.is-row-dragging *        { user-select: none !important; }
   }
 
   function riskMatrixSVG(items) {
+    registerChartData('risk-matrix', () => ({
+      headers: ['Identifier', 'Kind', 'Title', 'Owner', 'Inherent P', 'Inherent I', 'Inherent score', 'Residual P', 'Residual I', 'Residual score', 'Mitigation'],
+      rows: items.map((r) => {
+        const inh = getInherent(r), res = getResidual(r);
+        return [
+          r.identifier || '', r.kind || 'risk', r.title || '', personName(r.owner),
+          inh.probability, inh.impact, inh.probability * inh.impact,
+          res.probability, res.impact, res.probability * res.impact,
+          r.mitigation || '',
+        ];
+      }),
+    }));
     const W = 540, H = 460;
     const padL = 60, padR = 20, padT = 30, padB = 56;
     const cellW = (W - padL - padR) / 5;
@@ -16784,7 +16932,7 @@ body.is-row-dragging *        { user-select: none !important; }
     }).join('');
 
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="mtx-svg" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="mtx-svg copyable-chart" data-chart="risk-matrix" preserveAspectRatio="xMidYMid meet">
         <defs>
           <marker id="mtxArrowRisk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(248,113,113,.85)" />
@@ -18681,7 +18829,7 @@ body.is-row-dragging *        { user-select: none !important; }
               <button type="button" class="bc-delete-cc" data-cc="${escapeHTML(cc)}" title="Delete this cost centre" aria-label="Delete cost centre ${escapeHTML(cc)}">×</button>
             </div>
             <div class="budget-kpis" id="kpis-${safe}"></div>
-            <div class="budget-chart-wrap"><svg class="budget-chart" id="chart-${safe}"></svg></div>
+            <div class="budget-chart-wrap"><svg class="budget-chart copyable-chart" data-chart="budget-${safe}" id="chart-${safe}"></svg></div>
           </div>`;
       }).join('');
       visible.forEach((cc) => {
@@ -18770,6 +18918,17 @@ body.is-row-dragging *        { user-select: none !important; }
       const mode = state.settings.budgetView;
       const evm = evmFor(cc, weeks, mode);
       const fmtV = (v) => fmtBudgetVal(v, mode);
+      registerChartData(`budget-${safe}`, () => {
+        const unit = mode === 'cost' ? '€' : 'h';
+        return {
+          headers: ['Week start', `Budget (${unit})`, `Actual (${unit})`, `Cumulative budget (${unit})`, `Cumulative actual (${unit})`],
+          rows: weeks.map((w, i) => {
+            let cb = 0, ca = 0;
+            for (let j = 0; j <= i; j++) { cb += evm.budgets[j]; ca += evm.actuals[j]; }
+            return [w.isoStart, Number(evm.budgets[i].toFixed(2)), Number(evm.actuals[i].toFixed(2)), Number(cb.toFixed(2)), Number(ca.toFixed(2))];
+          }),
+        };
+      });
       const kpiEl = document.getElementById(`kpis-${safe}`);
       const k = (l, v, cls = '') => `<div class="bk" data-evm="${l}"><div class="bk-l">${l}</div><div class="bk-v ${cls}">${v}</div></div>`;
       kpiEl.innerHTML = [
@@ -19432,6 +19591,16 @@ body.is-row-dragging *        { user-select: none !important; }
 
   function workloadSparkSVG(person, series) {
     const cap = person.capacity || 5;
+    const chartId = `spark-${person.id}`;
+    registerChartData(chartId, () => ({
+      headers: ['Week start', 'Load %', 'Hours', 'Capacity %'],
+      rows: series.map((s) => [
+        fmtISO(s.weekStart),
+        s.count,
+        Math.round((s.count / 100) * HOURS_PER_WEEK),
+        cap,
+      ]),
+    }));
     const W = 480, H = 70;
     const padL = 0, padR = 0, padT = 6, padB = 14;
     const innerW = W - padL - padR;
@@ -19465,7 +19634,7 @@ body.is-row-dragging *        { user-select: none !important; }
     }).join('');
 
     return `
-      <svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Workload over time">
+      <svg class="spark copyable-chart" data-chart="${chartId}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Workload over time">
         <line class="spark-cap" x1="${padL}" x2="${W - padR}" y1="${capY}" y2="${capY}" stroke-dasharray="4 3" />
         <text class="spark-cap-label" x="${W - padR - 4}" y="${Math.max(10, capY - 3)}" text-anchor="end">cap ${cap}%</text>
         ${bars}
@@ -20996,6 +21165,230 @@ body.is-row-dragging *        { user-select: none !important; }
     }
   }
 
+  /* ────────────────── Chart copy: PNG / data via right-click ──────────
+   * Any SVG carrying class="copyable-chart" + data-chart="<id>" gets a
+   * right-click menu with Copy as PNG / Copy as data. The PNG path
+   * serialises the SVG, inlines the document stylesheet so styling
+   * survives serialisation, rasterises at 2x to an offscreen canvas,
+   * and writes to the clipboard. The data path looks up the chart id
+   * in a registry of { headers, rows } extractors, formats TSV, and
+   * writes that. Each chart render call (re-)registers its extractor.
+   */
+  const _chartDataExtractors = new Map();
+  function registerChartData(chartId, fn) {
+    if (chartId && typeof fn === 'function') _chartDataExtractors.set(chartId, fn);
+  }
+
+  // Concatenate every accessible stylesheet rule. Cross-origin sheets
+  // silently fail .cssRules access; we ignore those (the app's CSS is
+  // inlined so the main rules are always reachable).
+  let _cachedDocCss = null;
+  function _gatherDocCss() {
+    if (_cachedDocCss != null) return _cachedDocCss;
+    let out = '';
+    for (const sheet of Array.from(document.styleSheets)) {
+      try {
+        for (const rule of Array.from(sheet.cssRules || [])) out += rule.cssText + '\n';
+      } catch (_) { /* cross-origin or restricted */ }
+    }
+    _cachedDocCss = out;
+    return out;
+  }
+
+  function _serializeSvgWithStyles(svg) {
+    const clone = svg.cloneNode(true);
+    if (!clone.getAttribute('xmlns')) clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    const styleEl = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+    styleEl.textContent = _gatherDocCss();
+    clone.insertBefore(styleEl, clone.firstChild);
+    const bbox = svg.getBoundingClientRect();
+    if (!clone.getAttribute('width'))  clone.setAttribute('width',  Math.max(1, Math.round(bbox.width)));
+    if (!clone.getAttribute('height')) clone.setAttribute('height', Math.max(1, Math.round(bbox.height)));
+    return new XMLSerializer().serializeToString(clone);
+  }
+
+  async function _svgToPngBlob(svgEl, scale = 2) {
+    const svgStr = _serializeSvgWithStyles(svgEl);
+    const blob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    try {
+      const img = new Image();
+      img.src = url;
+      await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+      const bbox = svgEl.getBoundingClientRect();
+      const w = Math.max(1, Math.round(bbox.width  * scale));
+      const h = Math.max(1, Math.round(bbox.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      // Fill panel-coloured background so the PNG isn't transparent —
+      // the chart looks washed out when pasted into a light email.
+      const bg = (getComputedStyle(svgEl.closest('.panel') || document.body).getPropertyValue('--bg-1') || '#0f1115').trim();
+      ctx.fillStyle = bg || '#0f1115';
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+      return await new Promise((resolve, reject) =>
+        canvas.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob returned null')), 'image/png'));
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  // Snapshot every CSS custom property on :root so the cloned subtree
+  // inside <foreignObject> still resolves var(--bg-1) etc. without
+  // walking the whole document tree.
+  function _rootCustomProps() {
+    const cs = getComputedStyle(document.documentElement);
+    let out = '';
+    for (let i = 0; i < cs.length; i++) {
+      const name = cs[i];
+      if (name.startsWith('--')) out += `${name}:${cs.getPropertyValue(name).trim()};`;
+    }
+    return out;
+  }
+
+  // Rasterise a non-SVG element by serialising it inside an SVG
+  // <foreignObject>. The clone has overflow stripped on every node so
+  // off-screen content (Kanban columns past the scroll fold, Gantt
+  // bars past the horizontal viewport) lands in the PNG.
+  // expandSelectors → extra CSS selectors whose matching nodes should
+  // have their explicit width/height cleared so they grow with content.
+  async function _htmlToPngBlob(el, { scale = 2, expandSelectors = [] } = {}) {
+    const clone = el.cloneNode(true);
+    // Push var(--…) onto the clone wrapper so descendants inherit them.
+    const rootVars = _rootCustomProps();
+    clone.setAttribute('style', `${rootVars};${clone.getAttribute('style') || ''}`);
+    // Strip every constraint that hides content: overflow/max-h/max-w.
+    const all = [clone, ...clone.querySelectorAll('*')];
+    all.forEach((n) => {
+      if (n.nodeType !== 1) return;
+      n.style.maxHeight = 'none';
+      n.style.maxWidth  = 'none';
+      n.style.overflow  = 'visible';
+    });
+    // Caller-specified selectors get an extra forced width-relaxation
+    // so flex/grid containers grow with their natural content rather
+    // than staying pinned to their original computed width.
+    if (expandSelectors.length) {
+      expandSelectors.forEach((sel) => {
+        clone.querySelectorAll(sel).forEach((n) => {
+          n.style.width = 'auto';
+          n.style.height = 'auto';
+        });
+      });
+    }
+    // Mount off-screen at the source element's width so layout settles
+    // before we read scroll dimensions. The visibility:hidden keeps it
+    // out of the user's view while still triggering layout.
+    const sandbox = document.createElement('div');
+    sandbox.style.cssText = `position:absolute;left:-99999px;top:0;visibility:hidden;width:${el.scrollWidth}px;`;
+    sandbox.appendChild(clone);
+    document.body.appendChild(sandbox);
+    let w, h;
+    try {
+      w = Math.max(el.scrollWidth, clone.scrollWidth);
+      h = Math.max(el.scrollHeight, clone.scrollHeight);
+    } finally {
+      document.body.removeChild(sandbox);
+    }
+    // Re-mount inside the foreignObject. XMLSerializer produces valid
+    // XHTML for HTML elements, satisfying foreignObject's strictness.
+    const css = _gatherDocCss();
+    const cloneHtml = new XMLSerializer().serializeToString(clone);
+    const xml = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">`
+      + `<foreignObject x="0" y="0" width="${w}" height="${h}">`
+      + `<div xmlns="http://www.w3.org/1999/xhtml" style="${rootVars}">`
+      + `<style>${css}</style>${cloneHtml}`
+      + `</div></foreignObject></svg>`;
+    // Encode via base64 data URL — blob: URLs taint the canvas when the
+    // SVG carries a <foreignObject>; data: URLs are treated as same-
+    // origin and slip through in Chrome.
+    const url = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)));
+    const img = new Image();
+    img.src = url;
+    await new Promise((resolve, reject) => { img.onload = resolve; img.onerror = reject; });
+    const canvas = document.createElement('canvas');
+    canvas.width  = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    const ctx = canvas.getContext('2d');
+    const bg = (getComputedStyle(el.closest('.panel') || document.body).getPropertyValue('--bg-1') || '#0f1115').trim();
+    ctx.fillStyle = bg || '#0f1115';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    return await new Promise((resolve, reject) =>
+      canvas.toBlob((b) => b ? resolve(b) : reject(new Error('toBlob returned null — likely a tainted-canvas limitation when capturing HTML with embedded resources')), 'image/png'));
+  }
+
+  // Per-chart-id capture overrides — lets a chart specify which
+  // selectors to "open up" before HTML capture (used for the Kanban
+  // board so column-bodies expand past their scroll fold).
+  const _chartCaptureOpts = new Map();
+  function registerChartCapture(chartId, opts) {
+    if (chartId) _chartCaptureOpts.set(chartId, opts);
+  }
+
+  async function _copyChartPng(el) {
+    try {
+      const opts = _chartCaptureOpts.get(el.dataset.chart) || {};
+      const blob = el instanceof SVGElement
+        ? await _svgToPngBlob(el, 2)
+        : await _htmlToPngBlob(el, { scale: 2, ...opts });
+      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
+        throw new Error('Clipboard image API not available in this browser');
+      }
+      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+      toast('Plot copied as PNG');
+    } catch (err) {
+      console.error('Copy PNG failed:', err);
+      toast('Copy PNG failed — ' + (err?.message || 'see console'));
+    }
+  }
+
+  function _formatCell(v) {
+    if (v == null) return '';
+    if (typeof v === 'number') return Number.isFinite(v) ? String(v) : '';
+    // Strip tabs and newlines so the TSV stays a clean grid.
+    return String(v).replace(/[\t\r\n]+/g, ' ');
+  }
+  async function _copyChartData(dataFn) {
+    try {
+      const data = dataFn();
+      if (!data || !Array.isArray(data.rows) || !data.rows.length) {
+        toast('No data to copy');
+        return;
+      }
+      const headers = data.headers || [];
+      const lines = [headers.map(_formatCell).join('\t')];
+      data.rows.forEach((r) => lines.push(r.map(_formatCell).join('\t')));
+      const tsv = lines.join('\n');
+      await navigator.clipboard.writeText(tsv);
+      toast(`Copied ${data.rows.length} row${data.rows.length === 1 ? '' : 's'} of data`);
+    } catch (err) {
+      console.error('Copy data failed:', err);
+      toast('Copy data failed — ' + (err?.message || 'see console'));
+    }
+  }
+
+  // Delegated contextmenu — one listener for the whole app. Captures
+  // right-clicks anywhere inside a `.copyable-chart` SVG (including on
+  // bars/lines/etc., since "empty space" inside a busy chart is hard to
+  // hit). Bails when a more-specific handler has already preventDefault'd
+  // the event (e.g. the risk-matrix right-click on a dot opens that dot's
+  // edit menu — we don't want to also show the chart copy menu on top).
+  document.addEventListener('contextmenu', (e) => {
+    if (e.defaultPrevented) return;
+    const svg = e.target.closest('.copyable-chart');
+    if (!svg) return;
+    e.preventDefault();
+    const chartId = svg.dataset.chart;
+    const dataFn = chartId ? _chartDataExtractors.get(chartId) : null;
+    const items = [
+      { icon: '🖼', label: 'Copy as PNG',  onClick: () => _copyChartPng(svg) },
+    ];
+    if (dataFn) items.push({ icon: '⊞', label: 'Copy as data', onClick: () => _copyChartData(dataFn) });
+    showContextMenu(e.clientX, e.clientY, items);
+  });
+
   function openPersonEditor(personId) {
     const p = state.people.find((x) => x.id === personId);
     if (!p) return;
@@ -22439,15 +22832,30 @@ body.is-row-dragging *        { user-select: none !important; }
     const projLabel = (p) => p?.name || '';
     const sheets = [];
 
-    // 1) Actions — register-style columns
+    // Cache milestone / deliverable lookups per project — used by both the
+    // Actions sheet (name columns) and the dedicated sheets below.
+    const milestoneIndex = new Map();
+    const deliverableIndex = new Map();
+    projects.forEach((p) => {
+      const mMap = {}; (p.milestones || []).forEach((m) => { mMap[m.id] = m; });
+      const dMap = {}; (p.deliverables || []).forEach((d) => { dMap[d.id] = d; });
+      milestoneIndex.set(p, mMap);
+      deliverableIndex.set(p, dMap);
+    });
+
+    // 1) Actions — register-style columns, plus milestone + deliverable names
     const actionRows = [];
     projects.forEach((p) => {
+      const mMap = milestoneIndex.get(p);
+      const dMap = deliverableIndex.get(p);
       (p.actions || []).filter((a) => !a.deletedAt).forEach((a) => {
         actionRows.push([
           ...(multiProject ? [projLabel(p)] : []),
           a.id,
           a.title,
           findComponent(p, a.component)?.name || '',
+          mMap[a.milestone]?.name || '',
+          dMap[a.deliverable]?.name || '',
           personName(a.owner),
           (STATUSES.find((s) => s.id === a.status) || {}).name || a.status,
           priorityLevel(a.priorityLevel).label,
@@ -22473,12 +22881,80 @@ body.is-row-dragging *        { user-select: none !important; }
       name: 'Actions',
       headers: [
         ...(multiProject ? ['Project'] : []),
-        'ID', 'Title', 'Component', 'Owner', 'Status', 'Priority', 'Commitment %',
+        'ID', 'Title', 'Component', 'Milestone', 'Deliverable',
+        'Owner', 'Status', 'Priority', 'Commitment %',
         'Start', 'Due', 'Predicted', 'Originator', 'Originator date',
         'Baseline due', 'Variance days', 'Logged hours', 'Planned hours',
         '% Complete', 'Tags', 'Depends on', 'Created', 'Updated',
       ],
       rows: actionRows,
+    });
+
+    // 1b) Milestones — one row per milestone, with linked-action rollups so
+    // a PM can see "this gate has 7 actions, 4 open, 3 done" at a glance.
+    const milestoneRows = [];
+    projects.forEach((p) => {
+      (p.milestones || []).forEach((m) => {
+        const linked = (p.actions || []).filter((a) => !a.deletedAt && a.milestone === m.id);
+        const open = linked.filter((a) => !isClosedStatus(a.status)).length;
+        const done = linked.filter((a) => a.status === 'done').length;
+        const dueStr = m.date || '';
+        const today = todayISO();
+        const daysToGo = dueStr ? dayDiff(dueStr, today) : '';
+        milestoneRows.push([
+          ...(multiProject ? [projLabel(p)] : []),
+          m.id,
+          m.name || '',
+          dueStr,
+          (STATUSES.find((s) => s.id === m.status) || {}).name || m.status || '',
+          daysToGo === '' ? '' : Number(daysToGo),
+          linked.length,
+          open,
+          done,
+        ]);
+      });
+    });
+    sheets.push({
+      name: 'Milestones',
+      headers: [
+        ...(multiProject ? ['Project'] : []),
+        'ID', 'Name', 'Date', 'Status', 'Days to go',
+        'Linked actions', 'Open', 'Done',
+      ],
+      rows: milestoneRows,
+    });
+
+    // 1c) Deliverables — same shape as milestones, keyed by dueDate.
+    const deliverableRows = [];
+    projects.forEach((p) => {
+      (p.deliverables || []).forEach((d) => {
+        const linked = (p.actions || []).filter((a) => !a.deletedAt && a.deliverable === d.id);
+        const open = linked.filter((a) => !isClosedStatus(a.status)).length;
+        const done = linked.filter((a) => a.status === 'done').length;
+        const dueStr = d.dueDate || '';
+        const today = todayISO();
+        const daysToGo = dueStr ? dayDiff(dueStr, today) : '';
+        deliverableRows.push([
+          ...(multiProject ? [projLabel(p)] : []),
+          d.id,
+          d.name || '',
+          dueStr,
+          (STATUSES.find((s) => s.id === d.status) || {}).name || d.status || '',
+          daysToGo === '' ? '' : Number(daysToGo),
+          linked.length,
+          open,
+          done,
+        ]);
+      });
+    });
+    sheets.push({
+      name: 'Deliverables',
+      headers: [
+        ...(multiProject ? ['Project'] : []),
+        'ID', 'Name', 'Due date', 'Status', 'Days to go',
+        'Linked actions', 'Open', 'Done',
+      ],
+      rows: deliverableRows,
     });
 
     // 2) Open points
@@ -22639,6 +23115,105 @@ body.is-row-dragging *        { user-select: none !important; }
       name: 'Budgets',
       headers: ['Cost centre', 'Projects', 'Week start (ISO)', 'Budget hours'],
       rows: budgetRows,
+    });
+
+    // 8) KPIs — tall (long-form) snapshot so each row is one metric per
+    // project. Easier to pivot than wide; also gracefully handles new
+    // metrics over time. Includes action counts, delivery KPIs (adherence
+    // + productivity over the last 30 days), and EVM rollup.
+    const kpiRows = [];
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const todayStr = todayISO();
+    const day = (n) => fmtISO(new Date(today.getTime() - n * dayMs));
+    const since30 = day(30);
+
+    const computeProjectKpis = (p) => {
+      const live = (p.actions || []).filter((a) => !a.deletedAt);
+      const total = live.length;
+      const done = live.filter((a) => a.status === 'done').length;
+      const blocked = live.filter((a) => a.status === 'blocked').length;
+      const late = live.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, todayStr) < 0).length;
+      const upcoming = live.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, todayStr) >= 0 && dayDiff(a.due, todayStr) <= 7).length;
+      const completion = total ? Math.round((done / total) * 100) : 0;
+      const since14 = fmtISO(new Date(Date.now() - 14 * dayMs));
+      const throughput14 = live.filter((a) => a.status === 'done' && a.updatedAt >= since14).length;
+      // EVM rollup (closed-cancelled excluded — matches the dashboard tile).
+      const evmScope = live.filter((a) => a.status !== 'cancelled');
+      const ev = evmForActions(evmScope);
+      // Adherence + productivity over the last 30 days — temporarily scope
+      // deliveryMetricsForWindow to the single project by stashing
+      // currentProjectId.
+      const savedId = state.currentProjectId;
+      state.currentProjectId = p.id;
+      const delivery = deliveryMetricsForWindow(since30, todayStr);
+      state.currentProjectId = savedId;
+      return {
+        total, done, blocked, late, upcoming, completion, throughput14,
+        bac: ev.bac, pv: ev.pv, ev: ev.ev, ac: ev.ac,
+        cpi: ev.cpi, spi: ev.spi, eac: ev.eac, etc: ev.etc,
+        adherence: delivery.adherence,
+        productivity: delivery.productivity,
+        adherenceN: delivery.adherenceN,
+        doneInWindow: delivery.doneInWindow,
+        plannedHrs: delivery.plannedHrs,
+        loggedHrs: delivery.loggedHrs,
+      };
+    };
+
+    const push = (proj, metric, value, unit, notes) => kpiRows.push([
+      ...(multiProject ? [projLabel(proj)] : []),
+      metric, value, unit || '', notes || '',
+    ]);
+
+    projects.forEach((p) => {
+      const k = computeProjectKpis(p);
+      push(p, 'Total actions',           k.total,            'count', 'Live (non-deleted) actions');
+      push(p, 'Done actions',            k.done,              'count');
+      push(p, 'Open actions',            k.total - k.done,    'count');
+      push(p, 'Late actions',            k.late,              'count', 'Open + past due');
+      push(p, 'Blocked actions',         k.blocked,           'count');
+      push(p, 'Due within 7 days',       k.upcoming,          'count', 'Open + due in next 7 days');
+      push(p, 'Completion',              k.completion,        '%',     `${k.done} / ${k.total}`);
+      push(p, 'Throughput (14d)',        k.throughput14,      'count', 'Actions marked done in the last 14 days');
+      // Delivery KPIs (30-day window). Skip with note when sample too thin.
+      if (k.adherenceN >= 5) {
+        push(p, 'Schedule adherence (30d)', Number((k.adherence * 100).toFixed(1)), '%', `${k.adherenceN} due-by-now actions`);
+      } else {
+        push(p, 'Schedule adherence (30d)', '', '%', `Insufficient data (${k.adherenceN}/5 due-by-now actions)`);
+      }
+      if (k.doneInWindow >= 5) {
+        push(p, 'Productivity (30d)', Number(k.productivity.toFixed(2)), '×', `${Math.round(k.plannedHrs)}h planned / ${Math.round(k.loggedHrs)}h logged across ${k.doneInWindow} done actions`);
+      } else {
+        push(p, 'Productivity (30d)', '', '×', `Insufficient data (${k.doneInWindow}/5 done-with-hours)`);
+      }
+      // EVM rollup. Round currencies; only emit indices when defined.
+      if (k.bac > 0) {
+        push(p, 'EVM — BAC', Math.round(k.bac), '€', 'Budget at completion across baselined actions');
+        push(p, 'EVM — PV',  Math.round(k.pv),  '€', 'Planned value (work that should be done by today)');
+        push(p, 'EVM — EV',  Math.round(k.ev),  '€', 'Earned value (work actually completed)');
+        push(p, 'EVM — AC',  Math.round(k.ac),  '€', 'Actual cost (logged hours × rate)');
+        if (k.cpi != null) push(p, 'EVM — CPI', Number(k.cpi.toFixed(3)), '×', 'EV ÷ AC. >1 = under budget');
+        if (k.spi != null) push(p, 'EVM — SPI', Number(k.spi.toFixed(3)), '×', 'EV ÷ PV. >1 = ahead of schedule');
+        if (k.eac != null) push(p, 'EVM — EAC', Math.round(k.eac), '€', 'BAC ÷ CPI');
+        if (k.etc != null) push(p, 'EVM — ETC', Math.round(k.etc), '€', 'EAC − AC');
+      } else {
+        push(p, 'EVM rollup', '', '', 'No baselined actions yet — take a project baseline to populate');
+      }
+      // Reference counts so the snapshot is self-contained.
+      push(p, 'Milestones',         (p.milestones    || []).length, 'count');
+      push(p, 'Deliverables',       (p.deliverables  || []).length, 'count');
+      push(p, 'Open points',        (p.openPoints    || []).length, 'count');
+      push(p, 'Risks & Opps',       (p.risks         || []).length, 'count');
+      push(p, 'Decisions',          (p.decisions     || []).length, 'count');
+      push(p, 'Change requests',    (p.changes       || []).length, 'count');
+    });
+    sheets.push({
+      name: 'KPIs',
+      headers: [
+        ...(multiProject ? ['Project'] : []),
+        'Metric', 'Value', 'Unit', 'Notes',
+      ],
+      rows: kpiRows,
     });
 
     return sheets;
