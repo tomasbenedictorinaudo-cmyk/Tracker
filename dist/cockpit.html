@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-24T21:10:07.337Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-24T21:24:56.443Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -22749,29 +22749,166 @@ body.is-row-dragging *        { user-select: none !important; }
     return s;
   }
 
+  // Style index constants — see _buildStylesXml below for the
+  // corresponding cellXfs entries. Used by sheet builders to apply
+  // formatting (currency, percent, header bg, KPI band colours).
+  const STYLE = {
+    DEFAULT:    0,
+    HEADER:     1,
+    CURRENCY:   2,
+    PERCENT:    3,
+    MULT:       4,
+    DATE:       5,
+    SECTION:    6,  // section heading inside a sheet
+    KPI_BIG:    7,  // large bold number for headline KPIs
+    INT:        8,
+    DEC2:       9,
+    GOOD:       10,
+    WARN:       11,
+    BAD:        12,
+    LABEL:      13, // small uppercase label
+    TILE_BG:    14, // tinted background panel
+    BIG_TITLE:  15,
+  };
+
+  // styles.xml — minimum cell-format stylesheet. Keep in sync with the
+  // STYLE constants above; the cellXfs index of each entry IS the style
+  // id that cells reference via the `s` attribute.
+  function _buildStylesXml() {
+    // numFmtId 0-163 are built-in. Custom formats start at 164.
+    const numFmts = [
+      { id: 164, code: '&quot;€&quot;#,##0' },           // currency, integer
+      { id: 165, code: '0.0&quot;%&quot;' },              // percent (we store as 0..100)
+      { id: 166, code: '0.00&quot;×&quot;' },             // multiplier
+      { id: 167, code: 'yyyy-mm-dd' },                     // date
+      { id: 168, code: '#,##0' },                          // integer with thousands
+      { id: 169, code: '0.00' },                           // decimal 2 places
+    ];
+    const fonts = [
+      '<font><sz val="11"/><name val="Calibri"/></font>',                                                       // 0: default
+      '<font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Calibri"/></font>',                            // 1: header (white on dark bg)
+      '<font><b/><sz val="13"/><color rgb="FF1F4E79"/><name val="Calibri"/></font>',                            // 2: section heading
+      '<font><b/><sz val="22"/><color rgb="FF1F4E79"/><name val="Calibri"/></font>',                            // 3: KPI big number
+      '<font><sz val="9"/><color rgb="FF7F7F7F"/><name val="Calibri"/></font>',                                 // 4: label / muted
+      '<font><b/><sz val="18"/><name val="Calibri"/></font>',                                                   // 5: big title
+      '<font><b/><sz val="11"/><color rgb="FF2E7D32"/><name val="Calibri"/></font>',                            // 6: good (green)
+      '<font><b/><sz val="11"/><color rgb="FFF57F17"/><name val="Calibri"/></font>',                            // 7: warn (amber)
+      '<font><b/><sz val="11"/><color rgb="FFC62828"/><name val="Calibri"/></font>',                            // 8: bad (red)
+    ];
+    const fills = [
+      '<fill><patternFill patternType="none"/></fill>',                                                          // 0: none (required)
+      '<fill><patternFill patternType="gray125"/></fill>',                                                       // 1: default gray (required)
+      '<fill><patternFill patternType="solid"><fgColor rgb="FF1F4E79"/><bgColor indexed="64"/></patternFill></fill>', // 2: dark blue (header)
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFE7EEF7"/><bgColor indexed="64"/></patternFill></fill>', // 3: light blue (tile bg)
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFE8F5E9"/><bgColor indexed="64"/></patternFill></fill>', // 4: light green (good cell bg)
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFFFF8E1"/><bgColor indexed="64"/></patternFill></fill>', // 5: light amber
+      '<fill><patternFill patternType="solid"><fgColor rgb="FFFFEBEE"/><bgColor indexed="64"/></patternFill></fill>', // 6: light red
+    ];
+    const borders = [
+      '<border><left/><right/><top/><bottom/><diagonal/></border>',                                                                                                   // 0: no border
+      '<border><left style="thin"><color rgb="FFCCCCCC"/></left><right style="thin"><color rgb="FFCCCCCC"/></right><top style="thin"><color rgb="FFCCCCCC"/></top><bottom style="thin"><color rgb="FFCCCCCC"/></bottom></border>', // 1: thin gray
+    ];
+    // cellXfs MUST match the STYLE.* indices order.
+    const xfs = [
+      // 0: default
+      '<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>',
+      // 1: header (bold white, dark blue bg, thin border, left aligned)
+      '<xf numFmtId="0" fontId="1" fillId="2" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>',
+      // 2: currency (€)
+      '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>',
+      // 3: percent
+      '<xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>',
+      // 4: multiplier
+      '<xf numFmtId="166" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>',
+      // 5: date
+      '<xf numFmtId="167" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>',
+      // 6: section heading (large bold blue)
+      '<xf numFmtId="0" fontId="2" fillId="0" borderId="0" xfId="0" applyFont="1" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>',
+      // 7: KPI_BIG — big bold number, tile bg, centered
+      '<xf numFmtId="0" fontId="3" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>',
+      // 8: INT — integer with thousands
+      '<xf numFmtId="168" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>',
+      // 9: DEC2 — 2-decimal
+      '<xf numFmtId="169" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>',
+      // 10: GOOD — green bold, light-green bg
+      '<xf numFmtId="0" fontId="6" fillId="4" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>',
+      // 11: WARN — amber bold, light-amber bg
+      '<xf numFmtId="0" fontId="7" fillId="5" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>',
+      // 12: BAD — red bold, light-red bg
+      '<xf numFmtId="0" fontId="8" fillId="6" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>',
+      // 13: LABEL — small muted uppercase
+      '<xf numFmtId="0" fontId="4" fillId="3" borderId="1" xfId="0" applyFont="1" applyFill="1" applyBorder="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>',
+      // 14: TILE_BG — plain tile-coloured cell
+      '<xf numFmtId="0" fontId="0" fillId="3" borderId="1" xfId="0" applyFill="1" applyBorder="1"/>',
+      // 15: BIG_TITLE — sheet headline
+      '<xf numFmtId="0" fontId="5" fillId="0" borderId="0" xfId="0" applyFont="1"/>',
+    ];
+    let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    xml += '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    xml += `<numFmts count="${numFmts.length}">`;
+    numFmts.forEach((nf) => { xml += `<numFmt numFmtId="${nf.id}" formatCode="${nf.code}"/>`; });
+    xml += '</numFmts>';
+    xml += `<fonts count="${fonts.length}">${fonts.join('')}</fonts>`;
+    xml += `<fills count="${fills.length}">${fills.join('')}</fills>`;
+    xml += `<borders count="${borders.length}">${borders.join('')}</borders>`;
+    xml += '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>';
+    xml += `<cellXfs count="${xfs.length}">${xfs.join('')}</cellXfs>`;
+    xml += '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>';
+    xml += '</styleSheet>';
+    return xml;
+  }
+
   // Build the OOXML for one worksheet. Cell values may be:
   //   • a number → <c t="n"><v>…</v>
   //   • a string → <c t="inlineStr"><is><t>…</t></is></c>
-  //   • an object { f, v?, t? } → formula cell <c><f>…</f><v>…</v></c>
-  //     (`v` is the cached value Excel uses until next recalc; `t="str"`
-  //     marks a string-returning formula)
-  // Empty cells are omitted entirely (xlsx supports sparse rows).
-  function _buildSheetXml(headers, rows) {
+  //   • an object { f, v?, t?, s? } → formula cell <c><f>…</f><v>…</v></c>
+  //     (`v` is the cached value, `t="str"` marks string formulas,
+  //     `s` is a style index from the STYLE map)
+  //   • an object { v, s, t? } → plain value with explicit style
+  // Sheet options:
+  //   opts.colWidths   — array of widths (Excel char units) per column
+  //   opts.colStyles   — { colIndex: STYLE.X } default style per column
+  //   opts.frozenHeader — true to freeze row 1
+  //   opts.headerStyle  — style id for row 1 (default STYLE.HEADER)
+  //   opts.skipHeaderStyling — true to leave row 1 unstyled (for Dashboard)
+  //   opts.drawingRid   — if set, adds <drawing r:id="rIdN"/> at end
+  function _buildSheetXml(headers, rows, opts = {}) {
+    const colStyles = opts.colStyles || {};
+    const headerStyle = opts.headerStyle != null ? opts.headerStyle : STYLE.HEADER;
     let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
-    xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
+    xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"';
+    xml += ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+    if (opts.frozenHeader) {
+      xml += '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>';
+    }
+    if (opts.colWidths && opts.colWidths.length) {
+      xml += '<cols>';
+      opts.colWidths.forEach((w, i) => {
+        if (w == null) return;
+        xml += `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`;
+      });
+      xml += '</cols>';
+    }
     xml += '<sheetData>';
-    xml += '<row r="1">';
-    headers.forEach((h, i) => {
-      xml += `<c r="${_colLetter(i)}1" t="inlineStr"><is><t>${_xmlEsc(h)}</t></is></c>`;
-    });
-    xml += '</row>';
+    if (headers && headers.length) {
+      xml += '<row r="1">';
+      headers.forEach((h, i) => {
+        const sAttr = opts.skipHeaderStyling ? '' : ` s="${headerStyle}"`;
+        xml += `<c r="${_colLetter(i)}1"${sAttr} t="inlineStr"><is><t>${_xmlEsc(h)}</t></is></c>`;
+      });
+      xml += '</row>';
+    }
+    const headerOffset = (headers && headers.length) ? 2 : 1;
     rows.forEach((row, rIdx) => {
-      const r = rIdx + 2;
+      const r = rIdx + headerOffset;
       xml += `<row r="${r}">`;
       row.forEach((v, cIdx) => {
         if (v == null || v === '') return;
         const ref = `${_colLetter(cIdx)}${r}`;
-        if (typeof v === 'object' && typeof v.f === 'string') {
+        // Cell objects (formula or value with explicit style) take precedence.
+        if (typeof v === 'object' && (typeof v.f === 'string' || 'v' in v)) {
+          const sId = (v.s != null) ? v.s : colStyles[cIdx];
+          const sAttr = (sId != null) ? ` s="${sId}"` : '';
           const tAttr = v.t ? ` t="${v.t}"` : '';
           const cachedRaw = v.v;
           const cached = (cachedRaw == null || cachedRaw === '')
@@ -22779,16 +22916,33 @@ body.is-row-dragging *        { user-select: none !important; }
             : (typeof cachedRaw === 'number' && Number.isFinite(cachedRaw))
               ? `<v>${cachedRaw}</v>`
               : `<v>${_xmlEsc(String(cachedRaw))}</v>`;
-          xml += `<c r="${ref}"${tAttr}><f>${_xmlEsc(v.f)}</f>${cached}</c>`;
-        } else if (typeof v === 'number' && Number.isFinite(v)) {
-          xml += `<c r="${ref}" t="n"><v>${v}</v></c>`;
+          if (typeof v.f === 'string') {
+            xml += `<c r="${ref}"${sAttr}${tAttr}><f>${_xmlEsc(v.f)}</f>${cached}</c>`;
+          } else {
+            // Plain styled value
+            if (typeof cachedRaw === 'number' && Number.isFinite(cachedRaw)) {
+              xml += `<c r="${ref}"${sAttr} t="n"><v>${cachedRaw}</v></c>`;
+            } else {
+              xml += `<c r="${ref}"${sAttr} t="inlineStr"><is><t>${_xmlEsc(String(cachedRaw))}</t></is></c>`;
+            }
+          }
         } else {
-          xml += `<c r="${ref}" t="inlineStr"><is><t>${_xmlEsc(String(v))}</t></is></c>`;
+          const sId = colStyles[cIdx];
+          const sAttr = (sId != null) ? ` s="${sId}"` : '';
+          if (typeof v === 'number' && Number.isFinite(v)) {
+            xml += `<c r="${ref}"${sAttr} t="n"><v>${v}</v></c>`;
+          } else {
+            xml += `<c r="${ref}"${sAttr} t="inlineStr"><is><t>${_xmlEsc(String(v))}</t></is></c>`;
+          }
         }
       });
       xml += '</row>';
     });
-    xml += '</sheetData></worksheet>';
+    xml += '</sheetData>';
+    if (opts.drawingRid) {
+      xml += `<drawing r:id="rId${opts.drawingRid}"/>`;
+    }
+    xml += '</worksheet>';
     return xml;
   }
 
@@ -22797,10 +22951,65 @@ body.is-row-dragging *        { user-select: none !important; }
   function _buildXLSX(sheets) {
     const enc = new TextEncoder();
     const safeName = (n) => n.replace(/[\\\/?*[\]:]/g, '_').slice(0, 31);
+    // Per-sheet parts. Each sheet may carry `charts` (array of chart
+    // specs) — these become extra entries in the archive and the sheet
+    // gets a <drawing r:id> pointing at the drawing file.
     const sheetItems = sheets.map((s, i) => ({
       name: safeName(s.name) || `Sheet${i + 1}`,
-      xml: _buildSheetXml(s.headers, s.rows),
+      idx: i + 1,
+      raw: s,
     }));
+    const chartItems = [];   // { sheetIdx, chartIdx, drawingIdx, chartXml, drawingXml, sheetRelsXml, drawingRelsXml }
+    let chartCounter = 0;
+    let drawingCounter = 0;
+    sheetItems.forEach((s) => {
+      const charts = s.raw.charts || [];
+      if (!charts.length) {
+        s.xml = _buildSheetXml(s.raw.headers, s.raw.rows, s.raw);
+        return;
+      }
+      drawingCounter += 1;
+      const drawingIdx = drawingCounter;
+      const chartIds = [];
+      charts.forEach((cspec) => {
+        chartCounter += 1;
+        chartIds.push(chartCounter);
+        chartItems.push({
+          chartIdx: chartCounter,
+          drawingIdx,
+          chartXml: _buildChartXml(cspec),
+        });
+      });
+      // Drawing references chart files via local rIds.
+      const drawingRels = [];
+      const drawingAnchors = [];
+      charts.forEach((cspec, k) => {
+        const rid = k + 1;
+        drawingRels.push(`<Relationship Id="rId${rid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chart${chartIds[k]}.xml"/>`);
+        drawingAnchors.push(_buildDrawingAnchor(cspec, rid, k + 1));
+      });
+      const drawingXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+        + drawingAnchors.join('')
+        + '</xdr:wsDr>';
+      const drawingRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + drawingRels.join('')
+        + '</Relationships>';
+      // Sheet references the drawing via rId1.
+      const sheetRelsXml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+        + `<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing${drawingIdx}.xml"/>`
+        + '</Relationships>';
+      s.xml = _buildSheetXml(s.raw.headers, s.raw.rows, { ...s.raw, drawingRid: 1 });
+      s.sheetRelsXml = sheetRelsXml;
+      s.drawingIdx = drawingIdx;
+      s.drawingXml = drawingXml;
+      s.drawingRelsXml = drawingRelsXml;
+    });
+
+    // workbook.xml + workbook rels — same as before but reserves
+    // additional rId for the styles part.
     let wb = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
     wb += '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
     wb += '<sheets>';
@@ -22813,6 +23022,9 @@ body.is-row-dragging *        { user-select: none !important; }
     sheetItems.forEach((s, i) => {
       wbRels += `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i + 1}.xml"/>`;
     });
+    // Styles part — last rel id after all sheets.
+    const stylesRid = sheetItems.length + 1;
+    wbRels += `<Relationship Id="rId${stylesRid}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>`;
     wbRels += '</Relationships>';
     const rootRels = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
       + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
@@ -22823,8 +23035,17 @@ body.is-row-dragging *        { user-select: none !important; }
     ct += '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>';
     ct += '<Default Extension="xml" ContentType="application/xml"/>';
     ct += '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>';
+    ct += '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>';
     sheetItems.forEach((s, i) => {
       ct += `<Override PartName="/xl/worksheets/sheet${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`;
+    });
+    sheetItems.forEach((s) => {
+      if (s.drawingXml) {
+        ct += `<Override PartName="/xl/drawings/drawing${s.drawingIdx}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>`;
+      }
+    });
+    chartItems.forEach((c) => {
+      ct += `<Override PartName="/xl/charts/chart${c.chartIdx}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`;
     });
     ct += '</Types>';
 
@@ -22833,9 +23054,101 @@ body.is-row-dragging *        { user-select: none !important; }
       { name: '_rels/.rels', data: enc.encode(rootRels) },
       { name: 'xl/workbook.xml', data: enc.encode(wb) },
       { name: 'xl/_rels/workbook.xml.rels', data: enc.encode(wbRels) },
-      ...sheetItems.map((s, i) => ({ name: `xl/worksheets/sheet${i + 1}.xml`, data: enc.encode(s.xml) })),
+      { name: 'xl/styles.xml', data: enc.encode(_buildStylesXml()) },
+      ...sheetItems.map((s) => ({ name: `xl/worksheets/sheet${s.idx}.xml`, data: enc.encode(s.xml) })),
     ];
+    // Drawings + sheet rels for charts
+    sheetItems.forEach((s) => {
+      if (s.drawingXml) {
+        entries.push({ name: `xl/worksheets/_rels/sheet${s.idx}.xml.rels`, data: enc.encode(s.sheetRelsXml) });
+        entries.push({ name: `xl/drawings/drawing${s.drawingIdx}.xml`, data: enc.encode(s.drawingXml) });
+        entries.push({ name: `xl/drawings/_rels/drawing${s.drawingIdx}.xml.rels`, data: enc.encode(s.drawingRelsXml) });
+      }
+    });
+    chartItems.forEach((c) => {
+      entries.push({ name: `xl/charts/chart${c.chartIdx}.xml`, data: enc.encode(c.chartXml) });
+    });
     return _zipStore(entries);
+  }
+
+  // ─── Chart pipeline ────────────────────────────────────────────────
+  // _buildChartXml takes a chart spec and produces the chartN.xml body.
+  // Spec shape:
+  //   { title, type: 'column' | 'bar' | 'pie',
+  //     catRef: 'Dashboard!$A$4:$E$4',
+  //     series: [{ name, valRef, colorRgb? }],
+  //     colors: ['FF1F4E79', ...]   // optional per-point palette (pie)
+  //   }
+  function _buildChartXml(spec) {
+    const type = spec.type || 'column';
+    const series = spec.series || [];
+    const seriesXml = series.map((s, i) => {
+      const color = s.colorRgb || (spec.colors && spec.colors[i]) || ['1F4E79','388E3C','C62828','F57F17','6A1B9A'][i % 5];
+      const titleXml = s.name
+        ? `<c:tx><c:strRef><c:f>${_xmlEsc(s.nameRef || '')}</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${_xmlEsc(s.name)}</c:v></c:pt></c:strCache></c:strRef></c:tx>`
+        : '';
+      // For pie charts, per-point colours via dPt entries make the slices distinguishable.
+      let dPtXml = '';
+      if (type === 'pie' && spec.colors) {
+        spec.colors.forEach((cc, ptIdx) => {
+          dPtXml += `<c:dPt><c:idx val="${ptIdx}"/><c:bubble3D val="0"/><c:spPr><a:solidFill><a:srgbClr val="${cc}"/></a:solidFill></c:spPr></c:dPt>`;
+        });
+      }
+      const spPr = (type === 'pie')
+        ? ''
+        : `<c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr>`;
+      return ''
+        + `<c:ser><c:idx val="${i}"/><c:order val="${i}"/>${titleXml}${spPr}${dPtXml}`
+        + `<c:cat><c:strRef><c:f>${_xmlEsc(spec.catRef)}</c:f></c:strRef></c:cat>`
+        + `<c:val><c:numRef><c:f>${_xmlEsc(s.valRef)}</c:f></c:numRef></c:val>`
+        + '</c:ser>';
+    }).join('');
+    const titleBlock = spec.title
+      ? `<c:title><c:tx><c:rich><a:bodyPr rot="0" spcFirstLastPara="1" vertOverflow="ellipsis" wrap="square" anchor="ctr" anchorCtr="1"/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1400" b="1"><a:solidFill><a:srgbClr val="1F4E79"/></a:solidFill></a:defRPr></a:pPr><a:r><a:rPr lang="en-US" sz="1400" b="1"><a:solidFill><a:srgbClr val="1F4E79"/></a:solidFill></a:rPr><a:t>${_xmlEsc(spec.title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>`
+      : '';
+    let plotInner = '';
+    if (type === 'pie') {
+      plotInner = `<c:pieChart><c:varyColors val="1"/>${seriesXml}<c:firstSliceAng val="0"/></c:pieChart>`;
+    } else {
+      const barDir = (type === 'bar') ? 'bar' : 'col';
+      plotInner = `<c:barChart><c:barDir val="${barDir}"/><c:grouping val="clustered"/><c:varyColors val="0"/>${seriesXml}<c:axId val="111111"/><c:axId val="222222"/></c:barChart>`
+        + '<c:catAx><c:axId val="111111"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/>'
+        + `<c:axPos val="${barDir === 'bar' ? 'l' : 'b'}"/><c:crossAx val="222222"/></c:catAx>`
+        + '<c:valAx><c:axId val="222222"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/>'
+        + `<c:axPos val="${barDir === 'bar' ? 'b' : 'l'}"/><c:crossAx val="111111"/></c:valAx>`;
+    }
+    let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
+    xml += '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">';
+    xml += '<c:chart>';
+    xml += titleBlock;
+    xml += '<c:autoTitleDeleted val="0"/>';
+    xml += '<c:plotArea><c:layout/>';
+    xml += plotInner;
+    xml += '</c:plotArea>';
+    xml += type === 'pie'
+      ? '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/>'
+      : '<c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/>';
+    xml += '</c:chart></c:chartSpace>';
+    return xml;
+  }
+
+  // Drawing anchor — positions the chart at a cell-range in the sheet.
+  // Coordinates are zero-indexed cell positions; colOff/rowOff are EMUs
+  // (English Metric Units) but we leave them at 0 for cell-snap.
+  function _buildDrawingAnchor(spec, rid, idCounter) {
+    const f = spec.from || { col: 0, row: 0 };
+    const t = spec.to   || { col: f.col + 8, row: f.row + 16 };
+    return '<xdr:twoCellAnchor>'
+      + `<xdr:from><xdr:col>${f.col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${f.row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>`
+      + `<xdr:to><xdr:col>${t.col}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${t.row}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>`
+      + '<xdr:graphicFrame macro="">'
+      + `<xdr:nvGraphicFramePr><xdr:cNvPr id="${idCounter}" name="Chart ${idCounter}"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>`
+      + '<xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>'
+      + '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart">'
+      + `<c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId${rid}"/>`
+      + '</a:graphicData></a:graphic></xdr:graphicFrame>'
+      + '<xdr:clientData/>'
+      + '</xdr:twoCellAnchor>';
   }
 
   // ── Sheet builders — each produces { name, headers, rows } from current
@@ -22937,6 +23250,15 @@ body.is-row-dragging *        { user-select: none !important; }
         ]);
       });
     });
+    // Column index offset when an extra Project column is prepended.
+    const ofs = multiProject ? 1 : 0;
+    // Currency / decimal cell styling for the Actions sheet.
+    const actionsColStyles = {};
+    actionsColStyles[6 + ofs]  = STYLE.CURRENCY;  // Hourly rate
+    actionsColStyles[18 + ofs] = STYLE.DEC2;      // Logged hours
+    actionsColStyles[19 + ofs] = STYLE.DEC2;      // Planned hours
+    actionsColStyles[21 + ofs] = STYLE.DEC2;      // EV hours
+    actionsColStyles[22 + ofs] = STYLE.DEC2;      // PV hours
     sheets.push({
       name: 'Actions',
       headers: [
@@ -22950,6 +23272,18 @@ body.is-row-dragging *        { user-select: none !important; }
         'Tags', 'Depends on', 'Created', 'Updated',
       ],
       rows: actionRows,
+      frozenHeader: true,
+      colWidths: [
+        ...(multiProject ? [20] : []),
+        14, 42, 20, 24, 24,    // ID, Title, Component, Milestone, Deliverable
+        18, 12, 14, 12, 14,    // Owner, Hourly rate, Status, Priority, Commitment %
+        12, 12, 14, 14,        // Start, Due, Completed date, Predicted
+        18, 14,                // Originator, Originator date
+        13, 14, 13, 13,        // Baseline due, Variance days, Logged hours, Planned hours
+        12, 12, 12,            // % Complete, EV hours, PV hours
+        30, 30, 12, 12,        // Tags, Depends on, Created, Updated
+      ],
+      colStyles: actionsColStyles,
     });
 
     // 1b) Milestones — one row per milestone, with linked-action rollups so
@@ -22984,6 +23318,11 @@ body.is-row-dragging *        { user-select: none !important; }
         'Linked actions', 'Open', 'Done',
       ],
       rows: milestoneRows,
+      frozenHeader: true,
+      colWidths: [
+        ...(multiProject ? [20] : []),
+        16, 38, 12, 16, 11, 14, 8, 8,
+      ],
     });
 
     // 1c) Deliverables — same shape as milestones, keyed by dueDate.
@@ -23017,6 +23356,11 @@ body.is-row-dragging *        { user-select: none !important; }
         'Linked actions', 'Open', 'Done',
       ],
       rows: deliverableRows,
+      frozenHeader: true,
+      colWidths: [
+        ...(multiProject ? [20] : []),
+        16, 38, 12, 16, 11, 14, 8, 8,
+      ],
     });
 
     // 2) Open points
@@ -23045,6 +23389,11 @@ body.is-row-dragging *        { user-select: none !important; }
         'Created', 'Steps done', 'Steps total', 'Notes (plain)',
       ],
       rows: opRows,
+      frozenHeader: true,
+      colWidths: [
+        ...(multiProject ? [20] : []),
+        16, 40, 18, 14, 14, 12, 12, 12, 60,
+      ],
     });
 
     // 3) Risks & opportunities
@@ -23075,6 +23424,11 @@ body.is-row-dragging *        { user-select: none !important; }
         'Mitigation / Capture', 'Linked action',
       ],
       rows: riskRows,
+      frozenHeader: true,
+      colWidths: [
+        ...(multiProject ? [20] : []),
+        14, 12, 40, 18, 11, 11, 11, 11, 11, 11, 50, 14,
+      ],
     });
 
     // 4) Decisions
@@ -23101,6 +23455,11 @@ body.is-row-dragging *        { user-select: none !important; }
         'ID', 'Title', 'Rationale', 'Owner', 'Date', 'Component', 'Status', 'Trigger',
       ],
       rows: decRows,
+      frozenHeader: true,
+      colWidths: [
+        ...(multiProject ? [20] : []),
+        14, 38, 50, 18, 12, 18, 14, 20,
+      ],
     });
 
     // 5) Change requests
@@ -23129,6 +23488,9 @@ body.is-row-dragging *        { user-select: none !important; }
         ]);
       });
     });
+    // CR has a cost column we can format as currency.
+    const crColStyles = {};
+    crColStyles[11 + (multiProject ? 1 : 0)] = STYLE.CURRENCY;
     sheets.push({
       name: 'Change requests',
       headers: [
@@ -23139,6 +23501,12 @@ body.is-row-dragging *        { user-select: none !important; }
         'Rationale', 'Description', 'Analysis', 'Link',
       ],
       rows: crRows,
+      frozenHeader: true,
+      colWidths: [
+        ...(multiProject ? [20] : []),
+        14, 38, 14, 12, 18, 12, 18, 13, 18, 14, 14, 20, 20, 40, 50, 50, 30,
+      ],
+      colStyles: crColStyles,
     });
 
     // 6) People — always portfolio-wide; no Project column.
@@ -23153,6 +23521,9 @@ body.is-row-dragging *        { user-select: none !important; }
       name: 'People',
       headers: ['ID', 'Name', 'Role', 'Capacity %', 'Hourly rate'],
       rows: peopleRows,
+      frozenHeader: true,
+      colWidths: [14, 24, 22, 14, 14],
+      colStyles: { 4: STYLE.CURRENCY },
     });
 
     // 7) Budgets — one row per (cost-centre, week-start) with the weekly
@@ -23177,6 +23548,9 @@ body.is-row-dragging *        { user-select: none !important; }
       name: 'Budgets',
       headers: ['Cost centre', 'Projects', 'Week start (ISO)', 'Budget hours'],
       rows: budgetRows,
+      frozenHeader: true,
+      colWidths: [20, 36, 16, 14],
+      colStyles: { 3: STYLE.DEC2 },
     });
 
     // 8) KPIs — formula-driven so the workbook recomputes as the user
@@ -23221,16 +23595,27 @@ body.is-row-dragging *        { user-select: none !important; }
     const dayISO = (n) => fmtISO(new Date(todayT - n * dayMs));
 
     const kpiRows = [];
+    // Map a KPI's unit to the corresponding cell style id so the value
+    // cell renders with the right number format (€, %, ×, integer).
+    const styleForUnit = (unit) => {
+      if (unit === '€')     return STYLE.CURRENCY;
+      if (unit === '%')     return STYLE.PERCENT;
+      if (unit === '×')     return STYLE.MULT;
+      if (unit === 'count') return STYLE.INT;
+      return STYLE.DEFAULT;
+    };
     const pushF = (proj, metric, formula, cachedV, unit, notes, opts = {}) => kpiRows.push([
       ...(multiProject ? [projLabel(proj)] : []),
       metric,
-      { f: formula, v: cachedV, t: opts.t },
+      { f: formula, v: cachedV, t: opts.t, s: styleForUnit(unit) },
       unit || '',
       notes || '',
     ]);
     const pushS = (proj, metric, value, unit, notes) => kpiRows.push([
       ...(multiProject ? [projLabel(proj)] : []),
-      metric, value, unit || '', notes || '',
+      metric,
+      { v: value, s: styleForUnit(unit) },
+      unit || '', notes || '',
     ]);
 
     projects.forEach((p) => {
@@ -23364,7 +23749,240 @@ body.is-row-dragging *        { user-select: none !important; }
         'Metric', 'Value', 'Unit', 'Notes',
       ],
       rows: kpiRows,
+      frozenHeader: true,
+      colWidths: [
+        ...(multiProject ? [20] : []),
+        32, 16, 10, 70,
+      ],
     });
+
+    // ── 9) Dashboard — at-a-glance KPI tiles + 3 embedded charts.
+    // Built last (so all formula helpers are in scope) then unshifted
+    // to position 0 so it opens first.
+    {
+      // Portfolio-wide cached values for the headline tiles. Multi-project
+      // mode aggregates across every in-scope project; single-project
+      // uses just the current project.
+      const allLive = projects.flatMap((p) => (p.actions || []).filter((a) => !a.deletedAt));
+      const _todayStr = todayISO();
+      const dashTotal    = allLive.length;
+      const dashDone     = allLive.filter((a) => a.status === 'done').length;
+      const dashOpen     = allLive.filter((a) => !isClosedStatus(a.status)).length;
+      const dashLate     = allLive.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, _todayStr) < 0).length;
+      const dashBlocked  = allLive.filter((a) => a.status === 'blocked').length;
+      const dashUpcoming = allLive.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, _todayStr) >= 0 && dayDiff(a.due, _todayStr) <= 7).length;
+      const dashCancelled = allLive.filter((a) => a.status === 'cancelled').length;
+      const dashTodo     = allLive.filter((a) => a.status === 'todo').length;
+      const dashDoing    = allLive.filter((a) => a.status === 'doing').length;
+      const dashCompletion = dashTotal ? Number((dashDone / dashTotal * 100).toFixed(1)) : 0;
+      const dashEvm = evmForActions(allLive.filter((a) => a.status !== 'cancelled'));
+
+      // Adherence / productivity for the dashboard (portfolio scope).
+      const _savedProjectId = state.currentProjectId;
+      state.currentProjectId = multiProject ? '__all__' : projects[0].id;
+      const dashDelivery = deliveryMetricsForWindow(dayISO(30), _todayStr);
+      state.currentProjectId = _savedProjectId;
+
+      // Formula builders — same patterns as the KPI sheet but unfiltered
+      // (or filtered to portfolio scope). Range bounded at row 10001.
+      const aId = A['ID'];
+      const aSt = A['Status'];
+      const aDu = A['Due'];
+      const aCm = A['Completed date'];
+      const aPl = A['Planned hours'];
+      const aLg = A['Logged hours'];
+      const aRt = A['Hourly rate'];
+      const aBl = A['Baseline due'];
+      const aPv = A['PV hours'];
+      const aEv = A['EV hours'];
+      const _ref = (col) => `Actions!${col}2:${col}10001`;
+
+      const fTotal    = `COUNTA(${_ref(aId)})`;
+      const fDone     = `COUNTIF(Actions!${aSt}:${aSt},"Done")`;
+      const fOpen     = `SUMPRODUCT((${_ref(aSt)}<>"Done")*(${_ref(aSt)}<>"Cancelled")*(${_ref(aSt)}<>""))`;
+      const fLate     = `SUMPRODUCT((${_ref(aDu)}<>"")*(${_ref(aDu)}<TEXT(TODAY(),"yyyy-mm-dd"))*(${_ref(aSt)}<>"Done")*(${_ref(aSt)}<>"Cancelled"))`;
+      const fBlocked  = `COUNTIF(Actions!${aSt}:${aSt},"Blocked")`;
+      const fUpcoming = `SUMPRODUCT((${_ref(aDu)}<>"")*(${_ref(aDu)}>=TEXT(TODAY(),"yyyy-mm-dd"))*(${_ref(aDu)}<=TEXT(TODAY()+7,"yyyy-mm-dd"))*(${_ref(aSt)}<>"Done")*(${_ref(aSt)}<>"Cancelled"))`;
+      const fCompletion = `IFERROR(${fDone}/${fTotal}*100, 0)`;
+      const fTodo      = `COUNTIF(Actions!${aSt}:${aSt},"Not started")`;
+      const fDoing     = `COUNTIF(Actions!${aSt}:${aSt},"In progress")`;
+      const fCancelled = `COUNTIF(Actions!${aSt}:${aSt},"Cancelled")`;
+      const fAdherence = `IFERROR(SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*(${_ref(aCm)}<=IF(${_ref(aBl)}<>"",${_ref(aBl)},${_ref(aDu)})))/SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd")))*100, "")`;
+      const fProductivity = `IFERROR(SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*${_ref(aPl)})/SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*${_ref(aLg)}), "")`;
+      const fBac = `SUMPRODUCT((${_ref(aSt)}<>"Cancelled")*(${_ref(aSt)}<>"")*${_ref(aPl)}*${_ref(aRt)})`;
+      const fPv  = `SUMPRODUCT((${_ref(aSt)}<>"Cancelled")*(${_ref(aSt)}<>"")*${_ref(aPv)}*${_ref(aRt)})`;
+      const fEv  = `SUMPRODUCT((${_ref(aSt)}<>"Cancelled")*(${_ref(aSt)}<>"")*${_ref(aEv)}*${_ref(aRt)})`;
+      const fAc  = `SUMPRODUCT((${_ref(aSt)}<>"Cancelled")*(${_ref(aSt)}<>"")*${_ref(aLg)}*${_ref(aRt)})`;
+      const fCpi = `IFERROR(${fEv}/${fAc}, "")`;
+      const fSpi = `IFERROR(${fEv}/${fPv}, "")`;
+      const fEac = `IFERROR(${fBac}/(${fEv}/${fAc}), "")`;
+      const fEtc = `IFERROR(MAX(0, ${fBac}/(${fEv}/${fAc}) - ${fAc}), "")`;
+
+      // Band picker for value tiles. >= goodAt → green; <= badAt → red;
+      // between → amber. higherIsBetter flips the polarity.
+      const bandStyle = (val, goodAt, badAt, higherIsBetter = true) => {
+        if (val == null || val === '' || !Number.isFinite(val)) return STYLE.KPI_BIG;
+        if (higherIsBetter) {
+          if (val >= goodAt) return STYLE.GOOD;
+          if (val <= badAt)  return STYLE.BAD;
+          return STYLE.WARN;
+        } else {
+          if (val <= goodAt) return STYLE.GOOD;
+          if (val >= badAt)  return STYLE.BAD;
+          return STYLE.WARN;
+        }
+      };
+
+      const dashTitle = multiProject
+        ? 'Portfolio dashboard — all projects'
+        : `Project dashboard — ${projects[0].name}`;
+
+      // Row content — uses formula cells so the dashboard is live.
+      const dashRows = [
+        // Row 1: big title
+        [{ v: dashTitle, s: STYLE.BIG_TITLE }],
+        // Row 2: generation timestamp
+        [{ v: `Generated ${_todayStr} — values recompute on data edit`, s: STYLE.LABEL }],
+        // Row 3: blank
+        [],
+        // Row 4: section
+        [{ v: 'Headline KPIs', s: STYLE.SECTION }],
+        // Row 5: tile labels (6 wide)
+        [
+          { v: 'TOTAL ACTIONS', s: STYLE.LABEL },
+          { v: 'DONE %',        s: STYLE.LABEL },
+          { v: 'OPEN',          s: STYLE.LABEL },
+          { v: 'LATE',          s: STYLE.LABEL },
+          { v: 'BLOCKED',       s: STYLE.LABEL },
+          { v: 'DUE ≤ 7 DAYS',  s: STYLE.LABEL },
+        ],
+        // Row 6: tile values
+        [
+          { f: fTotal,      v: dashTotal,      s: STYLE.KPI_BIG },
+          { f: fCompletion, v: dashCompletion, s: bandStyle(dashCompletion, 70, 40, true) },
+          { f: fOpen,       v: dashOpen,       s: STYLE.KPI_BIG },
+          { f: fLate,       v: dashLate,       s: bandStyle(dashLate, 0, 10, false) },
+          { f: fBlocked,    v: dashBlocked,    s: bandStyle(dashBlocked, 0, 5, false) },
+          { f: fUpcoming,   v: dashUpcoming,   s: STYLE.KPI_BIG },
+        ],
+        // Row 7: blank
+        [],
+        // Row 8: delivery + EVM labels
+        [
+          { v: 'ADHERENCE 30d',    s: STYLE.LABEL },
+          { v: 'PRODUCTIVITY 30d', s: STYLE.LABEL },
+          { v: 'EVM CPI',          s: STYLE.LABEL },
+          { v: 'EVM SPI',          s: STYLE.LABEL },
+          { v: 'EAC (€)',          s: STYLE.LABEL },
+          { v: 'ETC (€)',          s: STYLE.LABEL },
+        ],
+        // Row 9: values
+        [
+          { f: fAdherence, v: (dashDelivery.adherenceN >= 5 && dashDelivery.adherence != null) ? Number((dashDelivery.adherence * 100).toFixed(1)) : '',
+            s: bandStyle(dashDelivery.adherence != null ? dashDelivery.adherence * 100 : null, 85, 70, true) },
+          { f: fProductivity, v: (dashDelivery.doneInWindow >= 5 && dashDelivery.productivity != null) ? Number(dashDelivery.productivity.toFixed(3)) : '',
+            s: bandStyle(dashDelivery.productivity, 1.0, 0.85, true) },
+          { f: fCpi, v: dashEvm.cpi == null ? '' : Number(dashEvm.cpi.toFixed(3)),
+            s: bandStyle(dashEvm.cpi, 1.0, 0.85, true) },
+          { f: fSpi, v: dashEvm.spi == null ? '' : Number(dashEvm.spi.toFixed(3)),
+            s: bandStyle(dashEvm.spi, 1.0, 0.85, true) },
+          { f: fEac, v: dashEvm.eac == null ? '' : Math.round(dashEvm.eac), s: STYLE.KPI_BIG },
+          { f: fEtc, v: dashEvm.etc == null ? '' : Math.round(dashEvm.etc), s: STYLE.KPI_BIG },
+        ],
+        // Row 10: blank
+        [],
+        // Row 11: section
+        [{ v: 'Action status mix', s: STYLE.SECTION }],
+        // Row 12: status names (chart categories)
+        [
+          { v: 'Not started', s: STYLE.HEADER },
+          { v: 'In progress', s: STYLE.HEADER },
+          { v: 'Blocked',     s: STYLE.HEADER },
+          { v: 'Done',        s: STYLE.HEADER },
+          { v: 'Cancelled',   s: STYLE.HEADER },
+        ],
+        // Row 13: status counts (chart values)
+        [
+          { f: fTodo,      v: dashTodo,      s: STYLE.INT },
+          { f: fDoing,     v: dashDoing,     s: STYLE.INT },
+          { f: fBlocked,   v: dashBlocked,   s: STYLE.INT },
+          { f: fDone,      v: dashDone,      s: STYLE.INT },
+          { f: fCancelled, v: dashCancelled, s: STYLE.INT },
+        ],
+        // Row 14: blank (chart anchored from row 15)
+        [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], // rows 14-29
+        // Row 31: section (after chart 1's anchor zone)
+        [{ v: 'EVM rollup (€)', s: STYLE.SECTION }],
+        // Row 32: EVM labels
+        [
+          { v: 'BAC', s: STYLE.HEADER },
+          { v: 'PV',  s: STYLE.HEADER },
+          { v: 'EV',  s: STYLE.HEADER },
+          { v: 'AC',  s: STYLE.HEADER },
+        ],
+        // Row 33: EVM values
+        [
+          { f: fBac, v: Math.round(dashEvm.bac), s: STYLE.CURRENCY },
+          { f: fPv,  v: Math.round(dashEvm.pv),  s: STYLE.CURRENCY },
+          { f: fEv,  v: Math.round(dashEvm.ev),  s: STYLE.CURRENCY },
+          { f: fAc,  v: Math.round(dashEvm.ac),  s: STYLE.CURRENCY },
+        ],
+        // Rows 34-49: chart 2 anchor zone
+        [], [], [], [], [], [], [], [], [], [], [], [], [], [], [], [],
+        // Row 51: section
+        [{ v: 'Action counts overview', s: STYLE.SECTION }],
+        // Row 52: count category labels
+        [
+          { v: 'Total',   s: STYLE.HEADER },
+          { v: 'Done',    s: STYLE.HEADER },
+          { v: 'Open',    s: STYLE.HEADER },
+          { v: 'Late',    s: STYLE.HEADER },
+          { v: 'Blocked', s: STYLE.HEADER },
+        ],
+        // Row 53: count values
+        [
+          { f: fTotal,   v: dashTotal,   s: STYLE.INT },
+          { f: fDone,    v: dashDone,    s: STYLE.INT },
+          { f: fOpen,    v: dashOpen,    s: STYLE.INT },
+          { f: fLate,    v: dashLate,    s: STYLE.INT },
+          { f: fBlocked, v: dashBlocked, s: STYLE.INT },
+        ],
+      ];
+      sheets.unshift({
+        name: 'Dashboard',
+        headers: null,
+        rows: dashRows,
+        colWidths: [22, 22, 22, 22, 22, 22, 14, 14, 14, 14],
+        // Three column / bar charts. Each anchors to a 7-col × 14-row
+        // patch of the sheet, leaving space for the data tables.
+        charts: [
+          {
+            title: 'Action status mix',
+            type: 'column',
+            catRef: 'Dashboard!$A$12:$E$12',
+            series: [{ name: 'Count', valRef: 'Dashboard!$A$13:$E$13' }],
+            colors: ['8C8C8C', '1F77B4', 'F57F17', '2E7D32', 'B71C1C'],
+            from: { col: 0, row: 14 }, to: { col: 7, row: 29 },
+          },
+          {
+            title: 'EVM rollup',
+            type: 'column',
+            catRef: 'Dashboard!$A$32:$D$32',
+            series: [{ name: 'Value (€)', valRef: 'Dashboard!$A$33:$D$33' }],
+            colors: ['1F4E79', '5B9BD5', '70AD47', 'C00000'],
+            from: { col: 0, row: 34 }, to: { col: 7, row: 49 },
+          },
+          {
+            title: 'Action counts overview',
+            type: 'bar',
+            catRef: 'Dashboard!$A$52:$E$52',
+            series: [{ name: 'Count', valRef: 'Dashboard!$A$53:$E$53' }],
+            colors: ['1F4E79', '2E7D32', 'F57F17', 'B71C1C', '8C8C8C'],
+            from: { col: 0, row: 54 }, to: { col: 7, row: 69 },
+          },
+        ],
+      });
+    }
 
     return sheets;
   }
