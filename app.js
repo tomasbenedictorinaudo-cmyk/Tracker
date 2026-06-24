@@ -15458,7 +15458,7 @@
       ...(multiProject ? ['Project'] : []),
       'ID', 'Title', 'Component', 'Milestone', 'Deliverable',
       'Owner', 'Hourly rate', 'Status', 'Priority', 'Commitment %',
-      'Start', 'Due', 'Completed date', 'Predicted',
+      'Start', 'Due', 'Completed date', 'Promised due', 'Predicted',
       'Originator', 'Originator date',
       'Baseline due', 'Variance days', 'Logged hours', 'Planned hours',
       '% Complete', 'EV hours', 'PV hours',
@@ -15490,8 +15490,15 @@
         const pctRef     = `${A['% Complete']}${rowNum}`;
         const startRef   = `${A['Start']}${rowNum}`;
         const dueRef     = `${A['Due']}${rowNum}`;
+        const baselineRef = `${A['Baseline due']}${rowNum}`;
         const evFormula  = `IFERROR(${plannedRef}*${pctRef}/100, 0)`;
         const pvFormula  = `IFERROR(IF(OR(${startRef}="",${dueRef}=""),0,${plannedRef}*MAX(0,MIN(1,(TODAY()-DATEVALUE(${startRef}))/MAX(1,DATEVALUE(${dueRef})-DATEVALUE(${startRef}))))), 0)`;
+        // Promised due: baseline if frozen, else current due. Single-cell
+        // IF — works everywhere; KPI / Dashboard formulas just reference
+        // this column instead of fighting Excel's quirky IF-inside-
+        // SUMPRODUCT behaviour.
+        const promisedFormula = `IF(${baselineRef}<>"",${baselineRef},${dueRef})`;
+        const promisedCached = a.baseline?.due || a.due || '';
         actionRows.push([
           ...(multiProject ? [projLabel(p)] : []),
           a.id,
@@ -15507,6 +15514,7 @@
           a.startDate || '',
           a.due || '',
           actionCompletedAt(a) || '',
+          { f: promisedFormula, v: promisedCached, t: 'str' },
           predictedCompletion(a) || '',
           personName(a.originator),
           a.originatorDate || a.createdAt || '',
@@ -15526,20 +15534,22 @@
     });
     // Column index offset when an extra Project column is prepended.
     const ofs = multiProject ? 1 : 0;
-    // Currency / decimal cell styling for the Actions sheet.
+    // Currency / decimal cell styling for the Actions sheet. Column
+    // indices below match the headers array — Promised due bumped every
+    // subsequent column +1 from the previous schema.
     const actionsColStyles = {};
     actionsColStyles[6 + ofs]  = STYLE.CURRENCY;  // Hourly rate
-    actionsColStyles[18 + ofs] = STYLE.DEC2;      // Logged hours
-    actionsColStyles[19 + ofs] = STYLE.DEC2;      // Planned hours
-    actionsColStyles[21 + ofs] = STYLE.DEC2;      // EV hours
-    actionsColStyles[22 + ofs] = STYLE.DEC2;      // PV hours
+    actionsColStyles[19 + ofs] = STYLE.DEC2;      // Logged hours
+    actionsColStyles[20 + ofs] = STYLE.DEC2;      // Planned hours
+    actionsColStyles[22 + ofs] = STYLE.DEC2;      // EV hours
+    actionsColStyles[23 + ofs] = STYLE.DEC2;      // PV hours
     sheets.push({
       name: 'Actions',
       headers: [
         ...(multiProject ? ['Project'] : []),
         'ID', 'Title', 'Component', 'Milestone', 'Deliverable',
         'Owner', 'Hourly rate', 'Status', 'Priority', 'Commitment %',
-        'Start', 'Due', 'Completed date', 'Predicted',
+        'Start', 'Due', 'Completed date', 'Promised due', 'Predicted',
         'Originator', 'Originator date',
         'Baseline due', 'Variance days', 'Logged hours', 'Planned hours',
         '% Complete', 'EV hours', 'PV hours',
@@ -15551,7 +15561,7 @@
         ...(multiProject ? [20] : []),
         14, 42, 20, 24, 24,    // ID, Title, Component, Milestone, Deliverable
         18, 12, 14, 12, 14,    // Owner, Hourly rate, Status, Priority, Commitment %
-        12, 12, 14, 14,        // Start, Due, Completed date, Predicted
+        12, 12, 14, 13, 14,    // Start, Due, Completed date, Promised due, Predicted
         18, 14,                // Originator, Originator date
         13, 14, 13, 13,        // Baseline due, Variance days, Logged hours, Planned hours
         12, 12, 12,            // % Complete, EV hours, PV hours
@@ -15842,6 +15852,7 @@
     const aDue        = A['Due'];
     const aStatus     = A['Status'];
     const aCompleted  = A['Completed date'];
+    const aPromised   = A['Promised due'];
     const aPlanned    = A['Planned hours'];
     const aLogged     = A['Logged hours'];
     const aRate       = A['Hourly rate'];
@@ -15959,18 +15970,12 @@
 
       // ── Delivery KPIs ────────────────────────────────────────────────
       // Adherence: on-time done in the 30-day window ÷ all done in window.
-      // Promised due = baseline if set, else current due. We can't fold
-      // that condition into a single SUMPRODUCT via IF() — Excel doesn't
-      // apply IF element-wise inside SUMPRODUCT unless the cell is
-      // entered as an array formula, and IFERROR then swallows the
-      // resulting #VALUE!, leaving the cell blank. Splitting into two
-      // SUMPRODUCTs (with-baseline vs without) keeps the formula purely
-      // boolean-arithmetic and works in every Excel.
-      const adhWindow = `${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))`;
-      const adhNumA   = `SUMPRODUCT(${adhWindow}*(${_r(aBaseline)}<>"")*(${_r(aCompleted)}<=${_r(aBaseline)}))`;
-      const adhNumB   = `SUMPRODUCT(${adhWindow}*(${_r(aBaseline)}="")*(${_r(aCompleted)}<=${_r(aDue)}))`;
-      const adhDen    = `SUMPRODUCT(${adhWindow})`;
-      const adherenceF = `IFERROR((${adhNumA}+${adhNumB})/${adhDen}*100, "")`;
+      // "Promised due" lives in its own column on the Actions sheet
+      // (=IF(Baseline<>"", Baseline, Due) per-row), so the KPI formula
+      // is a single boolean-arithmetic SUMPRODUCT — no IF inline, no
+      // splits — and Excel handles it identically to LibreOffice.
+      const adhWindow  = `${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))`;
+      const adherenceF = `IFERROR(SUMPRODUCT(${adhWindow}*(${_r(aCompleted)}<=${_r(aPromised)}))/SUMPRODUCT(${adhWindow})*100, "")`;
       pushF(p, 'Schedule adherence (30d)', adherenceF,
         (delivery.adherenceN >= 5 && delivery.adherence != null) ? Number((delivery.adherence * 100).toFixed(1)) : '',
         '%',
@@ -16077,6 +16082,7 @@
       const aSt = A['Status'];
       const aDu = A['Due'];
       const aCm = A['Completed date'];
+      const aPm = A['Promised due'];
       const aPl = A['Planned hours'];
       const aLg = A['Logged hours'];
       const aRt = A['Hourly rate'];
@@ -16095,14 +16101,11 @@
       const fTodo      = `COUNTIF(Actions!${aSt}:${aSt},"Not started")`;
       const fDoing     = `COUNTIF(Actions!${aSt}:${aSt},"In progress")`;
       const fCancelled = `COUNTIF(Actions!${aSt}:${aSt},"Cancelled")`;
-      // Split into with-baseline vs without — see comment on adherenceF
-      // in the KPI builder for why IF inside SUMPRODUCT is unsafe here.
+      // Adherence: see the comment on adherenceF in the KPI builder.
+      // Uses the Promised due column so the formula is a single clean
+      // SUMPRODUCT, no IF, no array semantics — works in every Excel.
       const dashAdhWindow = `(${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))`;
-      const fAdherence =
-        `IFERROR(`
-        + `(SUMPRODUCT(${dashAdhWindow}*(${_ref(aBl)}<>"")*(${_ref(aCm)}<=${_ref(aBl)}))`
-        + `+SUMPRODUCT(${dashAdhWindow}*(${_ref(aBl)}="")*(${_ref(aCm)}<=${_ref(aDu)})))`
-        + `/SUMPRODUCT(${dashAdhWindow})*100, "")`;
+      const fAdherence = `IFERROR(SUMPRODUCT(${dashAdhWindow}*(${_ref(aCm)}<=${_ref(aPm)}))/SUMPRODUCT(${dashAdhWindow})*100, "")`;
       const fProductivity = `IFERROR(SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*${_ref(aPl)})/SUMPRODUCT((${_ref(aCm)}<>"")*(${_ref(aCm)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*${_ref(aLg)}), "")`;
       const fBac = `SUMPRODUCT((${_ref(aSt)}<>"Cancelled")*(${_ref(aSt)}<>"")*${_ref(aPl)}*${_ref(aRt)})`;
       const fPv  = `SUMPRODUCT((${_ref(aSt)}<>"Cancelled")*(${_ref(aSt)}<>"")*${_ref(aPv)}*${_ref(aRt)})`;
