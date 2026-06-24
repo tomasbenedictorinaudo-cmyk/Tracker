@@ -13601,17 +13601,46 @@
     if (chartId) _chartCaptureOpts.set(chartId, opts);
   }
 
+  // Reusable kick-off — returns the Promise of a PNG blob without
+  // awaiting it. ClipboardItem accepts a Promise, which preserves
+  // Safari's user-activation across the async render step. Falls back
+  // to a real Blob await for the download path.
+  function _chartPngBlobPromise(el) {
+    const opts = _chartCaptureOpts.get(el.dataset.chart) || {};
+    return el instanceof SVGElement
+      ? _svgToPngBlob(el, 2)
+      : _htmlToPngBlob(el, { scale: 2, ...opts });
+  }
+
   async function _copyChartPng(el) {
-    try {
-      const opts = _chartCaptureOpts.get(el.dataset.chart) || {};
-      const blob = el instanceof SVGElement
-        ? await _svgToPngBlob(el, 2)
-        : await _htmlToPngBlob(el, { scale: 2, ...opts });
-      if (!navigator.clipboard?.write || typeof ClipboardItem === 'undefined') {
-        throw new Error('Clipboard image API not available in this browser');
+    const blobPromise = _chartPngBlobPromise(el);
+    // 1) Preferred path — write to clipboard. Pass the BLOB PROMISE
+    //    (not an awaited Blob) so the ClipboardItem is constructed
+    //    synchronously inside the user gesture, satisfying Safari's
+    //    user-activation requirement for the async-clipboard API.
+    if (navigator.clipboard?.write && typeof ClipboardItem !== 'undefined') {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blobPromise })]);
+        toast('Plot copied as PNG');
+        return;
+      } catch (err) {
+        // Falls through to the download fallback. Common causes: the
+        // permission was denied, the document lost focus mid-render,
+        // or the browser does not allow image MIME types on the
+        // clipboard (Firefox until recently).
+        console.warn('Clipboard image write failed — falling back to download:', err);
       }
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      toast('Plot copied as PNG');
+    }
+    // 2) Fallback — download the PNG. Always works, no permissions.
+    try {
+      const blob = await blobPromise;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (el.dataset.chart || 'chart') + '.png';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('Saved as PNG (clipboard unavailable)');
     } catch (err) {
       console.error('Copy PNG failed:', err);
       toast('Copy PNG failed — ' + (err?.message || 'see console'));
