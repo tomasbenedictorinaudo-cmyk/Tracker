@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-24T22:03:25.105Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-24T22:15:15.148Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -15015,7 +15015,7 @@ body.is-row-dragging *        { user-select: none !important; }
     }));
 
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="adherence-trend" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
         ${yTicksL}${yTicksR}
         ${target}
         ${bars}
@@ -15104,7 +15104,7 @@ body.is-row-dragging *        { user-select: none !important; }
     }));
 
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="productivity-trend" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
         ${yTicksL}${yTicksR}
         ${onePar}
         ${bars}
@@ -15182,7 +15182,7 @@ body.is-row-dragging *        { user-select: none !important; }
           <div id="evmRollup"></div>
         </div>
 
-        <div class="panel risk-heat-panel">
+        <div class="panel risk-heat-panel copyable-chart" data-chart="risk-heatmap">
           <div class="panel-title">Portfolio risk heatmap <span class="legend">5×5 residual risk · cells aggregate matching items across projects · click a cell to filter the register</span></div>
           <div id="riskHeat"></div>
         </div>
@@ -15193,27 +15193,27 @@ body.is-row-dragging *        { user-select: none !important; }
         <div class="dashboard-section-sub">Trends and projections across the portfolio</div>
       </div>
       <div class="charts-grid">
-        <div class="panel chart-panel half">
+        <div class="panel chart-panel half copyable-chart" data-chart="adherence-trend">
           <div class="panel-title">Schedule adherence trend <span class="legend">last 12 weeks • bars = closed actions per week • line = % on-time</span></div>
           ${chartAdherenceTrend(12)}
         </div>
-        <div class="panel chart-panel half">
+        <div class="panel chart-panel half copyable-chart" data-chart="productivity-trend">
           <div class="panel-title">Productivity trend <span class="legend">last 12 weeks • bars = hours per week • line = planned ÷ logged</span></div>
           ${chartProductivityTrend(12)}
         </div>
-        <div class="panel chart-panel">
+        <div class="panel chart-panel copyable-chart" data-chart="waterfall">
           <div class="panel-title">Schedule deviation waterfall <span class="legend">x = when forecast was made • y = forecast due • diagonal = delivered now</span></div>
           ${chartWaterfall()}
         </div>
-        <div class="panel chart-panel half">
+        <div class="panel chart-panel half copyable-chart" data-chart="cumulative-workload">
           <div class="panel-title">Cumulative workload (next 12 weeks) <span class="legend">click a name to hide / show</span></div>
           <div id="cumWlSlot">${chartCumulativeWorkload(12)}</div>
         </div>
-        <div class="panel chart-panel half">
+        <div class="panel chart-panel half copyable-chart" data-chart="flow">
           <div class="panel-title">Activity / week (last 12 weeks)</div>
           ${chartFlow(12)}
         </div>
-        <div class="panel chart-panel">
+        <div class="panel chart-panel copyable-chart" data-chart="per-person-workload">
           <div class="panel-title">Per-person workload (next 12 weeks)</div>
           ${chartPerPerson()}
         </div>
@@ -15360,7 +15360,7 @@ body.is-row-dragging *        { user-select: none !important; }
         }
         return { headers: ['Probability', 'Impact', 'Base score', 'Items in cell', 'Sum of residual scores'], rows };
       });
-      let svg = `<svg class="risk-heat-svg copyable-chart" data-chart="risk-heatmap" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
+      let svg = `<svg class="risk-heat-svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">`;
       // Axis labels
       svg += `<text class="rh-axis" x="${padL + innerW/2}" y="${H - 6}" text-anchor="middle">Probability →</text>`;
       svg += `<text class="rh-axis" transform="translate(10, ${padT + innerH/2}) rotate(-90)" text-anchor="middle">Impact →</text>`;
@@ -15646,7 +15646,7 @@ body.is-row-dragging *        { user-select: none !important; }
     });
 
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="cumulative-workload" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
         ${minorLines.join('')}
         ${capLine}
         ${layers.map((l) => `<path d="${l.path}" fill="rgba(${l.ps.color.rgb},.65)" stroke="rgba(${l.ps.color.rgb},.95)" stroke-width="0.7"><title>${escapeHTML(l.ps.person.name)}</title></path>`).join('')}
@@ -15786,7 +15786,7 @@ body.is-row-dragging *        { user-select: none !important; }
     }));
 
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="flow" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
         ${yTicks}
         ${bars}
         <path d="${linePath}" class="line-created" />
@@ -15897,7 +15897,7 @@ body.is-row-dragging *        { user-select: none !important; }
     });
 
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="chart-svg copyable-chart" data-chart="waterfall" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet">
         ${xTicks.join('')}
         ${yTicks.join('')}
         ${diag}
@@ -15918,7 +15918,7 @@ body.is-row-dragging *        { user-select: none !important; }
         const peak = series.reduce((mx, s) => s.count > mx.count ? s : mx, series[0]);
         const peakCls = peak.count > (p.capacity || 5) ? 'over' : peak.count > (p.capacity || 5) * 0.8 ? 'warn' : 'ok';
         return `
-          <div class="sm-cell">
+          <div class="sm-cell copyable-chart" data-chart="spark-${escapeHTML(p.id)}">
             <div class="sm-head">
               <span class="avatar">${initials(p.name)}</span>
               <b>${escapeHTML(p.name)}</b>
@@ -16932,7 +16932,7 @@ body.is-row-dragging *        { user-select: none !important; }
     }).join('');
 
     return `
-      <svg viewBox="0 0 ${W} ${H}" class="mtx-svg copyable-chart" data-chart="risk-matrix" preserveAspectRatio="xMidYMid meet">
+      <svg viewBox="0 0 ${W} ${H}" class="mtx-svg" preserveAspectRatio="xMidYMid meet">
         <defs>
           <marker id="mtxArrowRisk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(248,113,113,.85)" />
@@ -17000,7 +17000,7 @@ body.is-row-dragging *        { user-select: none !important; }
         return;
       }
       if (roState.view === 'matrix') {
-        body.innerHTML = `<div class="panel chart-panel">${riskMatrixSVG(items)}</div>`;
+        body.innerHTML = `<div class="panel chart-panel copyable-chart" data-chart="risk-matrix">${riskMatrixSVG(items)}</div>`;
         wireRiskMatrixHover(body);
         return;
       }
@@ -18817,7 +18817,7 @@ body.is-row-dragging *        { user-select: none !important; }
         const safe = cc.replace(/[^A-Za-z0-9_-]/g, '_');
         const range = getBudgetRange(cc);
         return `
-          <div class="budget-card" data-cc="${escapeHTML(cc)}">
+          <div class="budget-card copyable-chart" data-cc="${escapeHTML(cc)}" data-chart="budget-${safe}">
             <div class="budget-head">
               <h3>${escapeHTML(cc)}</h3>
               <span class="budget-range" title="Time range for this cost centre — snaps to weeks">
@@ -18829,7 +18829,7 @@ body.is-row-dragging *        { user-select: none !important; }
               <button type="button" class="bc-delete-cc" data-cc="${escapeHTML(cc)}" title="Delete this cost centre" aria-label="Delete cost centre ${escapeHTML(cc)}">×</button>
             </div>
             <div class="budget-kpis" id="kpis-${safe}"></div>
-            <div class="budget-chart-wrap"><svg class="budget-chart copyable-chart" data-chart="budget-${safe}" id="chart-${safe}"></svg></div>
+            <div class="budget-chart-wrap"><svg class="budget-chart" id="chart-${safe}"></svg></div>
           </div>`;
       }).join('');
       visible.forEach((cc) => {
@@ -18918,6 +18918,11 @@ body.is-row-dragging *        { user-select: none !important; }
       const mode = state.settings.budgetView;
       const evm = evmFor(cc, weeks, mode);
       const fmtV = (v) => fmtBudgetVal(v, mode);
+      // Hide interactive UI controls (date pickers, delete button) when
+      // the card is captured as PNG — they're noise in a shareable image.
+      registerChartCapture(`budget-${safe}`, {
+        hideSelectors: ['.bc-delete-cc', '.budget-range'],
+      });
       registerChartData(`budget-${safe}`, () => {
         const unit = mode === 'cost' ? '€' : 'h';
         return {
@@ -21253,7 +21258,7 @@ body.is-row-dragging *        { user-select: none !important; }
   // bars past the horizontal viewport) lands in the PNG.
   // expandSelectors → extra CSS selectors whose matching nodes should
   // have their explicit width/height cleared so they grow with content.
-  async function _htmlToPngBlob(el, { scale = 2, expandSelectors = [] } = {}) {
+  async function _htmlToPngBlob(el, { scale = 2, expandSelectors = [], hideSelectors = [] } = {}) {
     const clone = el.cloneNode(true);
     // Push var(--…) onto the clone wrapper so descendants inherit them.
     const rootVars = _rootCustomProps();
@@ -21275,6 +21280,14 @@ body.is-row-dragging *        { user-select: none !important; }
           n.style.width = 'auto';
           n.style.height = 'auto';
         });
+      });
+    }
+    // hideSelectors → remove UI controls that don't belong in the PNG
+    // (delete buttons, range pickers, etc.). Using `display:none` keeps
+    // the layout calculation clean.
+    if (hideSelectors.length) {
+      hideSelectors.forEach((sel) => {
+        clone.querySelectorAll(sel).forEach((n) => { n.style.display = 'none'; });
       });
     }
     // Mount off-screen at the source element's width so layout settles
@@ -21406,8 +21419,17 @@ body.is-row-dragging *        { user-select: none !important; }
   // edit menu — we don't want to also show the chart copy menu on top).
   document.addEventListener('contextmenu', (e) => {
     if (e.defaultPrevented) return;
-    const svg = e.target.closest('.copyable-chart');
+    let svg = e.target.closest('.copyable-chart');
     if (!svg) return;
+    // Prefer the OUTERmost copyable wrapper. Chart cards (panels,
+    // budget cards, sm-cells) typically contain a chart SVG that was
+    // itself marked copyable in an earlier iteration; the wrapper
+    // includes the title / legend / footer the user wants captured.
+    let outer = svg.parentElement?.closest('.copyable-chart');
+    while (outer) {
+      svg = outer;
+      outer = svg.parentElement?.closest('.copyable-chart');
+    }
     e.preventDefault();
     const chartId = svg.dataset.chart;
     const dataFn = chartId ? _chartDataExtractors.get(chartId) : null;
