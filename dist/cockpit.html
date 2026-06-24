@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-24T21:24:56.443Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-24T21:34:38.438Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -23732,9 +23732,15 @@ body.is-row-dragging *        { user-select: none !important; }
       // Each domain sheet has one row per item plus a header, so subtract
       // 1 from COUNTA in single-project mode; in multi-project filter by
       // the Project column. Project column is first in those sheets.
+      // Sheet names with spaces / special chars MUST be wrapped in
+      // single quotes per the A1 syntax — otherwise Excel returns
+      // #NAME? when it recalculates and the cell renders blank.
+      const sheetRef = (sheet) => /[\s&!@#$%^*()+={}[\]|\\:;"'<>,?/]/.test(sheet)
+        ? `'${sheet.replace(/'/g, "''")}'`
+        : sheet;
       const refF = (sheet) => multiProject
-        ? `SUMPRODUCT((${sheet}!A2:A${N_MAX}="${p.name.replace(/"/g, '""')}")*(${sheet}!B2:B${N_MAX}<>""))`
-        : `MAX(0, COUNTA(${sheet}!A:A) - 1)`;
+        ? `SUMPRODUCT((${sheetRef(sheet)}!A2:A${N_MAX}="${p.name.replace(/"/g, '""')}")*(${sheetRef(sheet)}!B2:B${N_MAX}<>""))`
+        : `MAX(0, COUNTA(${sheetRef(sheet)}!A:A) - 1)`;
       pushF(p, 'Milestones',      refF('Milestones'),      (p.milestones    || []).length, 'count');
       pushF(p, 'Deliverables',    refF('Deliverables'),    (p.deliverables  || []).length, 'count');
       pushF(p, 'Open points',     refF('Open points'),     (p.openPoints    || []).length, 'count');
