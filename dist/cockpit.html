@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-22T21:52:19.378Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-24T21:10:07.337Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -22749,9 +22749,13 @@ body.is-row-dragging *        { user-select: none !important; }
     return s;
   }
 
-  // Build the OOXML for one worksheet. Numbers go as <c t="n"><v>…</v>,
-  // everything else as inline strings. Empty cells are omitted entirely
-  // (xlsx supports sparse rows and that keeps the file small).
+  // Build the OOXML for one worksheet. Cell values may be:
+  //   • a number → <c t="n"><v>…</v>
+  //   • a string → <c t="inlineStr"><is><t>…</t></is></c>
+  //   • an object { f, v?, t? } → formula cell <c><f>…</f><v>…</v></c>
+  //     (`v` is the cached value Excel uses until next recalc; `t="str"`
+  //     marks a string-returning formula)
+  // Empty cells are omitted entirely (xlsx supports sparse rows).
   function _buildSheetXml(headers, rows) {
     let xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
     xml += '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">';
@@ -22767,7 +22771,16 @@ body.is-row-dragging *        { user-select: none !important; }
       row.forEach((v, cIdx) => {
         if (v == null || v === '') return;
         const ref = `${_colLetter(cIdx)}${r}`;
-        if (typeof v === 'number' && Number.isFinite(v)) {
+        if (typeof v === 'object' && typeof v.f === 'string') {
+          const tAttr = v.t ? ` t="${v.t}"` : '';
+          const cachedRaw = v.v;
+          const cached = (cachedRaw == null || cachedRaw === '')
+            ? ''
+            : (typeof cachedRaw === 'number' && Number.isFinite(cachedRaw))
+              ? `<v>${cachedRaw}</v>`
+              : `<v>${_xmlEsc(String(cachedRaw))}</v>`;
+          xml += `<c r="${ref}"${tAttr}><f>${_xmlEsc(v.f)}</f>${cached}</c>`;
+        } else if (typeof v === 'number' && Number.isFinite(v)) {
           xml += `<c r="${ref}" t="n"><v>${v}</v></c>`;
         } else {
           xml += `<c r="${ref}" t="inlineStr"><is><t>${_xmlEsc(String(v))}</t></is></c>`;
@@ -22843,12 +22856,55 @@ body.is-row-dragging *        { user-select: none !important; }
       deliverableIndex.set(p, dMap);
     });
 
-    // 1) Actions — register-style columns, plus milestone + deliverable names
+    // Per-person hourly-rate lookup — joined into every action row so
+    // the EVM formulas (BAC / EV / AC) work without VLOOKUP overhead.
+    const personRateById = new Map();
+    state.people.forEach((p) => personRateById.set(p.id, Number(p.hourlyRate) || 0));
+
+    // 1) Actions — register-style columns + Hourly rate, Completed date,
+    // and live formula cells EV hours / PV hours so KPIs can SUM them
+    // and the workbook recomputes when data is edited in Excel.
+    // Column letters that the KPI sheet's formulas need to reference.
+    // Keep this in sync with the headers array below.
+    const A = {};
+    [
+      ...(multiProject ? ['Project'] : []),
+      'ID', 'Title', 'Component', 'Milestone', 'Deliverable',
+      'Owner', 'Hourly rate', 'Status', 'Priority', 'Commitment %',
+      'Start', 'Due', 'Completed date', 'Predicted',
+      'Originator', 'Originator date',
+      'Baseline due', 'Variance days', 'Logged hours', 'Planned hours',
+      '% Complete', 'EV hours', 'PV hours',
+      'Tags', 'Depends on', 'Created', 'Updated',
+    ].forEach((name, i) => { A[name] = _colLetter(i); });
+
     const actionRows = [];
     projects.forEach((p) => {
       const mMap = milestoneIndex.get(p);
       const dMap = deliverableIndex.get(p);
       (p.actions || []).filter((a) => !a.deletedAt).forEach((a) => {
+        const planned = Number(plannedHoursTotal(a).toFixed(2));
+        const pct = percentComplete(a);
+        const evCached = Number(((planned * pct) / 100).toFixed(2));
+        // PV per row: planned × clamp01(elapsed/window). Pre-compute for
+        // the cached value so Excel shows the right number even before
+        // a recalc; the formula recomputes on edit / file open.
+        let pvCached = 0;
+        if (a.startDate && a.due) {
+          const s = parseDate(a.startDate).getTime();
+          const e = parseDate(a.due).getTime();
+          const t = new Date().setHours(0,0,0,0);
+          const frac = Math.max(0, Math.min(1, (t - s) / Math.max(1, e - s)));
+          pvCached = Number((planned * frac).toFixed(2));
+        }
+        const rowNum = actionRows.length + 2; // header is row 1
+        // Formula refs use the column letters from the A map.
+        const plannedRef = `${A['Planned hours']}${rowNum}`;
+        const pctRef     = `${A['% Complete']}${rowNum}`;
+        const startRef   = `${A['Start']}${rowNum}`;
+        const dueRef     = `${A['Due']}${rowNum}`;
+        const evFormula  = `IFERROR(${plannedRef}*${pctRef}/100, 0)`;
+        const pvFormula  = `IFERROR(IF(OR(${startRef}="",${dueRef}=""),0,${plannedRef}*MAX(0,MIN(1,(TODAY()-DATEVALUE(${startRef}))/MAX(1,DATEVALUE(${dueRef})-DATEVALUE(${startRef}))))), 0)`;
         actionRows.push([
           ...(multiProject ? [projLabel(p)] : []),
           a.id,
@@ -22857,19 +22913,23 @@ body.is-row-dragging *        { user-select: none !important; }
           mMap[a.milestone]?.name || '',
           dMap[a.deliverable]?.name || '',
           personName(a.owner),
+          personRateById.get(a.owner) || 0,
           (STATUSES.find((s) => s.id === a.status) || {}).name || a.status,
           priorityLevel(a.priorityLevel).label,
           (typeof a.commitment === 'number') ? a.commitment : '',
           a.startDate || '',
           a.due || '',
+          actionCompletedAt(a) || '',
           predictedCompletion(a) || '',
           personName(a.originator),
           a.originatorDate || a.createdAt || '',
           a.baseline?.due || '',
           baselineSlipDays(a) ?? '',
           Number(totalLoggedHours(a).toFixed(2)),
-          Number(plannedHoursTotal(a).toFixed(2)),
-          percentComplete(a),
+          planned,
+          pct,
+          { f: evFormula, v: evCached },
+          { f: pvFormula, v: pvCached },
           (a.tags || []).map((tid) => (p.tags || []).find((t) => t.id === tid)?.name || '').filter(Boolean).join('; '),
           (a.dependsOn || []).join('; '),
           a.createdAt || '',
@@ -22882,10 +22942,12 @@ body.is-row-dragging *        { user-select: none !important; }
       headers: [
         ...(multiProject ? ['Project'] : []),
         'ID', 'Title', 'Component', 'Milestone', 'Deliverable',
-        'Owner', 'Status', 'Priority', 'Commitment %',
-        'Start', 'Due', 'Predicted', 'Originator', 'Originator date',
+        'Owner', 'Hourly rate', 'Status', 'Priority', 'Commitment %',
+        'Start', 'Due', 'Completed date', 'Predicted',
+        'Originator', 'Originator date',
         'Baseline due', 'Variance days', 'Logged hours', 'Planned hours',
-        '% Complete', 'Tags', 'Depends on', 'Created', 'Updated',
+        '% Complete', 'EV hours', 'PV hours',
+        'Tags', 'Depends on', 'Created', 'Updated',
       ],
       rows: actionRows,
     });
@@ -23117,95 +23179,183 @@ body.is-row-dragging *        { user-select: none !important; }
       rows: budgetRows,
     });
 
-    // 8) KPIs — tall (long-form) snapshot so each row is one metric per
-    // project. Easier to pivot than wide; also gracefully handles new
-    // metrics over time. Includes action counts, delivery KPIs (adherence
-    // + productivity over the last 30 days), and EVM rollup.
-    const kpiRows = [];
-    const today = new Date(); today.setHours(0, 0, 0, 0);
+    // 8) KPIs — formula-driven so the workbook recomputes as the user
+    // edits the underlying data. Each Value cell is an Excel formula
+    // referencing Actions / Milestones / etc.; the cached value Excel
+    // displays before recalculation matches what the app's runtime
+    // shows today.
+    //
+    // Multi-project mode prepends a Project column to most sheets, which
+    // shifts every other column by one — we keep that mapping inline so
+    // formulas pick the right letter regardless of mode.
+    //
+    // Column letters used in formulas (see Actions sheet builder above
+    // for the source of truth).
+    const aDue        = A['Due'];
+    const aStatus     = A['Status'];
+    const aCompleted  = A['Completed date'];
+    const aPlanned    = A['Planned hours'];
+    const aLogged     = A['Logged hours'];
+    const aRate       = A['Hourly rate'];
+    const aBaseline   = A['Baseline due'];
+    const aEV         = A['EV hours'];
+    const aPV         = A['PV hours'];
+    const aId         = A['ID'];
+    const aProj       = A['Project']; // undefined in single-project mode
+
+    // Helper: build a SUMPRODUCT condition that filters by project when in
+    // multi-project mode, so each project's KPI rows only count their own
+    // actions. We use an explicit upper bound (10001 rows) so SUMPRODUCT
+    // can resolve to a stable array — whole-column refs aren't legal in
+    // SUMPRODUCT arrays.
+    const N_MAX = 10001;
+    const _r = (col) => `Actions!${col}2:${col}${N_MAX}`;
+    const projFilter = (projName) => multiProject
+      ? `(${_r(aProj)}="${String(projName).replace(/"/g, '""')}")*`
+      : '';
+
+    // Pre-load todayISO + dayMs to compute cached values that match
+    // the formulas' first-recalc result.
     const todayStr = todayISO();
-    const day = (n) => fmtISO(new Date(today.getTime() - n * dayMs));
-    const since30 = day(30);
+    const todayT   = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })();
+    const dayISO = (n) => fmtISO(new Date(todayT - n * dayMs));
 
-    const computeProjectKpis = (p) => {
-      const live = (p.actions || []).filter((a) => !a.deletedAt);
-      const total = live.length;
-      const done = live.filter((a) => a.status === 'done').length;
-      const blocked = live.filter((a) => a.status === 'blocked').length;
-      const late = live.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, todayStr) < 0).length;
-      const upcoming = live.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, todayStr) >= 0 && dayDiff(a.due, todayStr) <= 7).length;
-      const completion = total ? Math.round((done / total) * 100) : 0;
-      const since14 = fmtISO(new Date(Date.now() - 14 * dayMs));
-      const throughput14 = live.filter((a) => a.status === 'done' && a.updatedAt >= since14).length;
-      // EVM rollup (closed-cancelled excluded — matches the dashboard tile).
-      const evmScope = live.filter((a) => a.status !== 'cancelled');
-      const ev = evmForActions(evmScope);
-      // Adherence + productivity over the last 30 days — temporarily scope
-      // deliveryMetricsForWindow to the single project by stashing
-      // currentProjectId.
-      const savedId = state.currentProjectId;
-      state.currentProjectId = p.id;
-      const delivery = deliveryMetricsForWindow(since30, todayStr);
-      state.currentProjectId = savedId;
-      return {
-        total, done, blocked, late, upcoming, completion, throughput14,
-        bac: ev.bac, pv: ev.pv, ev: ev.ev, ac: ev.ac,
-        cpi: ev.cpi, spi: ev.spi, eac: ev.eac, etc: ev.etc,
-        adherence: delivery.adherence,
-        productivity: delivery.productivity,
-        adherenceN: delivery.adherenceN,
-        doneInWindow: delivery.doneInWindow,
-        plannedHrs: delivery.plannedHrs,
-        loggedHrs: delivery.loggedHrs,
-      };
-    };
-
-    const push = (proj, metric, value, unit, notes) => kpiRows.push([
+    const kpiRows = [];
+    const pushF = (proj, metric, formula, cachedV, unit, notes, opts = {}) => kpiRows.push([
+      ...(multiProject ? [projLabel(proj)] : []),
+      metric,
+      { f: formula, v: cachedV, t: opts.t },
+      unit || '',
+      notes || '',
+    ]);
+    const pushS = (proj, metric, value, unit, notes) => kpiRows.push([
       ...(multiProject ? [projLabel(proj)] : []),
       metric, value, unit || '', notes || '',
     ]);
 
     projects.forEach((p) => {
-      const k = computeProjectKpis(p);
-      push(p, 'Total actions',           k.total,            'count', 'Live (non-deleted) actions');
-      push(p, 'Done actions',            k.done,              'count');
-      push(p, 'Open actions',            k.total - k.done,    'count');
-      push(p, 'Late actions',            k.late,              'count', 'Open + past due');
-      push(p, 'Blocked actions',         k.blocked,           'count');
-      push(p, 'Due within 7 days',       k.upcoming,          'count', 'Open + due in next 7 days');
-      push(p, 'Completion',              k.completion,        '%',     `${k.done} / ${k.total}`);
-      push(p, 'Throughput (14d)',        k.throughput14,      'count', 'Actions marked done in the last 14 days');
-      // Delivery KPIs (30-day window). Skip with note when sample too thin.
-      if (k.adherenceN >= 5) {
-        push(p, 'Schedule adherence (30d)', Number((k.adherence * 100).toFixed(1)), '%', `${k.adherenceN} due-by-now actions`);
-      } else {
-        push(p, 'Schedule adherence (30d)', '', '%', `Insufficient data (${k.adherenceN}/5 due-by-now actions)`);
-      }
-      if (k.doneInWindow >= 5) {
-        push(p, 'Productivity (30d)', Number(k.productivity.toFixed(2)), '×', `${Math.round(k.plannedHrs)}h planned / ${Math.round(k.loggedHrs)}h logged across ${k.doneInWindow} done actions`);
-      } else {
-        push(p, 'Productivity (30d)', '', '×', `Insufficient data (${k.doneInWindow}/5 done-with-hours)`);
-      }
-      // EVM rollup. Round currencies; only emit indices when defined.
-      if (k.bac > 0) {
-        push(p, 'EVM — BAC', Math.round(k.bac), '€', 'Budget at completion across baselined actions');
-        push(p, 'EVM — PV',  Math.round(k.pv),  '€', 'Planned value (work that should be done by today)');
-        push(p, 'EVM — EV',  Math.round(k.ev),  '€', 'Earned value (work actually completed)');
-        push(p, 'EVM — AC',  Math.round(k.ac),  '€', 'Actual cost (logged hours × rate)');
-        if (k.cpi != null) push(p, 'EVM — CPI', Number(k.cpi.toFixed(3)), '×', 'EV ÷ AC. >1 = under budget');
-        if (k.spi != null) push(p, 'EVM — SPI', Number(k.spi.toFixed(3)), '×', 'EV ÷ PV. >1 = ahead of schedule');
-        if (k.eac != null) push(p, 'EVM — EAC', Math.round(k.eac), '€', 'BAC ÷ CPI');
-        if (k.etc != null) push(p, 'EVM — ETC', Math.round(k.etc), '€', 'EAC − AC');
-      } else {
-        push(p, 'EVM rollup', '', '', 'No baselined actions yet — take a project baseline to populate');
-      }
-      // Reference counts so the snapshot is self-contained.
-      push(p, 'Milestones',         (p.milestones    || []).length, 'count');
-      push(p, 'Deliverables',       (p.deliverables  || []).length, 'count');
-      push(p, 'Open points',        (p.openPoints    || []).length, 'count');
-      push(p, 'Risks & Opps',       (p.risks         || []).length, 'count');
-      push(p, 'Decisions',          (p.decisions     || []).length, 'count');
-      push(p, 'Change requests',    (p.changes       || []).length, 'count');
+      // Cached values mirror the runtime computation so Excel shows the
+      // right number even before a recalc. Reuses the existing JS logic.
+      const live = (p.actions || []).filter((a) => !a.deletedAt && (multiProject ? true : true));
+      const scopedLive = live.filter((a) => true); // already scoped to p
+      const total = scopedLive.length;
+      const done = scopedLive.filter((a) => a.status === 'done').length;
+      const open = scopedLive.filter((a) => !isClosedStatus(a.status)).length;
+      const late = scopedLive.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, todayStr) < 0).length;
+      const blocked = scopedLive.filter((a) => a.status === 'blocked').length;
+      const upcoming = scopedLive.filter((a) => a.due && !isClosedStatus(a.status) && dayDiff(a.due, todayStr) >= 0 && dayDiff(a.due, todayStr) <= 7).length;
+      const completion = total ? Number((done / total * 100).toFixed(1)) : 0;
+      const since14 = dayISO(14);
+      const throughput14 = scopedLive.filter((a) => actionCompletedAt(a) && actionCompletedAt(a) >= since14).length;
+      // EVM cached — match formula scope (status ≠ Cancelled).
+      const evmScope = scopedLive.filter((a) => a.status !== 'cancelled');
+      const evm = evmForActions(evmScope);
+      // Adherence + productivity cached.
+      const savedId = state.currentProjectId;
+      state.currentProjectId = p.id;
+      const delivery = deliveryMetricsForWindow(dayISO(30), todayStr);
+      state.currentProjectId = savedId;
+
+      // Formula filter prefix (empty in single-project mode).
+      const pf = projFilter(p.name);
+
+      // ── Counts ────────────────────────────────────────────────────────
+      pushF(p, 'Total actions',
+        multiProject
+          ? `SUMPRODUCT(${pf}(${_r(aId)}<>""))`
+          : `COUNTA(Actions!${aId}2:${aId}${N_MAX})`,
+        total, 'count', 'Every live (non-deleted) action');
+
+      pushF(p, 'Done actions',
+        multiProject
+          ? `SUMPRODUCT(${pf}(${_r(aStatus)}="Done"))`
+          : `COUNTIF(Actions!${aStatus}:${aStatus},"Done")`,
+        done, 'count');
+
+      pushF(p, 'Open actions',
+        `SUMPRODUCT(${pf}(${_r(aStatus)}<>"Done")*(${_r(aStatus)}<>"Cancelled")*(${_r(aStatus)}<>""))`,
+        open, 'count', 'Status is Not started, In progress, or Blocked');
+
+      pushF(p, 'Late actions',
+        `SUMPRODUCT(${pf}(${_r(aDue)}<>"")*(${_r(aDue)}<TEXT(TODAY(),"yyyy-mm-dd"))*(${_r(aStatus)}<>"Done")*(${_r(aStatus)}<>"Cancelled"))`,
+        late, 'count', 'Open + past due');
+
+      pushF(p, 'Blocked actions',
+        multiProject
+          ? `SUMPRODUCT(${pf}(${_r(aStatus)}="Blocked"))`
+          : `COUNTIF(Actions!${aStatus}:${aStatus},"Blocked")`,
+        blocked, 'count');
+
+      pushF(p, 'Due within 7 days',
+        `SUMPRODUCT(${pf}(${_r(aDue)}<>"")*(${_r(aDue)}>=TEXT(TODAY(),"yyyy-mm-dd"))*(${_r(aDue)}<=TEXT(TODAY()+7,"yyyy-mm-dd"))*(${_r(aStatus)}<>"Done")*(${_r(aStatus)}<>"Cancelled"))`,
+        upcoming, 'count', 'Open + due in the next 7 days');
+
+      pushF(p, 'Completion',
+        `IFERROR(SUMPRODUCT(${pf}(${_r(aStatus)}="Done")) / SUMPRODUCT(${pf}(${_r(aId)}<>"")) * 100, 0)`,
+        completion, '%', 'Done ÷ total live actions');
+
+      pushF(p, 'Throughput (14d)',
+        `SUMPRODUCT(${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-14,"yyyy-mm-dd")))`,
+        throughput14, 'count', 'Actions whose Completed date is in the last 14 days');
+
+      // ── Delivery KPIs ────────────────────────────────────────────────
+      // Adherence: on-time done in the 30-day window ÷ all done in window.
+      // Promised due = baseline if set, else current due.
+      const adherenceF =
+        `IFERROR(SUMPRODUCT(${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*(${_r(aCompleted)}<=IF(${_r(aBaseline)}<>"",${_r(aBaseline)},${_r(aDue)})))`
+        + ` / SUMPRODUCT(${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))) * 100, "")`;
+      pushF(p, 'Schedule adherence (30d)', adherenceF,
+        (delivery.adherenceN >= 5 && delivery.adherence != null) ? Number((delivery.adherence * 100).toFixed(1)) : '',
+        '%',
+        delivery.adherenceN >= 5
+          ? `${delivery.adherenceN} actions completed in the last 30 days`
+          : `Insufficient data (${delivery.adherenceN}/5 done in 30d) — formula returns blank below threshold`);
+
+      // Productivity: Σ planned hrs ÷ Σ logged hrs on actions completed in window.
+      const prodF =
+        `IFERROR(SUMPRODUCT(${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*${_r(aPlanned)})`
+        + ` / SUMPRODUCT(${pf}(${_r(aCompleted)}<>"")*(${_r(aCompleted)}>=TEXT(TODAY()-30,"yyyy-mm-dd"))*${_r(aLogged)}), "")`;
+      pushF(p, 'Productivity (30d)', prodF,
+        (delivery.doneInWindow >= 5 && delivery.productivity != null) ? Number(delivery.productivity.toFixed(3)) : '',
+        '×',
+        delivery.doneInWindow >= 5
+          ? `${Math.round(delivery.plannedHrs)}h planned / ${Math.round(delivery.loggedHrs)}h logged across ${delivery.doneInWindow} done`
+          : `Insufficient data (${delivery.doneInWindow}/5 done with logged hours)`);
+
+      // ── EVM rollup ────────────────────────────────────────────────────
+      // All four EVM raw values are SUMPRODUCT(rate × hours) over the
+      // appropriate slice. CPI/SPI/EAC/ETC are derived.
+      const bacF = `SUMPRODUCT(${pf}(${_r(aStatus)}<>"Cancelled")*(${_r(aStatus)}<>"")*${_r(aPlanned)}*${_r(aRate)})`;
+      const pvF  = `SUMPRODUCT(${pf}(${_r(aStatus)}<>"Cancelled")*(${_r(aStatus)}<>"")*${_r(aPV)}*${_r(aRate)})`;
+      const evF  = `SUMPRODUCT(${pf}(${_r(aStatus)}<>"Cancelled")*(${_r(aStatus)}<>"")*${_r(aEV)}*${_r(aRate)})`;
+      const acF  = `SUMPRODUCT(${pf}(${_r(aStatus)}<>"Cancelled")*(${_r(aStatus)}<>"")*${_r(aLogged)}*${_r(aRate)})`;
+      pushF(p, 'EVM — BAC', bacF, Math.round(evm.bac), '€', 'Σ planned hrs × hourly rate (non-cancelled)');
+      pushF(p, 'EVM — PV',  pvF,  Math.round(evm.pv),  '€', 'Σ PV hrs × hourly rate (PV hrs uses TODAY() vs Start/Due)');
+      pushF(p, 'EVM — EV',  evF,  Math.round(evm.ev),  '€', 'Σ EV hrs × hourly rate (EV hrs = planned × %Complete/100)');
+      pushF(p, 'EVM — AC',  acF,  Math.round(evm.ac),  '€', 'Σ logged hrs × hourly rate');
+      pushF(p, 'EVM — CPI', `IFERROR(${evF}/${acF}, "")`,
+        evm.cpi == null ? '' : Number(evm.cpi.toFixed(3)), '×', 'EV ÷ AC. >1 = under budget');
+      pushF(p, 'EVM — SPI', `IFERROR(${evF}/${pvF}, "")`,
+        evm.spi == null ? '' : Number(evm.spi.toFixed(3)), '×', 'EV ÷ PV. >1 = ahead of schedule');
+      pushF(p, 'EVM — EAC', `IFERROR(${bacF}/(${evF}/${acF}), "")`,
+        evm.eac == null ? '' : Math.round(evm.eac), '€', 'BAC ÷ CPI');
+      pushF(p, 'EVM — ETC',
+        `IFERROR(MAX(0, ${bacF}/(${evF}/${acF}) - ${acF}), "")`,
+        evm.etc == null ? '' : Math.round(evm.etc), '€', 'EAC − AC');
+
+      // ── Reference counts ─────────────────────────────────────────────
+      // Each domain sheet has one row per item plus a header, so subtract
+      // 1 from COUNTA in single-project mode; in multi-project filter by
+      // the Project column. Project column is first in those sheets.
+      const refF = (sheet) => multiProject
+        ? `SUMPRODUCT((${sheet}!A2:A${N_MAX}="${p.name.replace(/"/g, '""')}")*(${sheet}!B2:B${N_MAX}<>""))`
+        : `MAX(0, COUNTA(${sheet}!A:A) - 1)`;
+      pushF(p, 'Milestones',      refF('Milestones'),      (p.milestones    || []).length, 'count');
+      pushF(p, 'Deliverables',    refF('Deliverables'),    (p.deliverables  || []).length, 'count');
+      pushF(p, 'Open points',     refF('Open points'),     (p.openPoints    || []).length, 'count');
+      pushF(p, 'Risks & Opps',    refF('Risks & Opps'),    (p.risks         || []).length, 'count');
+      pushF(p, 'Decisions',       refF('Decisions'),       (p.decisions     || []).length, 'count');
+      pushF(p, 'Change requests', refF('Change requests'), (p.changes       || []).length, 'count');
     });
     sheets.push({
       name: 'KPIs',
