@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-25T17:52:53.316Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-25T20:38:10.276Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -26639,7 +26639,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
     const filtered = allItems
       .filter((it) => calState.visible[it.kind] !== false)
-      .filter((it) => matchesSearch(it.label, it.sub));
+      .filter((it) => matchesSearch(it.label, it.sub))
+      .filter((it) => calendarItemMatchesTopbar(it));
     // Drop range middle/end (we'll show the start row with the range
     // length appended in the date column).
     const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
@@ -26800,7 +26801,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
     const filtered = allItems
       .filter((it) => calState.visible[it.kind] !== false)
-      .filter((it) => matchesSearch(it.label, it.sub));
+      .filter((it) => matchesSearch(it.label, it.sub))
+      .filter((it) => calendarItemMatchesTopbar(it));
     // Drop milestone middle/end positions — the start chip's width covers
     // the range as one continuous bar.
     const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));

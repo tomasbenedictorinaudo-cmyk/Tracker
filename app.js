@@ -18913,7 +18913,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
     const filtered = allItems
       .filter((it) => calState.visible[it.kind] !== false)
-      .filter((it) => matchesSearch(it.label, it.sub));
+      .filter((it) => matchesSearch(it.label, it.sub))
+      .filter((it) => calendarItemMatchesTopbar(it));
     // Drop range middle/end (we'll show the start row with the range
     // length appended in the date column).
     const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
@@ -19074,7 +19075,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const allItems = buildCalendarItems(proj, anchor.getFullYear(), anchor.getMonth(), startISO, endISO);
     const filtered = allItems
       .filter((it) => calState.visible[it.kind] !== false)
-      .filter((it) => matchesSearch(it.label, it.sub));
+      .filter((it) => matchesSearch(it.label, it.sub))
+      .filter((it) => calendarItemMatchesTopbar(it));
     // Drop milestone middle/end positions — the start chip's width covers
     // the range as one continuous bar.
     const items = filtered.filter((it) => !(it.kind === 'milestone' && (it.rangePos === 'middle' || it.rangePos === 'end')));
