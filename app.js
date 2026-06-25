@@ -18698,6 +18698,36 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     }
     return { year, month, monthLabel, cells };
   }
+  // Honour the topbar filters across every calendar item kind. Actions
+  // accept the full set (owner / component / status / due bucket).
+  // Other kinds (milestones, deliverables, change requests, meetings)
+  // accept the subset their record carries: component is shared by all,
+  // status by everything except meetings, and the owner filter only
+  // matters for actions — the calendar is meant to also surface gates
+  // and reviews regardless of owner.
+  function calendarItemMatchesTopbar(it) {
+    const rec = it._record;
+    if (!rec) return true;
+    if (it.kind === 'action') return actionMatchesFilters(rec);
+    const fComp = $('#filterComponent')?.value || '';
+    if (fComp) {
+      const recComp = rec.component || '';
+      if (fComp === '__none__' && recComp) return false;
+      if (fComp !== '__none__' && recComp !== fComp) return false;
+    }
+    const fStatus = $('#filterStatus')?.value || '';
+    if (fStatus && rec.status && rec.status !== fStatus) return false;
+    const fDue = $('#filterDue')?.value || '';
+    if (fDue && it.date) {
+      const today = todayISO();
+      const diff = dayDiff(it.date, today);
+      if (fDue === 'late'  && !(diff <  0)) return false;
+      if (fDue === 'week'  && !(diff >= 0 && diff <=  7)) return false;
+      if (fDue === 'month' && !(diff >= 0 && diff <= 30)) return false;
+    }
+    return true;
+  }
+
   function buildCalendarItems(proj, year, month, gridStartISO, gridEndISO) {
     const inRange = (d) => d && d >= gridStartISO && d <= gridEndISO;
     const items = []; // { date, kind, label, tone, run, icon, rangePos }
@@ -19438,7 +19468,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // state can flip without rebuilding the source data.
     const items = allItems
       .filter((it) => calState.visible[it.kind] !== false)
-      .filter((it) => matchesSearch(it.label, it.sub));
+      .filter((it) => matchesSearch(it.label, it.sub))
+      .filter((it) => calendarItemMatchesTopbar(it));
     const byDate = new Map();
     items.forEach((it) => {
       if (!byDate.has(it.date)) byDate.set(it.date, []);
