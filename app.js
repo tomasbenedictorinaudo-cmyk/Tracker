@@ -6181,6 +6181,7 @@
           <button class="icon-btn" id="btnTLZoomOut" title="Zoom out">−</button>
           <button class="icon-btn" id="btnTLZoomIn" title="Zoom in">+</button>
           <button class="ghost" id="btnTLToday">Today</button>
+          <button class="ghost ${tlState?.criticalOnly ? 'is-on' : ''}" id="btnTLCritical" title="Highlight the critical path — actions whose dependsOn chain ends at an open milestone. Dims every other bar so the longest blocking chain stands out. Empty if no actions are linked to an open milestone.">◈ Critical path</button>
         </div>
       </div>
       <div class="timeline copyable-chart" data-chart="gantt">
@@ -6210,7 +6211,8 @@
       ]),
     }));
 
-    if (!tlState) tlState = { granularity: 'day', dayWidth: GRANULARITIES.day.defaultDw, startOffsetDays: -14 };
+    if (!tlState) tlState = { granularity: 'day', dayWidth: GRANULARITIES.day.defaultDw, startOffsetDays: -14, criticalOnly: false };
+    if (tlState.criticalOnly == null) tlState.criticalOnly = false;
     if (!state.settings) state.settings = { holidayCountries: [] };
 
     // Mark active granularity
@@ -6250,6 +6252,11 @@
       drawTimeline(acts);
     });
     $('#btnTLToday').addEventListener('click', scrollToToday);
+    $('#btnTLCritical')?.addEventListener('click', () => {
+      tlState.criticalOnly = !tlState.criticalOnly;
+      $('#btnTLCritical').classList.toggle('is-on', tlState.criticalOnly);
+      drawTimeline(acts);
+    });
   }
 
   function scrollToToday() {
@@ -6597,6 +6604,24 @@
     // to the milestone via a.milestone (since the milestone date is the
     // chain's endpoint).
     const criticalSet = computeCriticalActions(proj);
+
+    // "Critical path only" toggle — when on, the .timeline container
+    // picks up .cp-mode, which the stylesheet uses to dim every bar
+    // and dependency arrow that's NOT on the critical path. When the
+    // critical set is empty (no actions linked to an open milestone)
+    // surface a one-line hint above the grid so the user understands
+    // why nothing seems to be happening.
+    const timelineEl = document.querySelector('.timeline');
+    if (timelineEl) timelineEl.classList.toggle('cp-mode', !!tlState.criticalOnly);
+    const cpHintId = 'tlCriticalHint';
+    document.getElementById(cpHintId)?.remove();
+    if (tlState.criticalOnly && criticalSet.size === 0) {
+      const hint = document.createElement('div');
+      hint.id = cpHintId;
+      hint.className = 'tl-cp-hint';
+      hint.innerHTML = 'No critical path detected — link at least one action to an open milestone (Action drawer → Milestone) and connect upstream work via the Depends-on field.';
+      timelineEl?.parentElement?.insertBefore(hint, timelineEl);
+    }
 
     // Draw bars
     actions.forEach((a) => {

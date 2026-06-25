@@ -645,6 +645,41 @@ input, select, textarea { font: inherit; color: inherit; }
   outline-offset: -1px;
   box-shadow: 0 0 0 2px rgba(248,113,113,.18);
 }
+/* Critical-path-only toggle — dim every non-critical bar and dependency
+   arrow so the longest blocking chain stands out. Critical bars stay at
+   full opacity; the arrows that connect two critical actions also stay
+   bright (drawDependencyArrows tags them via .critical-arrow). */
+.timeline.cp-mode .tl-bar:not(.critical-path) {
+  opacity: 0.18;
+  filter: grayscale(0.6);
+}
+.timeline.cp-mode .tl-dep-arrow:not(.critical) {
+  opacity: 0.18;
+}
+.timeline.cp-mode .tl-bar.critical-path {
+  /* Pop a little harder when isolated. */
+  box-shadow: 0 0 0 2px rgba(248,113,113,.35);
+}
+
+/* The "Critical path" toggle button switches to a quiet pressed state
+   when active so the user always knows the dim mode is on. */
+#btnTLCritical.is-on {
+  background: rgba(248,113,113,.12);
+  border-color: rgba(248,113,113,.5);
+  color: var(--bad);
+}
+
+/* Empty-state hint shown above the timeline when the toggle is on but
+   the algorithm found no critical path. */
+.tl-cp-hint {
+  margin: 6px 0 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: rgba(248,113,113,.08);
+  border: 1px solid rgba(248,113,113,.32);
+  color: var(--text-dim);
+  font-size: 12px;
+}
 
 /* Phase G — tags + comments + … overflow button */
 .tag-chip {
