@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-25T21:19:47.218Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-06-25T21:39:03.840Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -11132,6 +11132,22 @@ body.is-row-dragging *        { user-select: none !important; }
     return Math.sign(v) * Math.log2(1 + Math.abs(v));
   }
 
+  // How many times the due date has been pushed FORWARD over this
+  // action's life. Walks the schedule timeline (history entries of the
+  // form "Schedule: X → Y") and counts the transitions where the new
+  // due lands later than the prior one. Used by Action Cloud Preset C
+  // to surface chronic slippers.
+  function actionSlipPushBacks(a) {
+    if (!a) return 0;
+    const hist = scheduleHistory(a);
+    if (hist.length < 2) return 0;
+    let count = 0;
+    for (let i = 1; i < hist.length; i++) {
+      if (hist[i].due > hist[i - 1].due) count++;
+    }
+    return count;
+  }
+
   // Days-to-due — positive = future, negative = overdue, 0 = today.
   // (dayDiff(due, today) computes due − today directly, which already
   // matches this convention. The earlier * −1 inverted the sign and
@@ -11203,6 +11219,7 @@ body.is-row-dragging *        { user-select: none !important; }
           <div class="seg" id="cloudPresetSeg" role="tablist" aria-label="Axis preset">
             <button class="seg-btn ${_cloudState.preset === 'A' ? 'active' : ''}" data-cloud-preset="A" title="X = days-to-due · Y = % complete · bubble size = composite importance">A · Urgency × Progress</button>
             <button class="seg-btn ${_cloudState.preset === 'B' ? 'active' : ''}" data-cloud-preset="B" title="X = owner (sorted by load) · Y = composite importance · bubble size = commitment %">B · Owner × Importance</button>
+            <button class="seg-btn ${_cloudState.preset === 'C' ? 'active' : ''}" data-cloud-preset="C" title="X = number of times the due date has been pushed back · Y = days overdue now · bubble size = composite importance. Upper-right quadrant = chronic slippers that are also late.">C · Chronic slippers</button>
           </div>
           <button class="ghost ${_cloudState.focusMode ? 'is-on' : ''}" id="cloudFocus" title="Highlight the N most noteworthy bubbles for the current preset. N adapts to context: it counts items inside the preset's critical zone (inner ring in A · critical band in B), clamped to [${CLOUD_FOCUS_FLOOR}, ${CLOUD_FOCUS_CEIL}].">★ Focus top <span id="cloudFocusN">…</span></button>
           <div class="seg cloud-zoom-seg" role="group" aria-label="Zoom">
@@ -11465,9 +11482,20 @@ body.is-row-dragging *        { user-select: none !important; }
     // Full data range per preset — viewport fractions [0..1] map into
     // these ranges. Stored so axis-tick rendering can use them too.
     let fullXMin, fullXMax, fullYMin, fullYMax;
+    // Preset C numbers — slip count (linear, 0..maxObserved+1, floor 3
+    // so a fresh project still has a sensible canvas) and days overdue
+    // (sym-log, 0..symLog(180) so a 6-month overdue still fits).
+    let cMaxSlips = 3;
+    if (_cloudState.preset === 'C') {
+      cMaxSlips = Math.max(3, ...allActions.map(({ a }) => actionSlipPushBacks(a)));
+    }
+    const cYTop = symLog(180);  // top of Y range — 180 days overdue
     if (_cloudState.preset === 'A') {
       fullXMin = -6.6; fullXMax = 7.5;       // sym-log days, +7.5 is the no-date lane
       fullYMin = 0;    fullYMax = 100;       // % complete
+    } else if (_cloudState.preset === 'C') {
+      fullXMin = 0;    fullXMax = cMaxSlips + 1; // slip count + pad
+      fullYMin = 0;    fullYMax = cYTop;         // sym-log days overdue
     } else {
       fullXMin = 0;    fullXMax = Math.max(1, owners.length); // owner slot indices + unassigned
       fullYMin = 0;    fullYMax = Math.log2(1 + maxComp);     // log composite importance
@@ -11495,6 +11523,13 @@ body.is-row-dragging *        { user-select: none !important; }
           xRaw = Math.max(-6.6, Math.min(6.6, symLog(dtd)));
         }
         yRaw = pct;
+      } else if (_cloudState.preset === 'C') {
+        // Slip count (linear) × days overdue (sym-log, 0 floor — actions
+        // due in the future sit on the baseline, the closer to upper-
+        // right the worse the action's track record).
+        xRaw = actionSlipPushBacks(a);
+        const overdueDays = Math.max(0, dtd == null ? 0 : -dtd);
+        yRaw = Math.min(cYTop, symLog(overdueDays));
       } else {
         xRaw = ownerIdx.has(a.owner) ? ownerIdx.get(a.owner) : owners.length;
         yRaw = Math.log2(1 + compositeScores[i]);
@@ -11576,6 +11611,18 @@ body.is-row-dragging *        { user-select: none !important; }
       const inCrit = placed.reduce((n, p) =>
         n + (((p.x - oX) * (p.x - oX) + (p.y - oY) * (p.y - oY) <= critR2) ? 1 : 0), 0);
       focusN = Math.max(CLOUD_FOCUS_FLOOR, Math.min(CLOUD_FOCUS_CEIL, inCrit));
+    } else if (_cloudState.preset === 'C') {
+      // Preset C — items inside the upper-right danger quadrant
+      // (slips ≥ ceil(cMaxSlips × 0.5) AND overdue ≥ 7 days). Rank by
+      // distance to the top-right corner.
+      const slipThr = Math.max(1, Math.ceil(cMaxSlips * 0.5));
+      const yThr = symLog(7);
+      const inCrit = placed.reduce((n, p) => {
+        const isSlipper = p.xRaw >= slipThr;
+        const isOverdue = p.yRaw >= yThr;
+        return n + (isSlipper && isOverdue ? 1 : 0);
+      }, 0);
+      focusN = Math.max(CLOUD_FOCUS_FLOOR, Math.min(CLOUD_FOCUS_CEIL, inCrit));
     } else {
       // Preset B — items inside the critical horizontal band
       // (importance ≥ maxComp × 0.75).
@@ -11592,6 +11639,13 @@ body.is-row-dragging *        { user-select: none !important; }
           const da = (a.x - oX) * (a.x - oX) + (a.y - oY) * (a.y - oY);
           const db = (b.x - oX) * (b.x - oX) + (b.y - oY) * (b.y - oY);
           return da - db;
+        }).slice(0, focusN).forEach((p) => focusIds.add(p.id));
+      } else if (_cloudState.preset === 'C') {
+        // Rank by composite slip score: slips dominate, overdue tie-breaks.
+        placed.slice().sort((a, b) => {
+          const sa = a.xRaw * 30 + Math.pow(2, a.yRaw); // expand sym-log back to days
+          const sb = b.xRaw * 30 + Math.pow(2, b.yRaw);
+          return sb - sa;
         }).slice(0, focusN).forEach((p) => focusIds.add(p.id));
       } else {
         placed.slice().sort((a, b) => b.importance - a.importance)
@@ -11633,6 +11687,11 @@ body.is-row-dragging *        { user-select: none !important; }
         <stop offset="0%"   stop-color="rgba(248,113,121,.18)"/>
         <stop offset="70%"  stop-color="rgba(248,113,121,0)"/>
       </linearGradient>
+      <radialGradient id="cl-heat-grad-c" cx="100%" cy="0%" r="65%" fx="100%" fy="0%">
+        <stop offset="0%"   stop-color="rgba(248,113,121,.24)"/>
+        <stop offset="55%"  stop-color="rgba(248,113,121,.06)"/>
+        <stop offset="100%" stop-color="rgba(248,113,121,0)"/>
+      </radialGradient>
     </defs>`;
     if (_cloudState.preset === 'A') {
       // Heat backdrop — radial red gradient anchored at the firefight
@@ -11701,6 +11760,54 @@ body.is-row-dragging *        { user-select: none !important; }
         svgAxesFrag += `<text class="cl-tick muted" x="${ndX - 6}" y="${padT + innerH + 16}" text-anchor="end">no date</text>`;
       }
       svgAxesFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Days to due (negative = overdue) →</text>`;
+      svgAxesFrag += `</g>`;
+    } else if (_cloudState.preset === 'C') {
+      // ── Preset C decor — danger gradient in the upper-right corner.
+      // Concentric rings would mislead here (X and Y are different
+      // units), so a single radial gradient marks the danger quadrant.
+      svgDecorFrag += `<rect class="cl-heat-fill" x="${padL}" y="${padT}" width="${innerW}" height="${innerH}" fill="url(#cl-heat-grad-c)" clip-path="url(#cl-chart-clip)" />`;
+      svgDecorFrag += `<text class="cl-zone safe" x="${padL + 12}" y="${padT + innerH - 12}">on-track ✓</text>`;
+      svgDecorFrag += `<text class="cl-zone fire" x="${padL + innerW - 12}" y="${padT + 18}" text-anchor="end">🔥 chronic slippers</text>`;
+
+      // Vertical gridlines at integer slip counts (0..cMaxSlips+1).
+      for (let s = 0; s <= cMaxSlips + 1; s++) {
+        if (s < xMinV || s > xMaxV) continue;
+        const x = dataToPx(s, yMinV).x;
+        svgFrag += `<line class="cl-grid" x1="${x}" y1="${padT}" x2="${x}" y2="${padT + innerH}"></line>`;
+      }
+      // Horizontal gridlines at meaningful overdue marks.
+      const overdueTicks = [0, 7, 30, 90, 180];
+      overdueTicks.forEach((d) => {
+        const yRaw = symLog(d);
+        if (yRaw < yMinV || yRaw > yMaxV) return;
+        const y = dataToPx(xMinV, yRaw).y;
+        svgFrag += `<line class="cl-grid" x1="${padL}" y1="${y}" x2="${padL + innerW}" y2="${y}"></line>`;
+      });
+
+      // Y axis — days overdue ticks.
+      svgAxesFrag += `<g class="cl-y-axis" id="cloudYAxis">`;
+      svgAxesFrag += `<rect class="cl-axis-bg" x="0" y="0" width="${padL - 0.5}" height="${H}" />`;
+      svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + innerH}"></line>`;
+      overdueTicks.forEach((d) => {
+        const yRaw = symLog(d);
+        if (yRaw < yMinV || yRaw > yMaxV) return;
+        const y = dataToPx(xMinV, yRaw).y;
+        const lbl = d === 0 ? 'on time' : `${d}d`;
+        svgAxesFrag += `<text class="cl-tick" x="${padL - 6}" y="${y + 3}" text-anchor="end">${lbl}</text>`;
+      });
+      svgAxesFrag += `<text class="cl-axis-title" transform="translate(14, ${padT + innerH / 2}) rotate(-90)" text-anchor="middle">Days overdue ↑</text>`;
+      svgAxesFrag += `</g>`;
+
+      // X axis — slip count ticks (every integer).
+      svgAxesFrag += `<g class="cl-x-axis" id="cloudXAxis">`;
+      svgAxesFrag += `<rect class="cl-axis-bg" x="0" y="${padT + innerH + 0.5}" width="${W}" height="${H - padT - innerH}" />`;
+      svgAxesFrag += `<line class="cl-axis" x1="${padL}" y1="${padT + innerH}" x2="${padL + innerW}" y2="${padT + innerH}"></line>`;
+      for (let s = 0; s <= cMaxSlips + 1; s++) {
+        if (s < xMinV || s > xMaxV) continue;
+        const x = dataToPx(s, yMinV).x;
+        svgAxesFrag += `<text class="cl-tick" x="${x}" y="${padT + innerH + 16}" text-anchor="middle">${s}×</text>`;
+      }
+      svgAxesFrag += `<text class="cl-axis-title" x="${padL + innerW / 2}" y="${H - 4}" text-anchor="middle">Times the due date was pushed back →</text>`;
       svgAxesFrag += `</g>`;
     } else {
       // Preset B — horizontal importance bands (NOT concentric rings).
@@ -11852,7 +11959,8 @@ body.is-row-dragging *        { user-select: none !important; }
     SVG.innerHTML = svgDecorFrag
       + `<g id="cloudPlotPan">${svgFrag}</g>`
       + svgAxesFrag;
-    $('#cloudStat').textContent = `${allActions.length} action${allActions.length === 1 ? '' : 's'} · ${_cloudState.preset === 'A' ? 'Urgency × Progress' : 'Owner × Importance'}${_cloudState.focusMode ? ` · top ${focusN} highlighted` : ''}`;
+    const presetLabel = { A: 'Urgency × Progress', B: 'Owner × Importance', C: 'Chronic slippers' }[_cloudState.preset] || _cloudState.preset;
+    $('#cloudStat').textContent = `${allActions.length} action${allActions.length === 1 ? '' : 's'} · ${presetLabel}${_cloudState.focusMode ? ` · top ${focusN} highlighted` : ''}`;
     // Patch the button's N now that we've computed it from the
     // critical-zone count.
     const focusNEl = document.getElementById('cloudFocusN');
@@ -11960,6 +12068,7 @@ body.is-row-dragging *        { user-select: none !important; }
         <div class="hc-meta">
           <span>${ah.toFixed(1)}h / ${ph.toFixed(1)}h planned</span>
           ${slip != null ? `<span class="hc-sep">·</span><span class="${slip > 0 ? 'bad' : 'ok'}">${slip > 0 ? '+' : ''}${slip}d vs baseline</span>` : ''}
+          ${(() => { const n = actionSlipPushBacks(a); return n > 0 ? `<span class="hc-sep">·</span><span class="${n >= 2 ? 'bad' : 'warn'}">pushed back ${n}×</span>` : ''; })()}
         </div>
         <div class="hc-hint">click to ${_cloudState.selection.has(a.id) ? 'deselect' : 'select'} · ⌘/ctrl-click to open</div>
       `;
