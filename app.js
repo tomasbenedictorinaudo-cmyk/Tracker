@@ -7643,12 +7643,31 @@
   function _wireDashboardTooltips(root) {
     const portal = _getKpiTooltipPortal();
     let currentAnchor = null;
+    let hideTimer = null;
+    const HIDE_DELAY = 180; // ms — long enough to cross the 8px gap between tile and portal
+    const cancelHide = () => {
+      if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    };
     const hide = () => {
+      cancelHide();
       if (!currentAnchor) return;
       portal.classList.remove('is-visible');
       portal.style.maxHeight = '';
       currentAnchor = null;
     };
+    const scheduleHide = () => {
+      cancelHide();
+      hideTimer = setTimeout(hide, HIDE_DELAY);
+    };
+    // Portal itself is a hover target — moving the pointer INTO the
+    // portal cancels a pending hide (so scrollable tooltips are
+    // reachable). Leaving the portal schedules a hide unless the
+    // pointer went back into the anchor.
+    portal.addEventListener('mouseenter', cancelHide);
+    portal.addEventListener('mouseleave', (e) => {
+      if (currentAnchor && currentAnchor.contains(e.relatedTarget)) return;
+      scheduleHide();
+    });
     const place = (anchor, sourceHtml) => {
       portal.innerHTML = sourceHtml;
       portal.style.maxHeight = ''; // let it grow to intrinsic size for measure
@@ -7712,6 +7731,7 @@
         node = node.parentElement;
       }
       if (!tt) return;
+      cancelHide(); // pointer is on a valid anchor — don't hide
       if (currentAnchor === node) return;
       currentAnchor = node;
       place(node, tt.innerHTML);
@@ -7721,11 +7741,20 @@
       const to = e.relatedTarget;
       // Stay open when the pointer is still inside the current anchor.
       if (to && currentAnchor.contains(to)) return;
-      hide();
+      // If the pointer is heading TO the portal, don't hide — the
+      // scheduleHide lets it survive the 8px gap between tile and
+      // portal, and the portal's own mouseenter cancels the timer.
+      if (to && portal.contains(to)) { cancelHide(); return; }
+      scheduleHide();
     });
-    // Clean up on scroll / resize so the tooltip doesn't drift out of
-    // its target position.
-    window.addEventListener('scroll', hide, { passive: true, capture: true });
+    // Clean up on document scroll / resize so the tooltip doesn't
+    // drift out of its target position. IMPORTANT: ignore scroll
+    // events that come from INSIDE the portal itself — otherwise the
+    // scrollbar in a scrollable tooltip would immediately dismiss it.
+    window.addEventListener('scroll', (e) => {
+      if (portal.contains(e.target)) return;
+      hide();
+    }, { passive: true, capture: true });
     window.addEventListener('resize', hide);
   }
 

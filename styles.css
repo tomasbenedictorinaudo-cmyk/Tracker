@@ -2908,7 +2908,10 @@ body.is-card-dragging * { cursor: grabbing !important; }
   opacity: 0;
   transform: translateY(-2px);
   transition: opacity .12s ease, transform .12s ease, visibility 0s .12s;
-  pointer-events: none;
+  /* Allow the pointer to enter the portal so scrollable tooltips are
+     usable. The hide is debounced (~180 ms) so the pointer can travel
+     the 8 px gap between anchor and portal without losing hover. */
+  pointer-events: auto;
 }
 .kpi-tt-portal.is-visible {
   visibility: visible;
