@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-06-25T21:39:03.840Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-01T19:53:08.804Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -2812,6 +2812,97 @@ body.is-card-dragging * { cursor: grabbing !important; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 14px;
+  position: relative;
+}
+/* Hover-tooltip for dashboard KPI tiles. Explains the formula, each
+   input, and — if the KPI can't be computed — the reason. Anchored
+   below the tile so it doesn't cover the number itself. */
+.kpi .kpi-tt {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(420px, calc(100vw - 40px));
+  max-height: 60vh;
+  overflow-y: auto;
+  z-index: 900;
+  padding: 12px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity .12s ease, transform .12s ease, visibility 0s .12s;
+  pointer-events: none;
+}
+/* Show on tile hover with a gentle slide-in. */
+.kpi:hover .kpi-tt,
+.kpi:focus-within .kpi-tt {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity .12s ease, transform .12s ease;
+}
+/* Right-align the tooltip on tiles that live in the right half of the
+   grid so it doesn't run off-screen. Second-to-last and last tiles in
+   a 4-col row typically. */
+.dashboard > .kpi:nth-child(4n) .kpi-tt,
+.dashboard > .kpi:nth-child(4n - 1) .kpi-tt {
+  left: auto;
+  right: 0;
+}
+.kpi-tt-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.kpi-tt-meaning {
+  margin: 0 0 10px;
+  color: var(--text-dim);
+}
+.kpi-tt-label {
+  margin: 8px 0 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+.kpi-tt-formula {
+  display: block;
+  padding: 8px 10px;
+  background: var(--bg-2, rgba(255,255,255,.04));
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.kpi-tt-inputs {
+  margin: 4px 0 0;
+  padding: 0 0 0 16px;
+  color: var(--text-dim);
+}
+.kpi-tt-inputs li { margin: 2px 0; }
+.kpi-tt-inputs b {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+}
+.kpi-tt-note {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, .10);
+  border-left: 3px solid var(--warn, #f59e0b);
+  color: var(--text-dim);
+  font-size: 11.5px;
 }
 .kpi-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: .12em;
@@ -15053,6 +15144,31 @@ body.is-row-dragging *        { user-select: none !important; }
     };
   }
 
+  // Compose the rich hover-tooltip content for a dashboard KPI tile.
+  // Every tile gets a hidden .kpi-tt panel with:
+  //   • a short prose meaning of the KPI
+  //   • the exact formula in monospace
+  //   • a bulleted list of inputs with human-readable definitions
+  //   • an optional "why can't this be computed" callout
+  // CSS shows the panel on :hover — no JS required.
+  function _kpiTooltip({ title, meaning, formula, inputs = [], notComputable = null }) {
+    const inputsHTML = inputs.length
+      ? `<div class="kpi-tt-label">Inputs</div>
+         <ul class="kpi-tt-inputs">${inputs.map((i) =>
+           `<li><b>${escapeHTML(i.name)}</b> — ${escapeHTML(i.desc)}</li>`).join('')}</ul>`
+      : '';
+    const notComputableHTML = notComputable
+      ? `<div class="kpi-tt-note">${escapeHTML(notComputable)}</div>` : '';
+    return `<div class="kpi-tt" role="tooltip">
+        <h4 class="kpi-tt-title">${escapeHTML(title)}</h4>
+        <p class="kpi-tt-meaning">${escapeHTML(meaning)}</p>
+        <div class="kpi-tt-label">Formula</div>
+        <code class="kpi-tt-formula">${escapeHTML(formula)}</code>
+        ${inputsHTML}
+        ${notComputableHTML}
+      </div>`;
+  }
+
   function deliveryTileHTML() {
     // Two 30-day windows: current and prior — same width so the trend is
     // apples-to-apples. Thirty days is short enough to feel "now" yet long
@@ -15064,13 +15180,26 @@ body.is-row-dragging *        { user-select: none !important; }
     const MIN_SAMPLE = 5;
 
     // Adherence tile
+    const adhInputs = [
+      { name: 'on-time',        desc: 'Actions marked Done in the last 30 days whose completion date is on or before their promised due.' },
+      { name: 'slipped',        desc: 'Actions marked Done in the window whose completion date is AFTER their promised due, plus actions still open whose promised due has already passed (in the window).' },
+      { name: 'promised due',   desc: 'The action\'s baseline due date if a project baseline was ever set; otherwise the current due date.' },
+    ];
     let adhTile;
     if (curr.adherenceN < MIN_SAMPLE) {
+      const tt = _kpiTooltip({
+        title: 'Schedule adherence (30d)',
+        meaning: 'The share of actions that hit the date you promised. A trust signal for downstream stakeholders — how reliably the team delivers on its own commitments.',
+        formula: 'on-time ÷ (on-time + slipped) × 100 %',
+        inputs: adhInputs,
+        notComputable: `Cannot compute — needs at least ${MIN_SAMPLE} actions whose promised due has already passed within the last 30 days. Currently ${curr.adherenceN}. Take a project baseline and let a few actions age before this KPI stabilises.`,
+      });
       adhTile = `
-        <div class="kpi" data-tile="adherence" title="Need at least ${MIN_SAMPLE} due-by-now actions to compute. Currently ${curr.adherenceN}.">
+        <div class="kpi" data-tile="adherence">
           <div class="kpi-label">Schedule adherence</div>
           <div class="kpi-value muted">—</div>
           <div class="kpi-sub">Not enough data (${curr.adherenceN}/${MIN_SAMPLE})</div>
+          ${tt}
         </div>`;
     } else {
       const pct = Math.round(curr.adherence * 100);
@@ -15079,24 +15208,43 @@ body.is-row-dragging *        { user-select: none !important; }
         eps: 0.01, higherIsBetter: true,
         fmt: (d) => `${d > 0 ? '+' : '−'}${Math.abs(Math.round(d * 100))} pts`,
       });
+      const tt = _kpiTooltip({
+        title: 'Schedule adherence (30d)',
+        meaning: `The share of actions that hit the date you promised. A trust signal for downstream stakeholders — how reliably the team delivers on its own commitments. Currently ${curr.onTime} delivered on time, ${curr.slipped} slipped or still open past due.`,
+        formula: 'on-time ÷ (on-time + slipped) × 100 %',
+        inputs: adhInputs,
+      });
       adhTile = `
-        <div class="kpi" data-tile="adherence" title="Last 30 days — ${curr.onTime} delivered on or before promised due, ${curr.slipped} slipped or open past due. Promised = baseline if set, else current due.">
+        <div class="kpi" data-tile="adherence">
           <div class="kpi-label">Schedule adherence</div>
           <div class="kpi-value ${band}">${pct}%</div>
           <div class="kpi-sub">${curr.onTime} on time / ${curr.adherenceN} due
             ${trend.html ? `<span class="kpi-trend ${trend.cls}">${trend.html}</span>` : ''}
           </div>
+          ${tt}
         </div>`;
     }
 
     // Productivity tile
+    const prodInputs = [
+      { name: 'Σ planned hours', desc: 'Sum of planned hours across every action completed in the last 30 days. Planned hours = (commitment % ÷ 100) × 40h × weeks in the [start, due] window.' },
+      { name: 'Σ logged hours',  desc: 'Sum of hours logged via the "Log time" action drawer control for those same completed actions.' },
+    ];
     let prodTile;
     if (curr.doneInWindow < MIN_SAMPLE) {
+      const tt = _kpiTooltip({
+        title: 'Productivity (30d)',
+        meaning: 'How the team\'s actual pace compares to what was planned. > 1.00× means the work landed with fewer hours than planned; < 1.00× means it took longer than expected.',
+        formula: 'Σ planned hours ÷ Σ logged hours   (over the last 30 days of completed actions)',
+        inputs: prodInputs,
+        notComputable: `Cannot compute — needs at least ${MIN_SAMPLE} actions completed in the last 30 days with BOTH a planned-hours value (needs start + due + commitment %) and at least one logged-hours entry. Currently ${curr.doneInWindow}. Ask owners to log their time on completed work.`,
+      });
       prodTile = `
-        <div class="kpi" data-tile="productivity" title="Need at least ${MIN_SAMPLE} completed actions with both planned and logged hours. Currently ${curr.doneInWindow}.">
+        <div class="kpi" data-tile="productivity">
           <div class="kpi-label">Productivity</div>
           <div class="kpi-value muted">—</div>
           <div class="kpi-sub">Not enough data (${curr.doneInWindow}/${MIN_SAMPLE})</div>
+          ${tt}
         </div>`;
     } else {
       const ratio = curr.productivity;
@@ -15105,13 +15253,20 @@ body.is-row-dragging *        { user-select: none !important; }
         eps: 0.02, higherIsBetter: true,
         fmt: (d) => `${d > 0 ? '+' : '−'}${Math.abs(d).toFixed(2)}×`,
       });
+      const tt = _kpiTooltip({
+        title: 'Productivity (30d)',
+        meaning: `How the team's actual pace compares to what was planned. > 1.00× means the work landed with fewer hours than planned; < 1.00× means it took longer than expected. Currently ${Math.round(curr.plannedHrs)}h planned vs ${Math.round(curr.loggedHrs)}h logged across ${curr.doneInWindow} actions.`,
+        formula: 'Σ planned hours ÷ Σ logged hours   (over the last 30 days of completed actions)',
+        inputs: prodInputs,
+      });
       prodTile = `
-        <div class="kpi" data-tile="productivity" title="Last 30 days — ${Math.round(curr.plannedHrs)}h planned vs ${Math.round(curr.loggedHrs)}h logged across ${curr.doneInWindow} completed actions. >1× = faster than plan.">
+        <div class="kpi" data-tile="productivity">
           <div class="kpi-label">Productivity</div>
           <div class="kpi-value ${band}">${ratio.toFixed(2)}×</div>
           <div class="kpi-sub">${Math.round(curr.plannedHrs)}h planned / ${Math.round(curr.loggedHrs)}h logged
             ${trend.html ? `<span class="kpi-trend ${trend.cls}">${trend.html}</span>` : ''}
           </div>
+          ${tt}
         </div>`;
     }
     return adhTile + prodTile;
@@ -15310,25 +15465,68 @@ body.is-row-dragging *        { user-select: none !important; }
       </div>
       ${decisionKpisHTML(decisionKpis)}
       <div class="dashboard">
-        <div class="kpi clickable" data-dash-filter="late" title="Click to view late items in Register">
+        <div class="kpi clickable" data-dash-filter="late">
           <div class="kpi-label">Late items</div>
           <div class="kpi-value ${k.late > 0 ? 'bad' : 'ok'}">${k.late}</div>
           <div class="kpi-sub">${k.lateRate}% of all actions</div>
+          ${_kpiTooltip({
+            title: 'Late items',
+            meaning: 'Open actions whose due date has passed. Every late item is a broken commitment — replan or complete now.',
+            formula: 'count( actions where a.due < today AND a.status ∉ {Done, Cancelled} AND a is live )',
+            inputs: [
+              { name: 'a.due',    desc: 'Current due date on each action.' },
+              { name: 'today',    desc: 'Today\'s calendar date.' },
+              { name: 'a.status', desc: 'One of Not started · In progress · Blocked · Done · Cancelled.' },
+              { name: 'live',     desc: 'Non-deleted, non-snoozed. Archived actions are excluded.' },
+            ],
+          })}
         </div>
-        <div class="kpi clickable" data-dash-filter="blocked" title="Click to view blocked items in Register">
+        <div class="kpi clickable" data-dash-filter="blocked">
           <div class="kpi-label">Blocked</div>
           <div class="kpi-value ${k.blocked > 0 ? 'warn' : 'ok'}">${k.blocked}</div>
           <div class="kpi-sub">${k.blockedRatio}% of all actions</div>
+          ${_kpiTooltip({
+            title: 'Blocked',
+            meaning: 'Actions the owner cannot progress because of an external dependency. Investigate what\'s blocking and clear the path or reassign.',
+            formula: 'count( actions where a.status == "Blocked" AND a is live )',
+            inputs: [
+              { name: 'a.status', desc: 'The action\'s current status column on the Board.' },
+              { name: 'live',     desc: 'Non-deleted, non-snoozed. Archived actions are excluded.' },
+            ],
+          })}
         </div>
-        <div class="kpi clickable" data-dash-filter="week" title="Click to view items due this week">
+        <div class="kpi clickable" data-dash-filter="week">
           <div class="kpi-label">Due ≤ 7 days</div>
           <div class="kpi-value ${k.upcoming > 4 ? 'warn' : ''}">${k.upcoming}</div>
           <div class="kpi-sub">Upcoming workload</div>
+          ${_kpiTooltip({
+            title: 'Due within 7 days',
+            meaning: 'Open actions whose due date falls in the next seven days. Sanity-check for the coming week — is anyone drowning, is any hand-off missing an owner?',
+            formula: 'count( actions where 0 ≤ (a.due − today) ≤ 7 AND a.status ∉ {Done, Cancelled} AND a is live )',
+            inputs: [
+              { name: 'a.due',    desc: 'Current due date on each action.' },
+              { name: 'today',    desc: 'Today\'s calendar date.' },
+              { name: 'a.status', desc: 'The action\'s current status column on the Board.' },
+            ],
+          })}
         </div>
-        <div class="kpi clickable" data-dash-filter="done" title="Click to view completed items">
+        <div class="kpi clickable" data-dash-filter="done">
           <div class="kpi-label">Completion</div>
           <div class="kpi-value ${k.completionRate >= 70 ? 'ok' : ''}">${k.completionRate}%</div>
           <div class="kpi-sub">${k.done} / ${k.total} done • throughput ${k.throughput}/2w</div>
+          ${_kpiTooltip({
+            title: 'Completion',
+            meaning: 'The share of the project\'s live actions that are marked Done. A snapshot of progress against the current scope — but it doesn\'t know about scope creep, so it\'s meaningless for cumulative reporting unless the scope is stable.',
+            formula: 'done ÷ total × 100 %',
+            inputs: [
+              { name: 'done',  desc: 'Count of actions with status = Done.' },
+              { name: 'total', desc: 'Count of live actions (non-deleted, non-snoozed, includes every status except archived).' },
+              { name: 'throughput (2w)', desc: 'Sub-metric shown below: number of actions marked Done in the last 14 days. Higher = more work landing per week.' },
+            ],
+            notComputable: k.total === 0
+              ? 'Cannot compute — the project has no live actions yet. Add some via the Board or the Register.'
+              : null,
+          })}
         </div>
         ${deliveryTileHTML()}
 

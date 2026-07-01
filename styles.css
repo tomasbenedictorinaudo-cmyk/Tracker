@@ -2803,6 +2803,97 @@ body.is-card-dragging * { cursor: grabbing !important; }
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 14px;
+  position: relative;
+}
+/* Hover-tooltip for dashboard KPI tiles. Explains the formula, each
+   input, and — if the KPI can't be computed — the reason. Anchored
+   below the tile so it doesn't cover the number itself. */
+.kpi .kpi-tt {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  width: min(420px, calc(100vw - 40px));
+  max-height: 60vh;
+  overflow-y: auto;
+  z-index: 900;
+  padding: 12px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.55;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity .12s ease, transform .12s ease, visibility 0s .12s;
+  pointer-events: none;
+}
+/* Show on tile hover with a gentle slide-in. */
+.kpi:hover .kpi-tt,
+.kpi:focus-within .kpi-tt {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity .12s ease, transform .12s ease;
+}
+/* Right-align the tooltip on tiles that live in the right half of the
+   grid so it doesn't run off-screen. Second-to-last and last tiles in
+   a 4-col row typically. */
+.dashboard > .kpi:nth-child(4n) .kpi-tt,
+.dashboard > .kpi:nth-child(4n - 1) .kpi-tt {
+  left: auto;
+  right: 0;
+}
+.kpi-tt-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+.kpi-tt-meaning {
+  margin: 0 0 10px;
+  color: var(--text-dim);
+}
+.kpi-tt-label {
+  margin: 8px 0 4px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: var(--text-faint);
+  font-weight: 600;
+}
+.kpi-tt-formula {
+  display: block;
+  padding: 8px 10px;
+  background: var(--bg-2, rgba(255,255,255,.04));
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.kpi-tt-inputs {
+  margin: 4px 0 0;
+  padding: 0 0 0 16px;
+  color: var(--text-dim);
+}
+.kpi-tt-inputs li { margin: 2px 0; }
+.kpi-tt-inputs b {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--text);
+}
+.kpi-tt-note {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: rgba(245, 158, 11, .10);
+  border-left: 3px solid var(--warn, #f59e0b);
+  color: var(--text-dim);
+  font-size: 11.5px;
 }
 .kpi-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: .12em;
