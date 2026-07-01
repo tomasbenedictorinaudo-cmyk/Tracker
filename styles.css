@@ -834,6 +834,86 @@ input, select, textarea { font: inherit; color: inherit; }
   outline-offset: 2px;
   border-radius: 4px;
 }
+.tour-dots {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 10px;
+}
+.tour-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--line-2);
+  transition: background .15s ease, transform .15s ease;
+}
+.tour-dot.is-done { background: var(--text-faint); }
+.tour-dot.is-current {
+  background: var(--accent);
+  transform: scale(1.35);
+}
+.tour-foot .ghost:disabled {
+  opacity: .35;
+  pointer-events: none;
+}
+
+/* Walkthroughs — list in help modal */
+.wt-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.wt-item {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  text-align: left;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease;
+}
+.wt-item:hover {
+  border-color: var(--accent);
+  background: var(--bg-1);
+}
+.wt-check {
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  font-size: 12px;
+  color: var(--text-faint);
+  background: var(--bg-1);
+}
+.wt-item.is-done .wt-check {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.wt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.wt-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.wt-tagline {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.4;
+}
+.wt-meta {
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
 
 /* Phase K — light team-mode merge overlay */
 .merge-overlay {

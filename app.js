@@ -15307,6 +15307,15 @@
     // Phase A — added flags / structures used by later phases. All retrocompat.
     if (typeof s.settings.tourSeen     !== 'boolean') s.settings.tourSeen = false;
     if (typeof s.settings.safetySeen   !== 'boolean') s.settings.safetySeen = false;
+    // Per-topic walkthrough progress. Structure: { [topicId]: 'completed' }.
+    // Any prior first-run tour completion migrates to the 'getting-started'
+    // topic so returning users don't see it flagged as unfinished.
+    if (typeof s.settings.walkthroughsSeen !== 'object' || !s.settings.walkthroughsSeen) {
+      s.settings.walkthroughsSeen = {};
+    }
+    if (s.settings.tourSeen && !s.settings.walkthroughsSeen['getting-started']) {
+      s.settings.walkthroughsSeen['getting-started'] = 'completed';
+    }
     if (typeof s.settings.notifyEnabled !== 'boolean') s.settings.notifyEnabled = false;
     if (typeof s.settings.sidebarGroups !== 'object' || !s.settings.sidebarGroups) {
       s.settings.sidebarGroups = { workspace: true, work: true, insight: true };
@@ -21259,7 +21268,27 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         ['Drop on Archive bin',  'Soft-delete'],
       ]],
     ];
-    body.innerHTML = sections.map(([title, rows]) => `
+    const seen = state.settings?.walkthroughsSeen || {};
+    const wtHTML = `
+      <div class="help-section">
+        <div class="help-section-title">Guided walkthroughs</div>
+        <div class="wt-list">
+          ${WALKTHROUGHS.map((t) => {
+            const done = seen[t.id] === 'completed';
+            return `
+              <button type="button" class="wt-item${done ? ' is-done' : ''}" data-wt="${escapeHTML(t.id)}">
+                <span class="wt-check" aria-hidden="true">${done ? '✓' : ''}</span>
+                <span class="wt-body">
+                  <span class="wt-label">${escapeHTML(t.label)}</span>
+                  <span class="wt-tagline">${escapeHTML(t.tagline)}</span>
+                </span>
+                <span class="wt-meta">${t.steps.length} steps · ~${t.estMinutes} min</span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+      </div>`;
+    const shortcutHTML = sections.map(([title, rows]) => `
       <div class="help-section">
         <div class="help-section-title">${escapeHTML(title)}</div>
         <div class="help-rows">
@@ -21267,60 +21296,432 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <div class="help-row"><kbd>${escapeHTML(k)}</kbd><span>${escapeHTML(v)}</span></div>
           `).join('')}
         </div>
-      </div>`).join('') + `
-      <div class="help-section">
-        <div class="help-section-title">Re-run intro</div>
-        <div class="help-row"><button class="ghost" id="btnHelpRunTour" style="padding:5px 10px;font-size:12px;">Run 5-step tour</button><span>Get the guided introduction again.</span></div>
-      </div>`;
+      </div>`).join('');
+    body.innerHTML = wtHTML + shortcutHTML;
     overlay.hidden = false;
-    $('#btnHelpRunTour')?.addEventListener('click', () => {
-      $('#helpOverlay').hidden = true;
-      runTour(0);
+    body.querySelectorAll('.wt-item').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const id = btn.dataset.wt;
+        overlay.hidden = true;
+        startWalkthrough(id);
+      });
     });
   }
 
   /* ----------------------------- wire-up ----------------------------- */
 
-  /* ----------------------- Phase L: first-run tour --------------------- */
-  // 5-step Shepherd-style overlay. Pinned to the most stable selectors
-  // available; if a target isn't on screen (rare), we still show the
-  // step's body in a centered card. Sets state.settings.tourSeen on
-  // skip / finish so it never auto-fires twice.
-  const TOUR_STEPS = [
+  /* ----------------------- Guided walkthroughs --------------------- */
+  // Topical mini-tours, launched from the ? help modal or auto-fired
+  // on first run. Each topic is a small list of steps; each step can
+  // optionally `before()` — switch to a panel, open the drawer, etc. —
+  // before the spotlight is placed. Progress persists per topic in
+  // state.settings.walkthroughsSeen[topicId].
+  //
+  // Selector hygiene: prefer stable IDs (#btnHelp) or unique data-view
+  // attributes ([data-view="gantt"]). Fall back to a class that only
+  // exists on the target panel to avoid mis-anchoring when several
+  // panels are cached in the DOM.
+  const _setView = (v) => new Promise((resolve) => {
+    if (state.currentView === v) { resolve(); return; }
+    state.currentView = v;
+    saveState();
+    render();
+    // Two RAFs — first flushes the new view into the DOM, second lets
+    // any per-panel effects (canvas resize, chart layout) settle.
+    requestAnimationFrame(() => requestAnimationFrame(resolve));
+  });
+  const WALKTHROUGHS = [
     {
-      target: '#sidebar .nav, .sidebar nav',
-      side: 'right',
-      title: 'Navigate the project',
-      body: 'Switch views from here — Board, Register, Gantt, Calendar, Reports, plus engineering side-views like Risks and Change Requests.',
+      id: 'getting-started',
+      label: 'Getting started',
+      tagline: 'The five things every user should know on day one.',
+      estMinutes: 2,
+      steps: [
+        {
+          target: '#sidebar .nav, .sidebar nav',
+          side: 'right',
+          title: 'Navigate the project',
+          body: 'Switch views from here — Board, Register, Gantt, Calendar, Dashboard, plus engineering side-views like Risks and Change Requests.',
+        },
+        {
+          target: '#btnQuickAdd',
+          side: 'bottom',
+          title: 'One palette for everything',
+          body: 'Press <b>⌘K</b> (or click here) to open the universal palette. Type to search across actions, links, decisions, risks — or run quick commands like <i>+ action</i>, <i>report</i>, <i>today</i>.',
+        },
+        {
+          before: () => _setView('board'),
+          target: '.card[data-id]',
+          side: 'right',
+          title: 'Edit anywhere',
+          body: 'Click any card to open its drawer. Drag between columns to change status. Hover to reveal a <b>⋯</b> menu with quick actions like Mark blocked / Add note / Archive.',
+        },
+        {
+          target: '#btnInbox',
+          side: 'bottom',
+          title: 'Stay on top of what\'s slipping',
+          body: 'The bell aggregates late actions, due-soon items, aging change requests and uncovered risks. Click an item to jump to it; dismissals stick.',
+        },
+        {
+          target: '#btnHelp',
+          side: 'bottom',
+          title: 'Guided walkthroughs live here',
+          body: 'Press <b>?</b> any time to open this menu — the shortcut cheatsheet is one section, guided walkthroughs are another. Come back when you\'re ready to explore a new area.',
+        },
+      ],
     },
     {
-      target: '#btnQuickAdd',
-      side: 'bottom',
-      title: 'One palette for everything',
-      body: 'Press <b>⌘K</b> (or click here) to open the universal palette. Type to search across actions, links, decisions, risks — or run quick commands like <i>+ action</i>, <i>report</i>, <i>today</i>.',
+      id: 'board-register',
+      label: 'Boards & Register — track work day-to-day',
+      tagline: 'Two ways to look at the same actions, plus the drawer that ties them together.',
+      estMinutes: 4,
+      steps: [
+        {
+          before: () => _setView('board'),
+          target: '.board',
+          side: 'top',
+          title: 'The Board is your daily heartbeat',
+          body: 'One column per status — <i>Not started, In progress, Blocked, Done, Cancelled</i>. Cards you own float to the top; the newest work sits at the bottom of each column.',
+        },
+        {
+          before: () => _setView('board'),
+          target: '.card[data-id]',
+          side: 'right',
+          title: 'Drag to change status',
+          body: 'Drop a card in another column to change its status. Two bins at the far right — <b>Done</b> and <b>Archive</b> — accept quick drops; Done marks complete, Archive soft-deletes (restorable from the Archive view).',
+        },
+        {
+          before: () => _setView('board'),
+          target: '.card[data-id]',
+          side: 'right',
+          title: 'Card → drawer',
+          body: 'Click a card to open its drawer. Edit any field, override the auto-computed Start / Completed dates, log hours, add dependencies, snooze, or set recurrence. Every change is written to the action history.',
+        },
+        {
+          before: () => _setView('register'),
+          target: '.register',
+          side: 'top',
+          title: 'The Register is the same data, tabular',
+          body: 'Everything the board shows, plus columns board cards hide (predicted vs actual completion, commitment, baseline variance). Sort any column; drag the ⋮⋮ grip to reorder within a status.',
+        },
+        {
+          before: () => _setView('register'),
+          target: '.reg-head',
+          side: 'bottom',
+          title: 'Bulk edits',
+          body: 'Multi-select rows with the checkboxes, then a floating bar surfaces at the bottom with <b>Set status</b>, <b>Set owner</b>, <b>Set component</b>, <b>Set priority</b>. Great for triage after a review meeting.',
+        },
+        {
+          target: '#filterOwner, #filterStatus, .topbar',
+          side: 'bottom',
+          title: 'Topbar filters apply everywhere',
+          body: 'Owner / component / status / due — set once, then Board, Register, Gantt, and Calendar all honour the same filter. Save the current combo as a named view for one-click return.',
+        },
+      ],
     },
     {
-      target: '.card[data-id]',
-      side: 'right',
-      title: 'Edit anywhere',
-      body: 'Click any card to open its drawer. Drag between columns to change status. Hover to reveal a <b>⋯</b> menu with quick actions like Mark blocked / Add note / Archive.',
+      id: 'gantt-calendar',
+      label: 'Gantt & Calendar — plan the schedule',
+      tagline: 'Bars, dependencies, critical path, and three calendar formats.',
+      estMinutes: 5,
+      steps: [
+        {
+          before: () => _setView('timeline'),
+          target: '.timeline',
+          side: 'top',
+          title: 'The Gantt lays every action along time',
+          body: 'Bars span Start date → Due. If no Start is set, the bar starts two days before Due — set an explicit Start in the drawer to widen the plan window.',
+        },
+        {
+          before: () => _setView('timeline'),
+          target: '.tl-bar',
+          side: 'top',
+          title: 'Drag bars to reschedule',
+          body: 'Drag a bar horizontally to move both Start and Due together. Drag either edge to resize just that end. Double-click empty timeline space to create a new action starting on that day.',
+        },
+        {
+          before: () => _setView('timeline'),
+          target: '#btnTLCritical',
+          side: 'bottom',
+          title: 'Critical-path toggle',
+          body: 'The Gantt draws dependency lines automatically. Flip the <b>Critical path</b> toggle to dim everything that isn\'t on a chain feeding an open milestone — the fastest way to see where a slip actually hurts.',
+        },
+        {
+          before: () => _setView('calendar'),
+          target: '[data-cal-format]',
+          side: 'bottom',
+          title: 'Calendar comes in three formats',
+          body: 'Month grid, Timeline strip, Table. Each format renders the same underlying items — actions, milestones, meetings — filtered by the same topbar controls. Pick whichever answers today\'s question fastest.',
+        },
+        {
+          before: async () => { await _setView('calendar'); const btn = document.querySelector('[data-cal-format="month"]'); if (btn && !btn.classList.contains('active')) btn.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); },
+          target: '#calGrid',
+          side: 'top',
+          title: 'Discreet overflow, not truncation',
+          body: 'When a day has more items than fit in a cell, a small <b>+N</b> chip appears at the bottom. Hover to smooth-scroll the cell — every chip stays reachable without a modal.',
+        },
+        {
+          before: () => _setView('milestones'),
+          target: '.cal-timeline, .cal-grid, .view',
+          side: 'top',
+          title: 'Milestones anchor the plan',
+          body: 'Set a milestone\'s date, mark it critical, and any action that depends on it inherits the critical-path treatment. Miss-alerts fire when today crosses a milestone whose blockers aren\'t all Done.',
+        },
+        {
+          before: () => _setView('changes'),
+          target: '#crList, .cr-kpis',
+          side: 'top',
+          title: 'Change Requests are the schedule\'s audit trail',
+          body: 'When a milestone or major action moves, log a CR: what changed, why, impact, decision. The Register\'s baseline column shows variance against the last snapshot.',
+        },
+      ],
     },
     {
-      target: '#btnInbox',
-      side: 'bottom',
-      title: 'Stay on top of what\'s slipping',
-      body: 'The bell aggregates late actions, due-soon items, aging change requests and uncovered risks. Click an item to jump to it; dismissals stick.',
+      id: 'dashboard-evm',
+      label: 'Dashboard & EVM — steer with KPIs',
+      tagline: 'Every KPI tells you what it needs to compute — hover for the fine print.',
+      estMinutes: 4,
+      steps: [
+        {
+          before: () => _setView('dashboard'),
+          target: '.dashboard',
+          side: 'top',
+          title: 'A single page for project health',
+          body: 'Late, Blocked, Due-soon, Schedule Adherence, Team utilisation, Risk exposure, Stale actions, CPI, SPI, Change governance, and the trend charts. Everything scales to your topbar filters — so a Dashboard filtered to one owner is a valid personal review.',
+        },
+        {
+          before: () => _setView('dashboard'),
+          target: '.kpi[data-dash-filter]',
+          side: 'bottom',
+          title: 'Hover a KPI for the recipe',
+          body: 'Every tile has a hover tooltip explaining its <b>formula</b>, the <b>inputs</b> it read, its <b>meaning</b>, and — critically — the <b>minimum data</b> a task or person must have for the number to be accurate.',
+        },
+        {
+          before: () => _setView('dashboard'),
+          target: '.dkpi-grid',
+          side: 'top',
+          title: 'CPI & SPI live in Project performance',
+          body: 'Cost Performance = Earned Value / Actual Cost. Schedule Performance = Earned Value / Planned Value. Both need Commitment %, Start & Due, and either logged hours or a % complete override on each action. If it reads "—", the tooltip lists which field is missing.',
+        },
+        {
+          before: () => _setView('dashboard'),
+          target: '.kpi[data-tile]',
+          side: 'top',
+          title: 'Charts have their own tooltips',
+          body: 'Adherence trend, throughput, burndown, and workload projection all explain their inputs on hover. If a chart looks empty, the tooltip tells you which field is missing across which subset of actions.',
+        },
+        {
+          before: () => _setView('dashboard'),
+          target: '.kpi[data-tile], .dkpi',
+          side: 'top',
+          title: 'Right-click Copy',
+          body: 'Right-click any chart, board, or Gantt to <b>Copy as PNG</b> (full panel: title + legend + foot) or <b>Copy as data</b> (CSV to paste into Excel).',
+        },
+        {
+          before: () => _setView('review'),
+          target: '.review-card, .review-stepper, .view',
+          side: 'top',
+          title: 'The Reports view is the export target',
+          body: 'Reports composes a whole project XLSX (Actions, Register, KPIs, Milestones, Deliverables, Dashboard sheet). KPIs come through as <b>live Excel formulas</b>, so you can slice further outside the app.',
+        },
+      ],
     },
     {
-      target: '#btnHelp',
-      side: 'bottom',
-      title: 'Keyboard shortcuts',
-      body: 'Press <b>?</b> any time for the full shortcut cheatsheet. You can re-run this tour from there.',
+      id: 'notes-knowledge',
+      label: 'Notes & knowledge capture',
+      tagline: 'Meeting notes wired straight into actions, people, and decisions.',
+      estMinutes: 3,
+      steps: [
+        {
+          target: '#btnNotesToggle',
+          side: 'bottom',
+          title: 'Notes live in a slide-in panel',
+          body: 'Open with <b>⌘\\</b> or the notes button. The notes panel travels with you between views — take a meeting note without losing your place in the Gantt.',
+        },
+        {
+          before: async () => { const p = document.getElementById('notesPanel'); if (p && p.hidden) document.getElementById('btnNotesToggle')?.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); },
+          target: '#notesPanel',
+          side: 'left',
+          title: 'Structured, not free-form',
+          body: 'Multi-level bullet lists with Tab / Shift-Tab. Compound numbering (1, 1.A, 1.A.2, 1.A.2.a) is automatic. The TOC on the left is resizable — grab its edge and pull.',
+        },
+        {
+          before: async () => { const p = document.getElementById('notesPanel'); if (p && p.hidden) document.getElementById('btnNotesToggle')?.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); },
+          target: '#notesBody',
+          side: 'left',
+          title: '@ mentions and # actions',
+          body: 'Type <b>@</b> then a name to mention a person. Type <b>#</b> then part of a title to insert an existing action as a live chip — status updates in your note the moment the action moves.',
+        },
+        {
+          before: async () => { const p = document.getElementById('notesPanel'); if (p && p.hidden) document.getElementById('btnNotesToggle')?.click(); await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); },
+          target: '#notesBody',
+          side: 'left',
+          title: 'Create actions from the note',
+          body: 'Press <b>⌘Shift+A</b> anywhere in a note to spawn a new action and drop its chip inline. Every action created this way carries the note as its origin — clickable back-link on the action drawer.',
+        },
+        {
+          before: () => _setView('decisions'),
+          target: '.dec-main, .view',
+          side: 'top',
+          title: 'Decisions get their own log',
+          body: 'The Decisions view captures what was decided, why, and what alternatives were considered. Link decisions to actions or risks and they cross-reference automatically.',
+        },
+      ],
+    },
+    {
+      id: 'data-safety',
+      label: 'Data safety & backups',
+      tagline: 'Where your data lives and how to keep it after a browser purge.',
+      estMinutes: 2,
+      steps: [
+        {
+          target: '#storageStatus',
+          side: 'top',
+          title: 'The Saved pill is your storage HUD',
+          body: 'Bottom-right corner. Green means all writes committed to every layer (localStorage + IndexedDB + OPFS + your backup target). Click it to open the Storage panel.',
+        },
+        {
+          target: '#storageStatus',
+          side: 'top',
+          title: 'Three layers already run for you',
+          body: '<b>localStorage</b> is fast and primary. <b>IndexedDB</b> mirrors every write. <b>OPFS</b> keeps a hidden per-origin file copy that survives most cache clears. You get all three without configuring anything.',
+        },
+        {
+          target: '#btnAutoBackup',
+          side: 'bottom',
+          title: 'Pick an off-browser target',
+          body: 'From the Storage panel, pick a <b>folder</b> (Chrome / Edge — a real file you can back up yourself) or <b>auto-download</b> (works everywhere, drops timestamped snapshots into Downloads). Do this once and your work stops depending on any single browser store.',
+        },
+        {
+          target: '#btnImport',
+          side: 'bottom',
+          title: 'Restore is a single JSON',
+          body: 'Every backup is one JSON file — click the import arrow to restore. There\'s no proprietary format to worry about; you can inspect the file yourself.',
+        },
+      ],
     },
   ];
+  // Active-run state — cleared on close. Kept as a module-level so
+  // Back button can walk backwards through the current topic.
+  let _wtRun = null;
   function maybeRunFirstRunTour() {
-    if (state.settings?.tourSeen) return;
-    setTimeout(() => runTour(0), 600); // wait for first render
+    if (state.settings?.walkthroughsSeen?.['getting-started'] === 'completed') return;
+    if (state.settings?.tourSeen) return; // legacy flag, still honoured
+    setTimeout(() => startWalkthrough('getting-started'), 600);
+  }
+  function startWalkthrough(topicId) {
+    const topic = WALKTHROUGHS.find((t) => t.id === topicId);
+    if (!topic) return;
+    _wtRun = { topic, idx: 0 };
+    runStep();
+  }
+  async function runStep() {
+    closeTour();
+    if (!_wtRun) return;
+    const { topic, idx } = _wtRun;
+    if (idx < 0 || idx >= topic.steps.length) { finishWalkthrough(); return; }
+    const step = topic.steps[idx];
+    if (typeof step.before === 'function') {
+      try { await step.before(); } catch (_) { /* keep going even if the before-hook glitches */ }
+    }
+    // Some panels finish rendering a frame or two after render() returns
+    // (calendar month grid, gantt lanes, dashboard charts). Give the
+    // selector up to 800 ms to appear before we fall back to the
+    // centered-card treatment.
+    let target = step.target ? document.querySelector(step.target) : null;
+    if (step.target && !target) {
+      const deadline = performance.now() + 800;
+      while (!target && performance.now() < deadline) {
+        await new Promise((r) => setTimeout(r, 40));
+        target = document.querySelector(step.target);
+      }
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'tour-overlay';
+    const dots = topic.steps.map((_, i) =>
+      `<span class="tour-dot${i === idx ? ' is-current' : ''}${i < idx ? ' is-done' : ''}"></span>`
+    ).join('');
+    const isLast = idx === topic.steps.length - 1;
+    const isFirst = idx === 0;
+    overlay.innerHTML = `
+      <div class="tour-mask" id="tourMask"></div>
+      <div class="tour-card" id="tourCard">
+        <div class="tour-step">${escapeHTML(topic.label)} · step ${idx + 1} of ${topic.steps.length}</div>
+        <div class="tour-title">${escapeHTML(step.title)}</div>
+        <div class="tour-body">${step.body}</div>
+        <div class="tour-dots">${dots}</div>
+        <div class="tour-foot">
+          <button class="ghost" id="tourSkip">Exit</button>
+          <button class="ghost" id="tourBack" ${isFirst ? 'disabled' : ''}>← Back</button>
+          <button class="primary" id="tourNext">${isLast ? 'Finish' : 'Next →'}</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const card = overlay.querySelector('#tourCard');
+    const mask = overlay.querySelector('#tourMask');
+    if (target) {
+      target.classList.add('tour-highlight');
+      // Ensure the anchor is visible before we measure — nothing shipped
+      // gets less useful than a spotlight aimed off-screen.
+      try { target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' }); } catch (_) {}
+      const r = target.getBoundingClientRect();
+      mask.style.setProperty('--spot-x', (r.left + r.width / 2) + 'px');
+      mask.style.setProperty('--spot-y', (r.top + r.height / 2) + 'px');
+      mask.style.setProperty('--spot-r', (Math.max(r.width, r.height) / 2 + 12) + 'px');
+      const W = card.getBoundingClientRect().width || 340;
+      const H = card.getBoundingClientRect().height || 200;
+      const margin = 16;
+      let x = r.right + margin, y = r.top;
+      if (step.side === 'bottom') { x = Math.max(margin, r.left); y = r.bottom + margin; }
+      if (step.side === 'top')    { x = Math.max(margin, r.left); y = Math.max(margin, r.top - H - margin); }
+      if (step.side === 'left')   { x = Math.max(margin, r.left - W - margin); y = r.top; }
+      if (step.side === 'right')  { x = r.right + margin; y = Math.max(margin, r.top); }
+      x = clamp(x, margin, innerWidth - W - margin);
+      y = clamp(y, margin, innerHeight - H - margin);
+      card.style.left = x + 'px';
+      card.style.top = y + 'px';
+    } else {
+      mask.classList.add('full');
+      card.style.left = '50%';
+      card.style.top = '50%';
+      card.style.transform = 'translate(-50%, -50%)';
+    }
+    overlay.querySelector('#tourSkip').addEventListener('click', () => { closeTour(); exitWalkthrough(); });
+    overlay.querySelector('#tourBack').addEventListener('click', () => {
+      if (!_wtRun || _wtRun.idx === 0) return;
+      _wtRun.idx -= 1;
+      runStep();
+    });
+    overlay.querySelector('#tourNext').addEventListener('click', () => {
+      if (!_wtRun) return;
+      _wtRun.idx += 1;
+      runStep();
+    });
+  }
+  function closeTour() {
+    document.querySelectorAll('.tour-highlight').forEach((el) => el.classList.remove('tour-highlight'));
+    document.querySelectorAll('.tour-overlay').forEach((el) => el.remove());
+  }
+  function exitWalkthrough() {
+    _wtRun = null;
+  }
+  function finishWalkthrough() {
+    if (!_wtRun) return;
+    const topicId = _wtRun.topic.id;
+    _wtRun = null;
+    state.settings = state.settings || {};
+    state.settings.walkthroughsSeen = state.settings.walkthroughsSeen || {};
+    state.settings.walkthroughsSeen[topicId] = 'completed';
+    // Keep the legacy tourSeen flag in sync so the first-run guard
+    // never re-fires the Getting Started tour on old builds.
+    if (topicId === 'getting-started') state.settings.tourSeen = true;
+    saveState();
+    toast('Walkthrough finished — press ? to explore another');
+  }
+  // Legacy alias — a few call-sites still reference runTour.
+  function runTour(idx) {
+    startWalkthrough('getting-started');
+    if (_wtRun && typeof idx === 'number') { _wtRun.idx = clamp(idx, 0, _wtRun.topic.steps.length - 1); runStep(); }
   }
 
   // First-run data-safety prompt — shown once, before the feature tour,
@@ -21415,70 +21816,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     });
     overlay.querySelector('#frsLater')?.addEventListener('click', seen);
   }
-  function runTour(stepIdx) {
-    closeTour();
-    if (stepIdx < 0 || stepIdx >= TOUR_STEPS.length) {
-      finishTour();
-      return;
-    }
-    const step = TOUR_STEPS[stepIdx];
-    const target = document.querySelector(step.target);
-    const overlay = document.createElement('div');
-    overlay.className = 'tour-overlay';
-    overlay.innerHTML = `
-      <div class="tour-mask" id="tourMask"></div>
-      <div class="tour-card" id="tourCard">
-        <div class="tour-step">Step ${stepIdx + 1} of ${TOUR_STEPS.length}</div>
-        <div class="tour-title">${escapeHTML(step.title)}</div>
-        <div class="tour-body">${step.body}</div>
-        <div class="tour-foot">
-          <button class="ghost" id="tourSkip">Skip tour</button>
-          <button class="primary" id="tourNext">${stepIdx === TOUR_STEPS.length - 1 ? 'Finish' : 'Next →'}</button>
-        </div>
-      </div>`;
-    document.body.appendChild(overlay);
-    const card = overlay.querySelector('#tourCard');
-    const mask = overlay.querySelector('#tourMask');
-    if (target) {
-      target.classList.add('tour-highlight');
-      const r = target.getBoundingClientRect();
-      // Soft-spot the highlighted region with a ring on the mask
-      mask.style.setProperty('--spot-x', (r.left + r.width / 2) + 'px');
-      mask.style.setProperty('--spot-y', (r.top + r.height / 2) + 'px');
-      mask.style.setProperty('--spot-r', (Math.max(r.width, r.height) / 2 + 12) + 'px');
-      // Place the card to the side requested by the step (clamp to viewport)
-      const W = card.getBoundingClientRect().width || 320;
-      const H = card.getBoundingClientRect().height || 160;
-      const margin = 16;
-      let x = r.right + margin, y = r.top;
-      if (step.side === 'bottom') { x = Math.max(margin, r.left); y = r.bottom + margin; }
-      if (step.side === 'left')   { x = Math.max(margin, r.left - W - margin); y = r.top; }
-      if (step.side === 'right')  { x = r.right + margin; y = Math.max(margin, r.top); }
-      x = clamp(x, margin, innerWidth - W - margin);
-      y = clamp(y, margin, innerHeight - H - margin);
-      card.style.left = x + 'px';
-      card.style.top = y + 'px';
-    } else {
-      // No anchor — center the card and fade the mask uniformly
-      mask.classList.add('full');
-      card.style.left = '50%';
-      card.style.top = '50%';
-      card.style.transform = 'translate(-50%, -50%)';
-    }
-    overlay.querySelector('#tourSkip').addEventListener('click', () => { closeTour(); finishTour(); });
-    overlay.querySelector('#tourNext').addEventListener('click', () => runTour(stepIdx + 1));
-  }
-  function closeTour() {
-    document.querySelectorAll('.tour-highlight').forEach((el) => el.classList.remove('tour-highlight'));
-    document.querySelectorAll('.tour-overlay').forEach((el) => el.remove());
-  }
-  function finishTour() {
-    state.settings = state.settings || {};
-    state.settings.tourSeen = true;
-    saveState();
-    toast('Tour finished — press ? for shortcuts');
-  }
-
   function init() {
     // Load: must distinguish between empty storage (first run — fine to seed)
     // and corrupted storage (must NOT overwrite, surface a recovery overlay).
