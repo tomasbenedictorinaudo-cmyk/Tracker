@@ -2877,19 +2877,25 @@ body.is-card-dragging * { cursor: grabbing !important; }
   padding: 14px;
   position: relative;
 }
-/* Hover-tooltip for dashboard KPIs, EVM cells, workload panel and
-   chart panels. Positioning is JS-driven — the delegated hover
-   handler in the dashboard render sets fixed top/left based on the
-   anchor's viewport rect. Fixed positioning + max z-index means no
-   parent panel overflow, transform, or stacking context can clip it. */
+/* Source .kpi-tt elements sit inside each anchor (KPI tile, EVM cell,
+   panel-title info icon) as authoring locality — their innerHTML is
+   cloned into the body-level #kpiTooltipPortal on hover. The source
+   panel itself never renders. */
 .kpi-tt {
+  display: none;
+}
+
+/* Body-level portal — the only element that actually gets shown.
+   position:fixed + very high z-index + body parentage escapes every
+   ancestor stacking context, so sibling panels can't paint over it. */
+.kpi-tt-portal {
+  display: block;
   position: fixed;
   top: 0;
   left: 0;
   width: min(440px, calc(100vw - 40px));
-  max-height: 65vh;
   overflow-y: auto;
-  z-index: 9999;
+  z-index: 999999;
   padding: 12px 14px;
   background: var(--bg-1);
   border: 1px solid var(--line);
@@ -2904,7 +2910,7 @@ body.is-card-dragging * { cursor: grabbing !important; }
   transition: opacity .12s ease, transform .12s ease, visibility 0s .12s;
   pointer-events: none;
 }
-.kpi-tt.is-visible {
+.kpi-tt-portal.is-visible {
   visibility: visible;
   opacity: 1;
   transform: translateY(0);

@@ -7621,65 +7621,110 @@
       </div>`;
   }
 
-  // Global hover-tooltip positioner. Any element that contains a
-  // direct `.kpi-tt` child (KPI tile, EVM cell, info icon, chart
-  // panel-title) becomes an anchor. Fixed positioning + viewport
-  // clamping means panel overflow / stacking contexts can't clip it.
+  // Global hover-tooltip system. Every anchor keeps its `.kpi-tt`
+  // element as source content (kept in DOM for authoring locality).
+  // On hover we CLONE that content into a single body-level portal —
+  // this escapes every parent stacking context so the tooltip cannot
+  // be painted over by sibling panels. Placement never overlaps the
+  // anchor: prefer the side (below / above) that fits fully; if
+  // neither side has room, pick whichever has more and let the panel
+  // scroll internally.
+  function _getKpiTooltipPortal() {
+    let portal = document.getElementById('kpiTooltipPortal');
+    if (!portal) {
+      portal = document.createElement('div');
+      portal.id = 'kpiTooltipPortal';
+      portal.className = 'kpi-tt kpi-tt-portal';
+      portal.setAttribute('role', 'tooltip');
+      document.body.appendChild(portal);
+    }
+    return portal;
+  }
   function _wireDashboardTooltips(root) {
-    let current = null;
-    const place = (anchor, tt) => {
-      const rect = anchor.getBoundingClientRect();
-      // Reset before measuring so the tooltip sizes to content, not to
-      // whatever the previous anchor made it.
-      tt.style.left = '-99999px';
-      tt.style.top = '0';
-      tt.classList.add('is-visible');
-      // Two-frame delay so the browser applies the reset first.
+    const portal = _getKpiTooltipPortal();
+    let currentAnchor = null;
+    const hide = () => {
+      if (!currentAnchor) return;
+      portal.classList.remove('is-visible');
+      portal.style.maxHeight = '';
+      currentAnchor = null;
+    };
+    const place = (anchor, sourceHtml) => {
+      portal.innerHTML = sourceHtml;
+      portal.style.maxHeight = ''; // let it grow to intrinsic size for measure
+      portal.style.left = '-99999px';
+      portal.style.top = '0';
+      portal.classList.add('is-visible');
+      // Measure and place in the next frame — the browser applies the
+      // reset first, then we can trust offsetWidth / offsetHeight.
       requestAnimationFrame(() => {
-        const ttRect = tt.getBoundingClientRect();
+        const rect = anchor.getBoundingClientRect();
         const vw = window.innerWidth;
         const vh = window.innerHeight;
+        const margin = 12;
+        const gap = 8;
+        const ttWidth  = portal.offsetWidth;
+        const ttHeight = portal.offsetHeight;
+        const spaceBelow = vh - rect.bottom - gap - margin;
+        const spaceAbove = rect.top - gap - margin;
+        let top, maxH = null;
+        if (ttHeight <= spaceBelow) {
+          // Fits fully below — the preferred side.
+          top = rect.bottom + gap;
+        } else if (ttHeight <= spaceAbove) {
+          // Fits fully above — flip.
+          top = rect.top - ttHeight - gap;
+        } else if (spaceBelow >= spaceAbove) {
+          // Neither side fits fully; below has more room. Constrain
+          // maxHeight to the EXACT space so the panel scrolls
+          // internally instead of crossing back into the anchor.
+          top = rect.bottom + gap;
+          maxH = spaceBelow;
+        } else {
+          // Above has more room. top = margin + (rect.top-spaceAbove-gap),
+          // which reduces to just `margin`, but we derive it from spaceAbove
+          // so the maxHeight below can't push the tooltip's bottom into the
+          // anchor's top edge.
+          top = rect.top - spaceAbove - gap;
+          maxH = spaceAbove;
+        }
+        // Horizontal: start at anchor's left, shift left only if it would
+        // run off the right edge.
         let left = rect.left;
-        let top  = rect.bottom + 8;
-        // Right-edge overflow — shift left so the tooltip fits.
-        if (left + ttRect.width > vw - 12) {
-          left = Math.max(12, vw - ttRect.width - 12);
+        if (left + ttWidth > vw - margin) {
+          left = Math.max(margin, vw - ttWidth - margin);
         }
-        // Bottom-edge overflow — flip above the anchor.
-        if (top + ttRect.height > vh - 12) {
-          top = Math.max(12, rect.top - ttRect.height - 8);
-        }
-        tt.style.left = left + 'px';
-        tt.style.top  = top + 'px';
+        portal.style.left = Math.round(left) + 'px';
+        portal.style.top  = Math.round(top) + 'px';
+        if (maxH != null) portal.style.maxHeight = Math.round(maxH) + 'px';
       });
     };
-    const hide = () => {
-      if (!current) return;
-      current.tt.classList.remove('is-visible');
-      current = null;
-    };
     root.addEventListener('mouseover', (e) => {
-      // Walk up to find the nearest anchor that has a direct .kpi-tt.
+      // Walk up to find the nearest anchor that has a direct .kpi-tt
+      // source element (and is NOT the portal itself).
       let node = e.target;
       let tt = null;
       while (node && node !== root) {
-        tt = node.querySelector && node.querySelector(':scope > .kpi-tt');
-        if (tt) break;
+        if (node.classList && !node.classList.contains('kpi-tt-portal')) {
+          tt = node.querySelector && node.querySelector(':scope > .kpi-tt');
+          if (tt) break;
+        }
         node = node.parentElement;
       }
-      if (!tt || (current && current.tt === tt)) return;
-      hide();
-      current = { anchor: node, tt };
-      place(node, tt);
+      if (!tt) return;
+      if (currentAnchor === node) return;
+      currentAnchor = node;
+      place(node, tt.innerHTML);
     });
     root.addEventListener('mouseout', (e) => {
-      if (!current) return;
+      if (!currentAnchor) return;
       const to = e.relatedTarget;
-      // Stay open when the pointer is still inside the anchor.
-      if (to && current.anchor.contains(to)) return;
+      // Stay open when the pointer is still inside the current anchor.
+      if (to && currentAnchor.contains(to)) return;
       hide();
     });
-    // Clean up on scroll / resize so the tooltip doesn't drift.
+    // Clean up on scroll / resize so the tooltip doesn't drift out of
+    // its target position.
     window.addEventListener('scroll', hide, { passive: true, capture: true });
     window.addEventListener('resize', hide);
   }
