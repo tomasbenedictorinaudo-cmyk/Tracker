@@ -19747,10 +19747,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const isWeekend = d.getDay() === 0 || d.getDay() === 6;
       const isFirstOfMonth = d.getDate() === 1;
       const cellItems = byDate.get(iso) || [];
-      const VISIBLE = 4;
-      const shown = cellItems.slice(0, VISIBLE);
-      const hidden = cellItems.length - shown.length;
-      const chipsHTML = shown.map((it, idx) => {
+      // Every chip is rendered into the DOM — the CSS caps the visible
+      // area to ~4 rows so the cell layout stays compact, and on cell
+      // hover the chips container reveals a slim scrollbar so users can
+      // reach the hidden items without a click. A discreet corner badge
+      // (▾ N) still opens the click-to-list popover for touch/keyboard.
+      const HINT = 4;
+      const hidden = Math.max(0, cellItems.length - HINT);
+      const chipsHTML = cellItems.map((it, idx) => {
         const icon = it.icon || '·';
         const rangeCls = it.kind === 'milestone' && it.rangePos
           ? ` is-${it.rangePos}` : '';
@@ -19762,16 +19766,20 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <span class="cal-chip-label">${escapeHTML(it.label)}</span>
           </button>`;
       }).join('');
-      const moreHTML = hidden > 0 ? `<button class="cal-more" data-cell-idx="${i}">+ ${hidden} more</button>` : '';
+      const overflowBadge = hidden > 0
+        ? `<button class="cal-more" data-cell-idx="${i}" title="${hidden} more — hover the cell to scroll · click to list them all" aria-label="${hidden} more items">▾${hidden}</button>`
+        : '';
       // First-of-month gets a small inline label so the user can find
       // month boundaries while scrolling.
       const dayLabel = isFirstOfMonth
         ? `<span class="cal-day-month-tag">${d.toLocaleDateString(undefined, { month: 'short' })}</span> ${d.getDate()}`
         : `${d.getDate()}`;
+      const overflowCls = hidden > 0 ? ' has-overflow' : '';
       return `
-        <div class="cal-cell ${monthBand} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}" data-cell-idx="${i}" data-iso="${iso}">
+        <div class="cal-cell ${monthBand} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}${overflowCls}" data-cell-idx="${i}" data-iso="${iso}">
           <div class="cal-day-num">${dayLabel}</div>
-          <div class="cal-chips">${chipsHTML}${moreHTML}</div>
+          ${overflowBadge}
+          <div class="cal-chips">${chipsHTML}</div>
         </div>`;
     }
     const weekRowsHTML = [];

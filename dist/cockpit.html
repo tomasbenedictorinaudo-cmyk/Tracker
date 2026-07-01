@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-01T19:53:08.804Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-01T19:58:09.923Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -1139,6 +1139,85 @@ input, select, textarea { font: inherit; color: inherit; }
   display: flex; flex-direction: column;
   gap: 2px;
   min-width: 0;
+  /* Cap the visible height at ~4 chips. Extra chips still render
+     into the DOM — the cell reveals a scrollbar on hover so users
+     can reach them without a click. */
+  max-height: 96px;
+  overflow: hidden;
+  scrollbar-gutter: stable both-edges;
+}
+.cal-cell.has-overflow .cal-chips::after {
+  /* Bottom fade — visual cue that there's more content below the fold.
+     Sits INSIDE the scrollable area so it moves with content on scroll,
+     which is the right behavior (once you've scrolled to the bottom
+     you're no longer hidden). */
+  content: "";
+  position: sticky;
+  bottom: 0;
+  height: 12px;
+  margin-top: -12px;
+  background: linear-gradient(to bottom, transparent, var(--bg-1) 80%);
+  pointer-events: none;
+  flex-shrink: 0;
+}
+.cal-cell.has-overflow.month-band .cal-chips::after {
+  background: linear-gradient(to bottom, transparent, rgba(var(--accent-2-rgb), .07) 80%);
+}
+/* Hover reveals a slim scrollbar within the cell. The max-height
+   stays the same so the layout doesn't shift; the user scrolls
+   within the existing box. */
+.cal-cell:hover .cal-chips,
+.cal-cell:focus-within .cal-chips {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+.cal-cell:hover .cal-chips::-webkit-scrollbar,
+.cal-cell:focus-within .cal-chips::-webkit-scrollbar {
+  width: 6px;
+}
+.cal-cell:hover .cal-chips::-webkit-scrollbar-thumb,
+.cal-cell:focus-within .cal-chips::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 3px;
+}
+/* Fade cue only makes sense when the user hasn't hovered yet;
+   suppress it while the scrollbar is out so the two visuals don't
+   fight. */
+.cal-cell:hover.has-overflow .cal-chips::after,
+.cal-cell:focus-within.has-overflow .cal-chips::after {
+  display: none;
+}
+
+/* Discreet corner badge — the small "▾N" indicator that overflow
+   exists. Absolute-positioned so it stays visible regardless of
+   the scroll state of the chips container. Still clickable for
+   touch / keyboard users to open the full-list popover. */
+.cal-cell .cal-more {
+  position: absolute;
+  top: 3px;
+  right: 4px;
+  z-index: 2;
+  padding: 0 4px;
+  min-width: 18px;
+  height: 15px;
+  font-size: 9.5px;
+  font-weight: 600;
+  line-height: 15px;
+  color: var(--text-faint);
+  background: rgba(255, 255, 255, .06);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  cursor: pointer;
+  letter-spacing: 0;
+  opacity: .7;
+  transition: opacity .12s ease, color .12s ease, background .12s ease;
+}
+.cal-cell:hover .cal-more,
+.cal-cell:focus-within .cal-more {
+  opacity: 1;
+  color: var(--text);
+  background: rgba(255, 255, 255, .10);
 }
 .cal-chip {
   display: flex; align-items: center; gap: 5px;
@@ -1295,16 +1374,9 @@ input, select, textarea { font: inherit; color: inherit; }
   border-radius: 999px;
   letter-spacing: 0;
 }
-.cal-more {
-  background: transparent; border: 0;
-  padding: 1px 6px;
-  font-size: 10px;
-  color: var(--text-faint);
-  text-align: left;
-  cursor: pointer;
-  border-radius: 4px;
-}
-.cal-more:hover { background: var(--bg-3); color: var(--text); }
+/* .cal-more styling is now handled by the corner-badge rule earlier
+   in this file — the old wide "+ N more" button was replaced with a
+   compact "▾N" pill anchored to the cell's top-right corner. */
 
 /* Calendar — Timeline format.
    A single time axis (graduated arrow, zoom-aware ticks). Range
@@ -27599,10 +27671,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const isWeekend = d.getDay() === 0 || d.getDay() === 6;
       const isFirstOfMonth = d.getDate() === 1;
       const cellItems = byDate.get(iso) || [];
-      const VISIBLE = 4;
-      const shown = cellItems.slice(0, VISIBLE);
-      const hidden = cellItems.length - shown.length;
-      const chipsHTML = shown.map((it, idx) => {
+      // Every chip is rendered into the DOM — the CSS caps the visible
+      // area to ~4 rows so the cell layout stays compact, and on cell
+      // hover the chips container reveals a slim scrollbar so users can
+      // reach the hidden items without a click. A discreet corner badge
+      // (▾ N) still opens the click-to-list popover for touch/keyboard.
+      const HINT = 4;
+      const hidden = Math.max(0, cellItems.length - HINT);
+      const chipsHTML = cellItems.map((it, idx) => {
         const icon = it.icon || '·';
         const rangeCls = it.kind === 'milestone' && it.rangePos
           ? ` is-${it.rangePos}` : '';
@@ -27614,16 +27690,20 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <span class="cal-chip-label">${escapeHTML(it.label)}</span>
           </button>`;
       }).join('');
-      const moreHTML = hidden > 0 ? `<button class="cal-more" data-cell-idx="${i}">+ ${hidden} more</button>` : '';
+      const overflowBadge = hidden > 0
+        ? `<button class="cal-more" data-cell-idx="${i}" title="${hidden} more — hover the cell to scroll · click to list them all" aria-label="${hidden} more items">▾${hidden}</button>`
+        : '';
       // First-of-month gets a small inline label so the user can find
       // month boundaries while scrolling.
       const dayLabel = isFirstOfMonth
         ? `<span class="cal-day-month-tag">${d.toLocaleDateString(undefined, { month: 'short' })}</span> ${d.getDate()}`
         : `${d.getDate()}`;
+      const overflowCls = hidden > 0 ? ' has-overflow' : '';
       return `
-        <div class="cal-cell ${monthBand} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}" data-cell-idx="${i}" data-iso="${iso}">
+        <div class="cal-cell ${monthBand} ${isToday ? 'today' : ''} ${isWeekend ? 'weekend' : ''}${overflowCls}" data-cell-idx="${i}" data-iso="${iso}">
           <div class="cal-day-num">${dayLabel}</div>
-          <div class="cal-chips">${chipsHTML}${moreHTML}</div>
+          ${overflowBadge}
+          <div class="cal-chips">${chipsHTML}</div>
         </div>`;
     }
     const weekRowsHTML = [];
