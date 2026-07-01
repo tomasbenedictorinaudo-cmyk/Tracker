@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-01T20:35:42.751Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-01T22:58:06.131Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -9803,6 +9803,15 @@ body.is-row-dragging *        { user-select: none !important; }
       a.completedAt = todayISO();
     }
   }
+  // Auto-fill startDate the first time an action leaves Not started.
+  // Any state past todo counts (doing / blocked / done / cancelled) so
+  // that an action created and immediately marked Done still gets a
+  // start date. Only fills when null — never overwrites a user value.
+  function _syncStartDateOnStatus(a, oldStatus) {
+    if (oldStatus === 'todo' && a.status !== 'todo' && !a.startDate) {
+      a.startDate = todayISO();
+    }
+  }
   function actionPromisedDue(a) {
     return a?.baseline?.due || a?.due || null;
   }
@@ -10430,6 +10439,7 @@ body.is-row-dragging *        { user-select: none !important; }
             a.history.push({ at: todayISO(), what: `Status: ${a.status} → done` });
             a.status = 'done';
             _syncCompletedAtOnStatus(a, _prev);
+            _syncStartDateOnStatus(a, _prev);
             a.updatedAt = todayISO();
             commit('done');
             toast('Marked done');
@@ -10455,6 +10465,7 @@ body.is-row-dragging *        { user-select: none !important; }
       const newStatus = dropTarget.status;
       a.status = newStatus;
       _syncCompletedAtOnStatus(a, oldStatus);
+      _syncStartDateOnStatus(a, oldStatus);
       a.updatedAt = todayISO();
       if (oldStatus !== newStatus) {
         a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${newStatus}` });
@@ -10497,6 +10508,7 @@ body.is-row-dragging *        { user-select: none !important; }
       const wasNotDone = a.status !== 'done';
       a.status = st;
       _syncCompletedAtOnStatus(a, _prev);
+      _syncStartDateOnStatus(a, _prev);
       a.updatedAt = todayISO();
       stampEdit(a, null, `status → ${st}`);
       // Recurring → spawn next instance
@@ -10757,6 +10769,7 @@ body.is-row-dragging *        { user-select: none !important; }
       const oldStatus = a.status;
       a.status = newStatus;
       _syncCompletedAtOnStatus(a, oldStatus);
+      _syncStartDateOnStatus(a, oldStatus);
       a.updatedAt = todayISO();
       a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${newStatus}` });
       // recompute priority by visual order
@@ -13967,6 +13980,7 @@ body.is-row-dragging *        { user-select: none !important; }
           a.history.push({ at: today, what: `Status: ${a.status} → ${v}` });
           a.status = v; changed = true;
           _syncCompletedAtOnStatus(a, _prev);
+          _syncStartDateOnStatus(a, _prev);
         }
       } else if (field === 'due') {
         const v = raw || null;
@@ -14179,6 +14193,7 @@ body.is-row-dragging *        { user-select: none !important; }
         a.history.push({ at: todayISO(), what: `Status: ${a.status} → ${v}` });
         a.status = v;
         _syncCompletedAtOnStatus(a, _prev);
+        _syncStartDateOnStatus(a, _prev);
         if (v === 'done' && wasNotDone && a.recurrence) {
           const sourceProj = projectOfAction(a.id) || curProject();
           const nextA = spawnRecurrenceFromDone(a, sourceProj);
@@ -20842,10 +20857,13 @@ body.is-row-dragging *        { user-select: none !important; }
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <div class="field">
+          <label>Start date <span class="muted" id="dStartMode">${a.status === 'todo' ? 'set once Status leaves Not started' : (a.startDate ? 'override' : 'auto: today when moved past Not started')}</span></label>
+          <input id="dStartDate" type="date" value="${a.startDate || ''}" ${a.status === 'todo' ? 'disabled' : ''} title="When work on this action began. Auto-filled the day the status first leaves Not started — override here if the actual start was earlier or later." />
+        </div>
+        <div class="field">
           <label>Completed date <span class="muted" id="dCompletedMode">${a.status === 'done' ? (a.completedAt ? 'override' : 'auto: today when Done was set') : 'set Status = Done first'}</span></label>
           <input id="dCompletedAt" type="date" value="${a.completedAt || (a.status === 'done' ? actionCompletedAt(a) || '' : '')}" ${a.status === 'done' ? '' : 'disabled'} title="When the work actually landed. Auto-filled the day the status flips to Done — override here if the completion happened on a different date." />
         </div>
-        <div class="field"></div>
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <div class="field">
@@ -21310,18 +21328,31 @@ body.is-row-dragging *        { user-select: none !important; }
     }
     renderEffortUI();
 
-    // Toggle the Completed date field on live status changes so the user
-    // sees immediately whether they can override the date.
+    // Toggle the Completed and Start date fields on live status changes so
+    // the user sees immediately whether they can override each date.
     $('#dStatus')?.addEventListener('change', () => {
+      const nowStatus = $('#dStatus').value;
+      const nowDone = nowStatus === 'done';
+      const nowStarted = nowStatus !== 'todo';
       const dc = $('#dCompletedAt');
       const dm = $('#dCompletedMode');
-      if (!dc) return;
-      const nowDone = $('#dStatus').value === 'done';
-      dc.disabled = !nowDone;
-      if (dm) {
-        dm.textContent = nowDone
-          ? (dc.value ? 'override' : 'auto: today when Done was saved')
-          : 'set Status = Done first';
+      if (dc) {
+        dc.disabled = !nowDone;
+        if (dm) {
+          dm.textContent = nowDone
+            ? (dc.value ? 'override' : 'auto: today when Done was saved')
+            : 'set Status = Done first';
+        }
+      }
+      const ds = $('#dStartDate');
+      const sm = $('#dStartMode');
+      if (ds) {
+        ds.disabled = !nowStarted;
+        if (sm) {
+          sm.textContent = nowStarted
+            ? (ds.value ? 'override' : 'auto: today when moved past Not started')
+            : 'set once Status leaves Not started';
+        }
       }
     });
 
@@ -21331,6 +21362,7 @@ body.is-row-dragging *        { user-select: none !important; }
       const oldDue = a.due;
       const oldCmt = typeof a.commitment === 'number' ? a.commitment : 100;
       const oldCompletedAt = a.completedAt;
+      const oldStartDate = a.startDate;
       a.title = $('#dTitle').value.trim() || a.title;
       a.owner = $('#dOwner').value;
       a.status = $('#dStatus').value;
@@ -21342,6 +21374,14 @@ body.is-row-dragging *        { user-select: none !important; }
       if (a.status === 'done') {
         const explicit = $('#dCompletedAt')?.value || null;
         if (explicit) a.completedAt = explicit;
+      }
+      // Start date — editable once the action is past Not started. An
+      // explicit user value wins; otherwise the sync helper below fills
+      // it the first time status leaves todo. Clearing the field while
+      // enabled resets to null (which lets the auto-fill run again on
+      // the next status change).
+      if (a.status !== 'todo') {
+        a.startDate = $('#dStartDate')?.value || null;
       }
       a.deliverable = $('#dDel').value || null;
       a.milestone = $('#dMile').value || null;
@@ -21391,9 +21431,13 @@ body.is-row-dragging *        { user-select: none !important; }
       if (oldStatus !== a.status) {
         a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${a.status}` });
         _syncCompletedAtOnStatus(a, oldStatus);
+        _syncStartDateOnStatus(a, oldStatus);
       }
       if (oldCompletedAt !== a.completedAt) {
         a.history.push({ at: todayISO(), what: `Completed date: ${oldCompletedAt || '—'} → ${a.completedAt || '—'}` });
+      }
+      if (oldStartDate !== a.startDate) {
+        a.history.push({ at: todayISO(), what: `Start date: ${oldStartDate || '—'} → ${a.startDate || '—'}` });
       }
       if (oldOwner !== a.owner) a.history.push({ at: todayISO(), what: `Owner: ${personName(oldOwner)} → ${personName(a.owner)}` });
       if (oldDue !== a.due) a.history.push({ at: todayISO(), what: `Due: ${oldDue || '—'} → ${a.due || '—'}` });
