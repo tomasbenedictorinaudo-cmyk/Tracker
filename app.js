@@ -7297,13 +7297,24 @@
   //   • a short prose meaning of the KPI
   //   • the exact formula in monospace
   //   • a bulleted list of inputs with human-readable definitions
+  //   • a "minimum data required" list telling the user which fields
+  //     they must fill in per action / per person for the KPI to be
+  //     accurate. This is the guide the user asked for — the point
+  //     that turns "why is this blank / wrong?" into a to-do list.
   //   • an optional "why can't this be computed" callout
-  // CSS shows the panel on :hover — no JS required.
-  function _kpiTooltip({ title, meaning, formula, inputs = [], notComputable = null }) {
+  // Positioning is JS-driven — see the delegated hover handler in
+  // renderDashboard so parent panel overflow / stacking contexts
+  // never clip the tooltip.
+  function _kpiTooltip({ title, meaning, formula, inputs = [], minimumData = [], notComputable = null }) {
     const inputsHTML = inputs.length
       ? `<div class="kpi-tt-label">Inputs</div>
          <ul class="kpi-tt-inputs">${inputs.map((i) =>
            `<li><b>${escapeHTML(i.name)}</b> — ${escapeHTML(i.desc)}</li>`).join('')}</ul>`
+      : '';
+    const minimumDataHTML = minimumData.length
+      ? `<div class="kpi-tt-label">Minimum data to compute accurately</div>
+         <ul class="kpi-tt-minimum">${minimumData.map((i) =>
+           `<li><b>${escapeHTML(i.scope)}</b> ${escapeHTML(i.desc)}</li>`).join('')}</ul>`
       : '';
     const notComputableHTML = notComputable
       ? `<div class="kpi-tt-note">${escapeHTML(notComputable)}</div>` : '';
@@ -7313,6 +7324,7 @@
         <div class="kpi-tt-label">Formula</div>
         <code class="kpi-tt-formula">${escapeHTML(formula)}</code>
         ${inputsHTML}
+        ${minimumDataHTML}
         ${notComputableHTML}
       </div>`;
   }
@@ -7333,6 +7345,11 @@
       { name: 'slipped',        desc: 'Actions marked Done in the window whose completion date is AFTER their promised due, plus actions still open whose promised due has already passed (in the window).' },
       { name: 'promised due',   desc: 'The action\'s baseline due date if a project baseline was ever set; otherwise the current due date.' },
     ];
+    const adhMinimum = [
+      { scope: 'Per action', desc: 'a due date, so the action has a "promised" date at all.' },
+      { scope: 'Per action', desc: 'a status that actually flips to Done when the work lands — the KPI reads the "→ Done" transition in the history to date completion; if you never move cards off To do, everything looks slipped.' },
+      { scope: 'Per project', desc: 'take a baseline (Dashboard → 📌 Set project baseline) as early as possible. Without a baseline, "promised due" falls back to the current due, which slides as the work slides — the KPI then just tracks the moving target.' },
+    ];
     let adhTile;
     if (curr.adherenceN < MIN_SAMPLE) {
       const tt = _kpiTooltip({
@@ -7340,6 +7357,7 @@
         meaning: 'The share of actions that hit the date you promised. A trust signal for downstream stakeholders — how reliably the team delivers on its own commitments.',
         formula: 'on-time ÷ (on-time + slipped) × 100 %',
         inputs: adhInputs,
+        minimumData: adhMinimum,
         notComputable: `Cannot compute — needs at least ${MIN_SAMPLE} actions whose promised due has already passed within the last 30 days. Currently ${curr.adherenceN}. Take a project baseline and let a few actions age before this KPI stabilises.`,
       });
       adhTile = `
@@ -7361,6 +7379,7 @@
         meaning: `The share of actions that hit the date you promised. A trust signal for downstream stakeholders — how reliably the team delivers on its own commitments. Currently ${curr.onTime} delivered on time, ${curr.slipped} slipped or still open past due.`,
         formula: 'on-time ÷ (on-time + slipped) × 100 %',
         inputs: adhInputs,
+        minimumData: adhMinimum,
       });
       adhTile = `
         <div class="kpi" data-tile="adherence">
@@ -7378,6 +7397,11 @@
       { name: 'Σ planned hours', desc: 'Sum of planned hours across every action completed in the last 30 days. Planned hours = (commitment % ÷ 100) × 40h × weeks in the [start, due] window.' },
       { name: 'Σ logged hours',  desc: 'Sum of hours logged via the "Log time" action drawer control for those same completed actions.' },
     ];
+    const prodMinimum = [
+      { scope: 'Per action', desc: 'a start date AND a due date — that\'s how the KPI computes the planned window. Without both, planned hours = 0 and the action drops out of the numerator.' },
+      { scope: 'Per action', desc: 'a commitment % (defaults to 100%). Set it lower for anyone splitting time across multiple projects.' },
+      { scope: 'Per action', desc: 'at least one logged-hours entry (Action drawer → Log time). No log = no denominator contribution = KPI blind to that piece of work.' },
+    ];
     let prodTile;
     if (curr.doneInWindow < MIN_SAMPLE) {
       const tt = _kpiTooltip({
@@ -7385,6 +7409,7 @@
         meaning: 'How the team\'s actual pace compares to what was planned. > 1.00× means the work landed with fewer hours than planned; < 1.00× means it took longer than expected.',
         formula: 'Σ planned hours ÷ Σ logged hours   (over the last 30 days of completed actions)',
         inputs: prodInputs,
+        minimumData: prodMinimum,
         notComputable: `Cannot compute — needs at least ${MIN_SAMPLE} actions completed in the last 30 days with BOTH a planned-hours value (needs start + due + commitment %) and at least one logged-hours entry. Currently ${curr.doneInWindow}. Ask owners to log their time on completed work.`,
       });
       prodTile = `
@@ -7406,6 +7431,7 @@
         meaning: `How the team's actual pace compares to what was planned. > 1.00× means the work landed with fewer hours than planned; < 1.00× means it took longer than expected. Currently ${Math.round(curr.plannedHrs)}h planned vs ${Math.round(curr.loggedHrs)}h logged across ${curr.doneInWindow} actions.`,
         formula: 'Σ planned hours ÷ Σ logged hours   (over the last 30 days of completed actions)',
         inputs: prodInputs,
+        minimumData: prodMinimum,
       });
       prodTile = `
         <div class="kpi" data-tile="productivity">
@@ -7595,6 +7621,69 @@
       </div>`;
   }
 
+  // Global hover-tooltip positioner. Any element that contains a
+  // direct `.kpi-tt` child (KPI tile, EVM cell, info icon, chart
+  // panel-title) becomes an anchor. Fixed positioning + viewport
+  // clamping means panel overflow / stacking contexts can't clip it.
+  function _wireDashboardTooltips(root) {
+    let current = null;
+    const place = (anchor, tt) => {
+      const rect = anchor.getBoundingClientRect();
+      // Reset before measuring so the tooltip sizes to content, not to
+      // whatever the previous anchor made it.
+      tt.style.left = '-99999px';
+      tt.style.top = '0';
+      tt.classList.add('is-visible');
+      // Two-frame delay so the browser applies the reset first.
+      requestAnimationFrame(() => {
+        const ttRect = tt.getBoundingClientRect();
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+        let left = rect.left;
+        let top  = rect.bottom + 8;
+        // Right-edge overflow — shift left so the tooltip fits.
+        if (left + ttRect.width > vw - 12) {
+          left = Math.max(12, vw - ttRect.width - 12);
+        }
+        // Bottom-edge overflow — flip above the anchor.
+        if (top + ttRect.height > vh - 12) {
+          top = Math.max(12, rect.top - ttRect.height - 8);
+        }
+        tt.style.left = left + 'px';
+        tt.style.top  = top + 'px';
+      });
+    };
+    const hide = () => {
+      if (!current) return;
+      current.tt.classList.remove('is-visible');
+      current = null;
+    };
+    root.addEventListener('mouseover', (e) => {
+      // Walk up to find the nearest anchor that has a direct .kpi-tt.
+      let node = e.target;
+      let tt = null;
+      while (node && node !== root) {
+        tt = node.querySelector && node.querySelector(':scope > .kpi-tt');
+        if (tt) break;
+        node = node.parentElement;
+      }
+      if (!tt || (current && current.tt === tt)) return;
+      hide();
+      current = { anchor: node, tt };
+      place(node, tt);
+    });
+    root.addEventListener('mouseout', (e) => {
+      if (!current) return;
+      const to = e.relatedTarget;
+      // Stay open when the pointer is still inside the anchor.
+      if (to && current.anchor.contains(to)) return;
+      hide();
+    });
+    // Clean up on scroll / resize so the tooltip doesn't drift.
+    window.addEventListener('scroll', hide, { passive: true, capture: true });
+    window.addEventListener('resize', hide);
+  }
+
   function renderDashboard(root) {
     const proj = curProject();
     const k = kpis();
@@ -7627,6 +7716,9 @@
               { name: 'a.status', desc: 'One of Not started · In progress · Blocked · Done · Cancelled.' },
               { name: 'live',     desc: 'Non-deleted, non-snoozed. Archived actions are excluded.' },
             ],
+            minimumData: [
+              { scope: 'Per action', desc: 'a due date and a status (default status is "Not started"). Actions without a due date are ignored — the KPI can\'t know if they\'re late.' },
+            ],
           })}
         </div>
         <div class="kpi clickable" data-dash-filter="blocked">
@@ -7640,6 +7732,9 @@
             inputs: [
               { name: 'a.status', desc: 'The action\'s current status column on the Board.' },
               { name: 'live',     desc: 'Non-deleted, non-snoozed. Archived actions are excluded.' },
+            ],
+            minimumData: [
+              { scope: 'Per action', desc: 'a status — move the card to the Blocked column on the Board (or set status to Blocked in the Register / drawer) as soon as work stops.' },
             ],
           })}
         </div>
@@ -7656,6 +7751,9 @@
               { name: 'today',    desc: 'Today\'s calendar date.' },
               { name: 'a.status', desc: 'The action\'s current status column on the Board.' },
             ],
+            minimumData: [
+              { scope: 'Per action', desc: 'a due date. Actions without one aren\'t "upcoming" as far as this KPI can tell.' },
+            ],
           })}
         </div>
         <div class="kpi clickable" data-dash-filter="done">
@@ -7671,6 +7769,9 @@
               { name: 'total', desc: 'Count of live actions (non-deleted, non-snoozed, includes every status except archived).' },
               { name: 'throughput (2w)', desc: 'Sub-metric shown below: number of actions marked Done in the last 14 days. Higher = more work landing per week.' },
             ],
+            minimumData: [
+              { scope: 'Per action', desc: 'a status, kept up to date. Actions dragged to Done on the Board or ticked off in the drawer count as done. Actions with the default "Not started" status count as pending — leaving old work in that column will lower the number.' },
+            ],
             notComputable: k.total === 0
               ? 'Cannot compute — the project has no live actions yet. Add some via the Board or the Register.'
               : null,
@@ -7683,7 +7784,23 @@
           <div class="crit-list" id="critList"></div>
         </div>
         <div class="panel half">
-          <div class="panel-title">Workload by person</div>
+          <div class="panel-title">Workload by person
+            <span class="tt-info" aria-label="Info">i
+              ${_kpiTooltip({
+                title: 'Workload by person',
+                meaning: 'Each row is one person; the bar shows how many OPEN actions they own vs their configured capacity. Bars turn amber above 80 % of capacity and red above 100 %. This is a coarse capacity check, not a resource planner — anyone consistently in the red is a hand-off waiting to happen.',
+                formula: 'load%(p) = open_actions(p) ÷ capacity(p) × 100',
+                inputs: [
+                  { name: 'open_actions(p)', desc: 'Count of the person\'s actions whose status is NOT Done or Cancelled.' },
+                  { name: 'capacity(p)',     desc: 'The person\'s "Capacity %" field on the People page. Interpreted as the number of actions they can carry at once — set it to whatever fits your team\'s cadence (e.g. 5 for a typical week).' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'an assigned owner and a status. Unassigned actions don\'t contribute to anyone\'s load — a common blind spot.' },
+                  { scope: 'Per person', desc: 'a capacity value (defaults to 5). Zero-capacity people always look red; unset defaults are usually enough to spot outliers.' },
+                ],
+              })}
+            </span>
+          </div>
           <div id="workload"></div>
         </div>
 
@@ -7693,7 +7810,26 @@
         </div>
 
         <div class="panel evm-panel">
-          <div class="panel-title">Earned-value rollup <span class="legend">action-level · uses baselines + logged hours · independent of cost-centre budgets</span></div>
+          <div class="panel-title">Earned-value rollup
+            <span class="tt-info" aria-label="Info">i
+              ${_kpiTooltip({
+                title: 'Earned-value rollup',
+                meaning: 'A one-panel view of the eight core EVM numbers rolled up across every live action. Read left-to-right: BAC / PV / EV / AC are money numbers, CPI and SPI are the health indices (>1 = good), EAC / ETC are the forecasts.',
+                formula: 'See each cell for its formula. Everything flows from planned_hours × hourly_rate and logged_hours × hourly_rate.',
+                inputs: [
+                  { name: 'action.startDate / due / commitment',       desc: 'Define the planning window and effort level.' },
+                  { name: 'action.percentComplete or status',           desc: 'Drives EV — how much of BAC has been earned.' },
+                  { name: 'action.loggedHours entries',                 desc: 'Drive AC — money actually spent.' },
+                  { name: 'person.hourlyRate',                          desc: 'Converts hours to money.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'a start date, a due date, an owner, a commitment %, plus at least one logged-hours entry when the work starts. If the action carries no baseline, its BAC still counts — but slippage won\'t show unless you take a baseline (Dashboard → 📌 Set project baseline).' },
+                  { scope: 'Per person', desc: 'an hourly rate (People page). Without it, every cost roll-up understates.' },
+                ],
+              })}
+            </span>
+            <span class="legend">action-level · uses baselines + logged hours · independent of cost-centre budgets</span>
+          </div>
           <div id="evmRollup"></div>
         </div>
 
@@ -7709,32 +7845,133 @@
       </div>
       <div class="charts-grid">
         <div class="panel chart-panel half copyable-chart" data-chart="adherence-trend">
-          <div class="panel-title">Schedule adherence trend <span class="legend">last 12 weeks • bars = closed actions per week • line = % on-time</span></div>
+          <div class="panel-title">Schedule adherence trend
+            <span class="tt-info" aria-label="Info">i
+              ${_kpiTooltip({
+                title: 'Schedule adherence — 12-week trend',
+                meaning: 'Weekly bars split into ON-TIME (green) and SLIPPED (red) counts; the blue line is the same-week adherence %. Trend up = the team is getting more reliable; sudden drops flag a bad week to dig into.',
+                formula: 'per week w: adherence% = on-time(w) ÷ (on-time(w) + slipped(w)) × 100',
+                inputs: [
+                  { name: 'on-time(w)', desc: 'Actions completed in week w whose completed date ≤ promised due.' },
+                  { name: 'slipped(w)', desc: 'Actions completed in week w whose completed date > promised due, plus open actions past their promised due within the week.' },
+                  { name: 'promised due', desc: 'Baseline due if set, else current due.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'a due date and a status that flips to Done when the work lands. Actions with no due date are ignored.' },
+                  { scope: 'Per project', desc: 'take a baseline early. Without it, the line will always look flat because the "promise" slides with the work.' },
+                ],
+              })}
+            </span>
+            <span class="legend">last 12 weeks • bars = closed actions per week • line = % on-time</span>
+          </div>
           ${chartAdherenceTrend(12)}
         </div>
         <div class="panel chart-panel half copyable-chart" data-chart="productivity-trend">
-          <div class="panel-title">Productivity trend <span class="legend">last 12 weeks • bars = hours per week • line = planned ÷ logged</span></div>
+          <div class="panel-title">Productivity trend
+            <span class="tt-info" aria-label="Info">i
+              ${_kpiTooltip({
+                title: 'Productivity — 12-week trend',
+                meaning: 'Per-week bars show the sum of planned vs logged hours across actions completed that week; the green line is the weekly productivity ratio. Line above 1.0× = beating the plan; below 1.0× = burning more effort than budgeted.',
+                formula: 'per week w: productivity(w) = Σ planned_hours(a) ÷ Σ logged_hours(a)   over actions completed in week w',
+                inputs: [
+                  { name: 'planned_hours(a)', desc: '(commitment_%/100) × 40h × weeks in [start, due].' },
+                  { name: 'logged_hours(a)',  desc: 'Sum of "Log time" entries on the action.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'a start date, a due date, a commitment %, plus at least one logged-hours entry when the work is complete.' },
+                  { scope: 'Per person', desc: 'nothing extra — the ratio is unit-less.' },
+                ],
+              })}
+            </span>
+            <span class="legend">last 12 weeks • bars = hours per week • line = planned ÷ logged</span>
+          </div>
           ${chartProductivityTrend(12)}
         </div>
         <div class="panel chart-panel copyable-chart" data-chart="waterfall">
-          <div class="panel-title">Schedule deviation waterfall <span class="legend">x = when forecast was made • y = forecast due • diagonal = delivered now</span></div>
+          <div class="panel-title">Schedule deviation waterfall
+            <span class="tt-info" aria-label="Info">i
+              ${_kpiTooltip({
+                title: 'Schedule deviation waterfall',
+                meaning: 'Every open action is one line. X = when the forecast was made, Y = what date the forecast said. A horizontal line = the forecast held. A rising line = the due date got pushed. The 45° diagonal is "you are here now" — any line that ends on it landed on time; anything above the diagonal is currently late.',
+                formula: 'For each action a and each history entry h of type "Schedule: X → Y": plot the point (h.at, Y).',
+                inputs: [
+                  { name: 'action.history', desc: 'Every drag-to-reschedule or manual due-date edit records a "Schedule: <old> → <new>" entry with a timestamp.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'a due date — and reschedule it in-app (drag on the Gantt, edit in the drawer) rather than deleting/recreating. Every move is logged automatically.' },
+                ],
+              })}
+            </span>
+            <span class="legend">x = when forecast was made • y = forecast due • diagonal = delivered now</span>
+          </div>
           ${chartWaterfall()}
         </div>
         <div class="panel chart-panel half copyable-chart" data-chart="cumulative-workload">
-          <div class="panel-title">Cumulative workload (next 12 weeks) <span class="legend">click a name to hide / show</span></div>
+          <div class="panel-title">Cumulative workload (next 12 weeks)
+            <span class="tt-info" aria-label="Info">i
+              ${_kpiTooltip({
+                title: 'Cumulative workload — next 12 weeks',
+                meaning: 'Stacked area of each person\'s forecast open workload week-by-week, ending at the visible cap line (sum of capacities). Peaks above the cap = the team is over-committed in that week — reallocate or delay.',
+                formula: 'per week w, per person p: load(w, p) = count( a where owner(a)=p AND a.due within week w AND a.status ∉ {Done, Cancelled} )',
+                inputs: [
+                  { name: 'action.owner', desc: 'Assigned person.' },
+                  { name: 'action.due',   desc: 'Determines the week each action lands in.' },
+                  { name: 'person.capacity', desc: 'Sums into the cap line.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'an assigned owner AND a due date. Unassigned or undated actions vanish from this forecast.' },
+                  { scope: 'Per person', desc: 'a capacity value (defaults to 5).' },
+                ],
+              })}
+            </span>
+            <span class="legend">click a name to hide / show</span>
+          </div>
           <div id="cumWlSlot">${chartCumulativeWorkload(12)}</div>
         </div>
         <div class="panel chart-panel half copyable-chart" data-chart="flow">
-          <div class="panel-title">Activity / week (last 12 weeks)</div>
+          <div class="panel-title">Activity / week (last 12 weeks)
+            <span class="tt-info" aria-label="Info">i
+              ${_kpiTooltip({
+                title: 'Activity / week — last 12 weeks',
+                meaning: 'Per-week creation vs completion. Line = actions created that week. Bars = actions done (green) or slipped (red). Net = done − created in the trailing period; positive = the backlog is shrinking.',
+                formula: 'per week w: created(w) = count(a where a.createdAt in w); done(w) = count(a where done-transition in a.history is in w); slipped(w) = count of schedule-forward events in w.',
+                inputs: [
+                  { name: 'action.createdAt',       desc: 'Timestamp of action creation.' },
+                  { name: 'action.history',         desc: 'Contains the "Status: → Done" transitions and "Schedule: X → Y" moves.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'Create actions in-app rather than importing bulk. The chart reads timestamps that the app writes automatically. Manually-imported actions with no history entries won\'t register as done/slipped events.' },
+                ],
+              })}
+            </span>
+          </div>
           ${chartFlow(12)}
         </div>
         <div class="panel chart-panel copyable-chart" data-chart="per-person-workload">
-          <div class="panel-title">Per-person workload (next 12 weeks)</div>
+          <div class="panel-title">Per-person workload (next 12 weeks)
+            <span class="tt-info" aria-label="Info">i
+              ${_kpiTooltip({
+                title: 'Per-person workload — next 12 weeks',
+                meaning: 'One mini-chart per person: forecast open workload week-by-week, with a dashed cap line at their capacity. Peak bars label the week they\'re most stretched. Reading tall spikes across multiple people at once = a critical week.',
+                formula: 'per week w, per person p: bar height = count(open actions with due in w); cap = person.capacity.',
+                inputs: [
+                  { name: 'action.owner', desc: 'Assigned person.' },
+                  { name: 'action.due',   desc: 'Which week the bar lands in.' },
+                  { name: 'person.capacity', desc: 'The dashed cap line.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'an owner AND a due date.' },
+                  { scope: 'Per person', desc: 'a capacity value; leave at 5 if you have no better estimate.' },
+                ],
+              })}
+            </span>
+          </div>
           ${chartPerPerson()}
         </div>
       </div>`;
     root.appendChild(view);
     wireCumWlLegend();
+    _wireDashboardTooltips(view);
 
     // Stale-action rows in the decision-KPI panel → open the drawer for that action
     $$('.dkpi-list-row[data-action-id]', view).forEach((el) => {
@@ -7993,14 +8230,137 @@
       } else {
         evmEl.innerHTML = `
           <div class="evm-grid">
-            <div class="evm-cell"><span class="evm-lbl" title="Budget at Completion = total planned cost across baselined actions">BAC</span><b>${fmt$(evm.bac)}</b></div>
-            <div class="evm-cell"><span class="evm-lbl" title="Planned Value = budgeted value of work that should be done by today">PV</span><b>${fmt$(evm.pv)}</b></div>
-            <div class="evm-cell"><span class="evm-lbl" title="Earned Value = budgeted value of work actually completed">EV</span><b>${fmt$(evm.ev)}</b></div>
-            <div class="evm-cell"><span class="evm-lbl" title="Actual Cost = sum of logged hours × hourly rate">AC</span><b>${fmt$(evm.ac)}</b></div>
-            <div class="evm-cell evm-cell-index"><span class="evm-lbl" title="Cost Performance Index = EV ÷ AC. > 1 means you're getting more value per € spent than budgeted.">CPI</span><b class="${cpiCls}">${evm.cpi == null ? '—' : evm.cpi.toFixed(2)}</b><span class="evm-sub">${evm.cpi == null ? 'no actuals' : evm.cpi >= 1 ? 'under budget' : 'over budget'}</span></div>
-            <div class="evm-cell evm-cell-index"><span class="evm-lbl" title="Schedule Performance Index = EV ÷ PV. > 1 means ahead of schedule.">SPI</span><b class="${spiCls}">${evm.spi == null ? '—' : evm.spi.toFixed(2)}</b><span class="evm-sub">${evm.spi == null ? 'no progress' : evm.spi >= 1 ? 'on schedule' : 'behind'}</span></div>
-            <div class="evm-cell"><span class="evm-lbl" title="Estimate at Completion = BAC ÷ CPI">EAC</span><b>${evm.eac == null ? '—' : fmt$(evm.eac)}</b></div>
-            <div class="evm-cell"><span class="evm-lbl" title="Estimate to Complete = EAC − AC">ETC</span><b>${evm.etc == null ? '—' : fmt$(evm.etc)}</b></div>
+            <div class="evm-cell">
+              <span class="evm-lbl">BAC</span><b>${fmt$(evm.bac)}</b>
+              ${_kpiTooltip({
+                title: 'BAC — Budget at Completion',
+                meaning: 'The total planned cost of every non-cancelled action rolled up. The finish-line number: if everything ships as scheduled at planned effort, this is what it costs.',
+                formula: 'BAC = Σ ( planned_hours(a) × hourly_rate(a.owner) )   over live, non-cancelled actions',
+                inputs: [
+                  { name: 'planned_hours(a)', desc: '(commitment_% / 100) × 40h × weeks in [a.startDate, a.due].' },
+                  { name: 'hourly_rate(a.owner)', desc: 'From People → Hourly rate. Defaults to 0 when unset — actions without a rated owner contribute nothing.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'a start date, a due date, a commitment %, and an owner.' },
+                  { scope: 'Per person', desc: 'an hourly rate (People page). Rate 0 = that owner\'s work costs 0.' },
+                ],
+                notComputable: evm.bac === 0 ? 'BAC is 0 — no live action has both a scheduled window and a rated owner. Fill in start / due / owner / hourly rate to populate.' : null,
+              })}
+            </div>
+            <div class="evm-cell">
+              <span class="evm-lbl">PV</span><b>${fmt$(evm.pv)}</b>
+              ${_kpiTooltip({
+                title: 'PV — Planned Value',
+                meaning: 'How much of the BAC we planned to have earned by today. The pace we said we\'d walk.',
+                formula: 'PV = Σ ( planned_hours_to_date(a) × hourly_rate(a.owner) )',
+                inputs: [
+                  { name: 'planned_hours_to_date(a)', desc: 'BAC hours for the action, prorated by the fraction of its [start, due] window that has elapsed today. Clamped to 0 before start and BAC after due.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'the same as BAC — start, due, commitment %, owner.' },
+                  { scope: 'Per person', desc: 'an hourly rate.' },
+                ],
+              })}
+            </div>
+            <div class="evm-cell">
+              <span class="evm-lbl">EV</span><b>${fmt$(evm.ev)}</b>
+              ${_kpiTooltip({
+                title: 'EV — Earned Value',
+                meaning: 'How much of the BAC has actually been produced so far. The pace we\'re actually walking.',
+                formula: 'EV = Σ ( planned_hours(a) × % complete(a) × hourly_rate(a.owner) )',
+                inputs: [
+                  { name: '% complete(a)', desc: 'Comes from the action drawer\'s manual field. Falls back to auto (from status: Done=100 %, Cancelled=0 %, otherwise inferred from elapsed time in [start, due]).' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'start / due / commitment %/ owner AND an up-to-date % complete. Leaving % complete at auto-mode is fine as long as the action\'s status flips to Done when the work lands.' },
+                  { scope: 'Per person', desc: 'an hourly rate.' },
+                ],
+              })}
+            </div>
+            <div class="evm-cell">
+              <span class="evm-lbl">AC</span><b>${fmt$(evm.ac)}</b>
+              ${_kpiTooltip({
+                title: 'AC — Actual Cost',
+                meaning: 'What has actually been spent so far. Logged hours × the owner\'s rate.',
+                formula: 'AC = Σ ( logged_hours(a) × hourly_rate(a.owner) )',
+                inputs: [
+                  { name: 'logged_hours(a)', desc: 'Sum of every "Log time" entry on the action.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'at least one logged-hours entry (Action drawer → Log time). Without any logs the action contributes 0 to AC — CPI will look artificially high.' },
+                  { scope: 'Per person', desc: 'an hourly rate.' },
+                ],
+                notComputable: evm.ac === 0 ? 'AC is 0 — no action has any logged hours yet. Encourage owners to record time (Action drawer → Log time) so cost signals stay honest.' : null,
+              })}
+            </div>
+            <div class="evm-cell evm-cell-index">
+              <span class="evm-lbl">CPI</span><b class="${cpiCls}">${evm.cpi == null ? '—' : evm.cpi.toFixed(2)}</b><span class="evm-sub">${evm.cpi == null ? 'no actuals' : evm.cpi >= 1 ? 'under budget' : 'over budget'}</span>
+              ${_kpiTooltip({
+                title: 'CPI — Cost Performance Index',
+                meaning: 'How much value earned per unit of cost spent. > 1 = under budget; < 1 = over budget; = 1 = exactly on plan. Multiply your CPI by 100 to read it as "cents on the dollar earned".',
+                formula: 'CPI = EV ÷ AC',
+                inputs: [
+                  { name: 'EV', desc: 'Earned Value — see the EV cell.' },
+                  { name: 'AC', desc: 'Actual Cost — see the AC cell.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'the union of what EV and AC need: start / due / commitment % / owner / % complete / logged hours.' },
+                  { scope: 'Per person', desc: 'an hourly rate — cancels out of the ratio in principle, but a mix of rated and unrated owners silently distorts CPI.' },
+                ],
+                notComputable: evm.cpi == null ? 'Cannot compute — AC is 0 (division by zero). At least one action needs a logged-hours entry.' : null,
+              })}
+            </div>
+            <div class="evm-cell evm-cell-index">
+              <span class="evm-lbl">SPI</span><b class="${spiCls}">${evm.spi == null ? '—' : evm.spi.toFixed(2)}</b><span class="evm-sub">${evm.spi == null ? 'no progress' : evm.spi >= 1 ? 'on schedule' : 'behind'}</span>
+              ${_kpiTooltip({
+                title: 'SPI — Schedule Performance Index',
+                meaning: 'How on-schedule the work is by earned value. > 1 = ahead of schedule; < 1 = behind; = 1 = exactly on plan.',
+                formula: 'SPI = EV ÷ PV',
+                inputs: [
+                  { name: 'EV', desc: 'Earned Value — see the EV cell.' },
+                  { name: 'PV', desc: 'Planned Value — see the PV cell.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'start / due / commitment % / owner / an up-to-date % complete (or an accurate status).' },
+                  { scope: 'Per person', desc: 'an hourly rate.' },
+                ],
+                notComputable: evm.spi == null ? 'Cannot compute — PV is 0. No live action has both a scheduled window (start + due) and a rated owner.' : null,
+              })}
+            </div>
+            <div class="evm-cell">
+              <span class="evm-lbl">EAC</span><b>${evm.eac == null ? '—' : fmt$(evm.eac)}</b>
+              ${_kpiTooltip({
+                title: 'EAC — Estimate at Completion',
+                meaning: 'What the whole project will cost if the current cost-efficiency (CPI) holds to the end.',
+                formula: 'EAC = BAC ÷ CPI',
+                inputs: [
+                  { name: 'BAC', desc: 'Budget at Completion — see the BAC cell.' },
+                  { name: 'CPI', desc: 'Cost Performance Index — see the CPI cell.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'whatever BAC + CPI need — start, due, commitment %, owner, % complete, logged hours.' },
+                  { scope: 'Per person', desc: 'an hourly rate.' },
+                ],
+                notComputable: evm.eac == null ? 'Cannot compute — CPI is undefined (AC = 0).' : null,
+              })}
+            </div>
+            <div class="evm-cell">
+              <span class="evm-lbl">ETC</span><b>${evm.etc == null ? '—' : fmt$(evm.etc)}</b>
+              ${_kpiTooltip({
+                title: 'ETC — Estimate to Complete',
+                meaning: 'How much more it will cost from here to the end, at the current cost-efficiency.',
+                formula: 'ETC = EAC − AC',
+                inputs: [
+                  { name: 'EAC', desc: 'Estimate at Completion — see the EAC cell.' },
+                  { name: 'AC',  desc: 'Actual Cost — see the AC cell.' },
+                ],
+                minimumData: [
+                  { scope: 'Per action', desc: 'the union of what EAC and AC need.' },
+                  { scope: 'Per person', desc: 'an hourly rate.' },
+                ],
+                notComputable: evm.etc == null ? 'Cannot compute — EAC is undefined (CPI = undefined).' : null,
+              })}
+            </div>
           </div>
           <div class="evm-deltas">
             <span class="evm-delta ${cv >= 0 ? 'ok' : 'bad'}" title="Cost Variance: EV − AC. Positive = under budget.">CV ${cv >= 0 ? '+' : ''}${fmt$(cv)}</span>
