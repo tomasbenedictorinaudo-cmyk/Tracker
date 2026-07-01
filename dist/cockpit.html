@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-01T20:25:24.547Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-01T20:35:42.751Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -9784,8 +9784,24 @@ body.is-row-dragging *        { user-select: none !important; }
   const _doneHistRe = /Status:.*→\s*done/;
   function actionCompletedAt(a) {
     if (!a || a.status !== 'done') return null;
+    // Explicit override wins. Then the history-derived date. Then
+    // updatedAt as a last-resort fallback (imported data with no
+    // history log). Every automatic path still populates a.completedAt
+    // on the status-into-done transition, so most reads take the first
+    // branch — but the fallbacks keep old data reading correctly.
+    if (typeof a.completedAt === 'string' && a.completedAt) return a.completedAt;
     const entry = (a.history || []).filter((h) => _doneHistRe.test(h.what)).pop();
     return entry?.at || a.updatedAt || null;
+  }
+  // Auto-fill / preserve the completedAt field around a status change.
+  // Called from every status write site. Deliberately does NOT clear
+  // the field when leaving Done — the reader gates on status anyway,
+  // so a user who toggles Done off and back on keeps their overridden
+  // completion date.
+  function _syncCompletedAtOnStatus(a, oldStatus) {
+    if (a.status === 'done' && oldStatus !== 'done' && !a.completedAt) {
+      a.completedAt = todayISO();
+    }
   }
   function actionPromisedDue(a) {
     return a?.baseline?.due || a?.due || null;
@@ -10410,8 +10426,10 @@ body.is-row-dragging *        { user-select: none !important; }
         if (dropTarget.action === 'done') {
           if (a.status !== 'done') {
             // Not done yet → mark done (stays on the board)
+            const _prev = a.status;
             a.history.push({ at: todayISO(), what: `Status: ${a.status} → done` });
             a.status = 'done';
+            _syncCompletedAtOnStatus(a, _prev);
             a.updatedAt = todayISO();
             commit('done');
             toast('Marked done');
@@ -10436,6 +10454,7 @@ body.is-row-dragging *        { user-select: none !important; }
       const oldStatus = a.status;
       const newStatus = dropTarget.status;
       a.status = newStatus;
+      _syncCompletedAtOnStatus(a, oldStatus);
       a.updatedAt = todayISO();
       if (oldStatus !== newStatus) {
         a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${newStatus}` });
@@ -10473,9 +10492,11 @@ body.is-row-dragging *        { user-select: none !important; }
   function actionContextItems(a) {
     const setStatus = (st) => () => {
       if (a.status === st) return;
+      const _prev = a.status;
       a.history.push({ at: todayISO(), what: `Status: ${a.status} → ${st}` });
       const wasNotDone = a.status !== 'done';
       a.status = st;
+      _syncCompletedAtOnStatus(a, _prev);
       a.updatedAt = todayISO();
       stampEdit(a, null, `status → ${st}`);
       // Recurring → spawn next instance
@@ -10735,6 +10756,7 @@ body.is-row-dragging *        { user-select: none !important; }
       if (!a) return;
       const oldStatus = a.status;
       a.status = newStatus;
+      _syncCompletedAtOnStatus(a, oldStatus);
       a.updatedAt = todayISO();
       a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${newStatus}` });
       // recompute priority by visual order
@@ -13941,8 +13963,10 @@ body.is-row-dragging *        { user-select: none !important; }
       } else if (field === 'status') {
         const v = String(raw);
         if (v && v !== a.status) {
+          const _prev = a.status;
           a.history.push({ at: today, what: `Status: ${a.status} → ${v}` });
           a.status = v; changed = true;
+          _syncCompletedAtOnStatus(a, _prev);
         }
       } else if (field === 'due') {
         const v = raw || null;
@@ -14150,9 +14174,11 @@ body.is-row-dragging *        { user-select: none !important; }
       applyBulk(`status → ${v}`, (a) => {
         if (a.status === v) return;
         const wasNotDone = a.status !== 'done';
+        const _prev = a.status;
         a.history = a.history || [];
         a.history.push({ at: todayISO(), what: `Status: ${a.status} → ${v}` });
         a.status = v;
+        _syncCompletedAtOnStatus(a, _prev);
         if (v === 'done' && wasNotDone && a.recurrence) {
           const sourceProj = projectOfAction(a.id) || curProject();
           const nextA = spawnRecurrenceFromDone(a, sourceProj);
@@ -20816,6 +20842,13 @@ body.is-row-dragging *        { user-select: none !important; }
       </div>
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <div class="field">
+          <label>Completed date <span class="muted" id="dCompletedMode">${a.status === 'done' ? (a.completedAt ? 'override' : 'auto: today when Done was set') : 'set Status = Done first'}</span></label>
+          <input id="dCompletedAt" type="date" value="${a.completedAt || (a.status === 'done' ? actionCompletedAt(a) || '' : '')}" ${a.status === 'done' ? '' : 'disabled'} title="When the work actually landed. Auto-filled the day the status flips to Done — override here if the completion happened on a different date." />
+        </div>
+        <div class="field"></div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div class="field">
           <label>Commitment <span class="muted" id="dCmtVal">${typeof a.commitment === 'number' ? a.commitment : 100}%</span></label>
           <input id="dCmt" type="range" min="5" max="100" step="5" value="${typeof a.commitment === 'number' ? a.commitment : 100}" />
         </div>
@@ -21277,15 +21310,39 @@ body.is-row-dragging *        { user-select: none !important; }
     }
     renderEffortUI();
 
+    // Toggle the Completed date field on live status changes so the user
+    // sees immediately whether they can override the date.
+    $('#dStatus')?.addEventListener('change', () => {
+      const dc = $('#dCompletedAt');
+      const dm = $('#dCompletedMode');
+      if (!dc) return;
+      const nowDone = $('#dStatus').value === 'done';
+      dc.disabled = !nowDone;
+      if (dm) {
+        dm.textContent = nowDone
+          ? (dc.value ? 'override' : 'auto: today when Done was saved')
+          : 'set Status = Done first';
+      }
+    });
+
     $('#dSave').addEventListener('click', () => {
       const oldStatus = a.status;
       const oldOwner = a.owner;
       const oldDue = a.due;
       const oldCmt = typeof a.commitment === 'number' ? a.commitment : 100;
+      const oldCompletedAt = a.completedAt;
       a.title = $('#dTitle').value.trim() || a.title;
       a.owner = $('#dOwner').value;
       a.status = $('#dStatus').value;
       a.due = $('#dDue').value || null;
+      // Completed date — only meaningful when status is Done. Save the
+      // user's explicit value if they typed one; otherwise let the
+      // auto-fill logic below populate. When leaving Done, keep the
+      // stored value (the reader gates on status anyway).
+      if (a.status === 'done') {
+        const explicit = $('#dCompletedAt')?.value || null;
+        if (explicit) a.completedAt = explicit;
+      }
       a.deliverable = $('#dDel').value || null;
       a.milestone = $('#dMile').value || null;
       a.component = $('#dComponent').value || null;
@@ -21331,7 +21388,13 @@ body.is-row-dragging *        { user-select: none !important; }
       if (tagsChanged) a.history.push({ at: todayISO(), what: `Tags: ${oldTags.length} → ${a.tags.length}` });
       a.notes = $('#dNotes').value;
       a.updatedAt = todayISO();
-      if (oldStatus !== a.status) a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${a.status}` });
+      if (oldStatus !== a.status) {
+        a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${a.status}` });
+        _syncCompletedAtOnStatus(a, oldStatus);
+      }
+      if (oldCompletedAt !== a.completedAt) {
+        a.history.push({ at: todayISO(), what: `Completed date: ${oldCompletedAt || '—'} → ${a.completedAt || '—'}` });
+      }
       if (oldOwner !== a.owner) a.history.push({ at: todayISO(), what: `Owner: ${personName(oldOwner)} → ${personName(a.owner)}` });
       if (oldDue !== a.due) a.history.push({ at: todayISO(), what: `Due: ${oldDue || '—'} → ${a.due || '—'}` });
       // Audit stamp — short, human summary of what changed in this save.
@@ -23274,6 +23337,12 @@ body.is-row-dragging *        { user-select: none !important; }
         // Manual % complete override. null = use the time-based / actuals
         // auto-calc in percentComplete(). A number 0..100 wins over both.
         if (typeof a.percentComplete !== 'number' && a.percentComplete !== null) a.percentComplete = null;
+        // Completed date — the day the work actually landed. Nullable
+        // even when status = Done (reader falls back to the history
+        // "Status: → done" entry or updatedAt). User-overridable in
+        // the drawer; auto-filled to today whenever status transitions
+        // from anything else INTO 'done' and the field is still null.
+        if (typeof a.completedAt !== 'string' || !a.completedAt) a.completedAt = null;
         a.owner = a.owner || null;
         a.originator = a.originator || null;
         a.due = a.due || null;
