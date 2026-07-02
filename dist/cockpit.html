@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-02T17:33:15.874Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-02T17:47:54.148Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3135,6 +3135,38 @@ body.is-card-dragging * { cursor: grabbing !important; }
 /* Schedule-adherence chart */
 .adh-bar-on { fill: var(--ok);  opacity: .65; }
 .adh-bar-sl { fill: var(--bad); opacity: .65; }
+.adh-bar-on.is-clickable,
+.adh-bar-sl.is-clickable { cursor: pointer; transition: opacity .12s ease; }
+.adh-bar-on.is-clickable:hover,
+.adh-bar-sl.is-clickable:hover { opacity: 1; }
+
+/* Dashboard → Register drill chip */
+.drill-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 6px;
+  padding: 4px 6px 4px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--text);
+}
+.drill-chip-lbl {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-right: 2px;
+}
+.drill-chip-clear {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.drill-chip-clear:hover { color: var(--text); background: var(--bg-3); }
 .adh-line {
   fill: none;
   stroke: var(--accent-2);
@@ -4714,7 +4746,28 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
   border-radius: var(--radius);
   padding: 14px 16px;
   margin-bottom: 14px;
+  transition: opacity .12s ease, border-color .12s ease, box-shadow .12s ease;
 }
+.budget-card.is-dragging {
+  opacity: .55;
+}
+.budget-card.is-drop-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 91, 140, 255), .15);
+}
+.cc-drag-handle {
+  cursor: grab;
+  color: var(--text-faint);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: color .12s ease, background .12s ease;
+}
+.cc-drag-handle:hover { color: var(--text); background: var(--bg-3); }
+.cc-drag-handle:active { cursor: grabbing; }
 .budget-head {
   display: flex; align-items: center; gap: 12px;
   margin-bottom: 10px;
@@ -6506,6 +6559,20 @@ body.is-folder-dragging .folder-grip { cursor: grabbing !important; }
   margin-top: 6px;
   font-size: 11px;
   color: var(--text-dim);
+}
+.chart-legend-wf {
+  gap: 6px 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-2);
+  max-height: 80px;
+  overflow-y: auto;
+}
+.chart-legend-wf .legend-item {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .small-multiples {
@@ -9819,8 +9886,33 @@ body.is-row-dragging *        { user-select: none !important; }
     return next;
   }
 
+  // Session-only drill filter set by clicking a dashboard chart (e.g. an
+  // adherence-trend bar). Not persisted — the chip stays until the user
+  // dismisses it. actionMatchesFilters honours it on top of the topbar
+  // filters, and the register head renders a dismiss chip.
+  let _dashDrill = null;
+  function _drillMatches(a) {
+    if (!_dashDrill) return true;
+    if (_dashDrill.kind === 'adherence-week') {
+      const { startISO, endISO, side } = _dashDrill;
+      const completedAt = actionCompletedAt(a);
+      const promised = actionPromisedDue(a);
+      const closedHere = completedAt && completedAt >= startISO && completedAt <= endISO;
+      if (side === 'on-time') return closedHere && promised && completedAt <= promised;
+      if (side === 'slipped') {
+        const closedLate = closedHere && promised && completedAt > promised;
+        const openLapsed = a.status !== 'done' && promised && promised < todayISO() && promised >= startISO && promised <= endISO;
+        return closedLate || openLapsed;
+      }
+    }
+    return true;
+  }
   function actionMatchesFilters(a) {
-    if (a.archivedAt) return false; // archived items are hidden by default
+    if (!_drillMatches(a)) return false;
+    // The dashboard drill deliberately exposes archived actions — the
+    // whole point is to see what the KPI actually counted. Skip the
+    // archived-hide gate when a drill is active.
+    if (!_dashDrill && a.archivedAt) return false; // archived items are hidden by default
     if (isSnoozed(a)) return false; // snoozed actions hidden until their date
     const fOwner = $('#filterOwner').value;
     const fComp = $('#filterComponent').value;
@@ -13625,6 +13717,12 @@ body.is-row-dragging *        { user-select: none !important; }
         <div>
           <div class="page-title">${escapeHTML(proj.name)} — Register</div>
           <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters. Click the row checkbox or shift-click rows to select multiple, then use the bulk toolbar.</div>
+          ${_dashDrill ? `
+            <div class="drill-chip" role="status">
+              <span class="drill-chip-lbl">Drilled from Dashboard:</span>
+              <b>${escapeHTML(_dashDrill.label)}</b>
+              <button type="button" class="drill-chip-clear" id="btnClearDrill" title="Clear the drill scope">×</button>
+            </div>` : ''}
         </div>
         <div class="page-actions">
           <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${(proj.actions || []).filter((a) => a.archivedAt).length ? ` <span class="badge-count">${(proj.actions || []).filter((a) => a.archivedAt).length}</span>` : ''}</button>
@@ -14193,6 +14291,7 @@ body.is-row-dragging *        { user-select: none !important; }
       state.currentView = 'archive';
       saveState(); render();
     });
+    $('#btnClearDrill')?.addEventListener('click', () => { _dashDrill = null; render(); });
 
     // Bulk select / bulk-actions wiring. The selection is module-scoped
     // so it survives a re-render of the same view (sort change, status
@@ -15565,12 +15664,15 @@ body.is-row-dragging *        { user-select: none !important; }
       const yOn = yForC(b.onTime);
       const ySl = yForC(b.slipped);
       const baseLine = padT + innerH;
+      const wkLabel = b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       return `
-        <rect class="adh-bar-on" x="${xBase}" y="${yOn}" width="${barW}" height="${Math.max(0, baseLine - yOn)}" rx="2">
-          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.onTime} on time</title>
+        <rect class="adh-bar-on ${b.onTime > 0 ? 'is-clickable' : ''}" x="${xBase}" y="${yOn}" width="${barW}" height="${Math.max(0, baseLine - yOn)}" rx="2"
+              data-adh-side="on-time" data-adh-start="${b.startISO}" data-adh-end="${b.endISO}" data-adh-label="${escapeHTML(wkLabel)}">
+          <title>Week of ${wkLabel} — ${b.onTime} on time${b.onTime > 0 ? ' · click to open in Register' : ''}</title>
         </rect>
-        <rect class="adh-bar-sl" x="${xBase + barW}" y="${ySl}" width="${barW}" height="${Math.max(0, baseLine - ySl)}" rx="2">
-          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.slipped} slipped</title>
+        <rect class="adh-bar-sl ${b.slipped > 0 ? 'is-clickable' : ''}" x="${xBase + barW}" y="${ySl}" width="${barW}" height="${Math.max(0, baseLine - ySl)}" rx="2"
+              data-adh-side="slipped" data-adh-start="${b.startISO}" data-adh-end="${b.endISO}" data-adh-label="${escapeHTML(wkLabel)}">
+          <title>Week of ${wkLabel} — ${b.slipped} slipped${b.slipped > 0 ? ' · click to open in Register' : ''}</title>
         </rect>`;
     }).join('');
 
@@ -16146,6 +16248,43 @@ body.is-row-dragging *        { user-select: none !important; }
     root.appendChild(view);
     wireCumWlLegend();
     _wireDashboardTooltips(view);
+    // Waterfall legend → toggle a line's visibility (matches the
+    // cumulative-workload chart's pattern).
+    view.querySelector('[data-chart="waterfall"]')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.legend-item[data-wf-id]');
+      if (!btn) return;
+      const id = btn.dataset.wfId;
+      if (_wfHidden.has(id)) _wfHidden.delete(id); else _wfHidden.add(id);
+      const panel = view.querySelector('[data-chart="waterfall"]');
+      const title = panel.querySelector('.panel-title');
+      // Re-render just the waterfall body so the rest of the dashboard
+      // stays scrolled where the user left it.
+      const rest = panel.innerHTML;
+      const newBody = chartWaterfall();
+      // Replace everything after the title.
+      panel.innerHTML = '';
+      panel.appendChild(title);
+      const holder = document.createElement('div');
+      holder.innerHTML = newBody;
+      while (holder.firstChild) panel.appendChild(holder.firstChild);
+    });
+    // Adherence-trend bars → drill into Register scoped to that week and
+    // side (on-time / slipped). Only bars with a non-zero count carry
+    // .is-clickable, so we gate on that.
+    view.querySelector('[data-chart="adherence-trend"]')?.addEventListener('click', (e) => {
+      const rect = e.target.closest('rect.is-clickable[data-adh-side]');
+      if (!rect) return;
+      _dashDrill = {
+        kind: 'adherence-week',
+        side: rect.dataset.adhSide,
+        startISO: rect.dataset.adhStart,
+        endISO: rect.dataset.adhEnd,
+        label: `${rect.dataset.adhSide === 'on-time' ? 'On time' : 'Slipped'} · week of ${rect.dataset.adhLabel}`,
+      };
+      state.currentView = 'register';
+      saveState();
+      render();
+    });
 
     // Stale-action rows in the decision-KPI panel → open the drawer for that action
     $$('.dkpi-list-row[data-action-id]', view).forEach((el) => {
@@ -16626,6 +16765,9 @@ body.is-row-dragging *        { user-select: none !important; }
   // Persistent set of people hidden from the cumulative workload chart.
   // Toggled by clicking the legend.
   const cumWlHidden = new Set();
+  // Waterfall chart — session-scoped set of hidden action ids. Cleared
+  // only when the user reloads or explicitly re-toggles a chip.
+  const _wfHidden = new Set();
 
   // ----- Chart 1: Cumulative workload across all people, weekly -----
   function chartCumulativeWorkload(weeks = 12) {
@@ -16876,12 +17018,17 @@ body.is-row-dragging *        { user-select: none !important; }
     if (!top.length) {
       return `<div class="empty">No scheduled actions yet — add some, then dragging them on the Gantt will populate this chart over time.</div>`;
     }
+    // Session-scoped hidden set: matches the cumulative-workload pattern.
+    // Filters lines out of the domain computation and the render pass so
+    // hiding a distant line rescales the chart to what's left.
+    const visible = top.filter(({ a }) => !_wfHidden.has(a.id));
+    const domainSource = visible.length ? visible : top;
 
     // Domain: x = snapshot dates from earliest 'at' to today
     // y = forecast due dates from earliest to latest forecast
     let xMin = parseDate(todayISO()), xMax = parseDate(todayISO());
     let yMin = parseDate(todayISO()), yMax = parseDate(todayISO());
-    top.forEach(({ hist }) => {
+    domainSource.forEach(({ hist }) => {
       hist.forEach(({ at, due }) => {
         const ad = parseDate(at), dd = parseDate(due);
         if (ad < xMin) xMin = ad;
@@ -16908,8 +17055,8 @@ body.is-row-dragging *        { user-select: none !important; }
     const todayX = xFor(parseDate(todayISO()));
     const todayLine = `<line class="chart-today" x1="${todayX}" y1="${padT}" x2="${todayX}" y2="${padT + innerH}" stroke-dasharray="2 3" />`;
 
-    // Lines per action
-    const lines = top.map(({ proj, a, hist }) => {
+    // Lines per action — only visible ones are drawn.
+    const lines = visible.map(({ proj, a, hist }) => {
       const c = colorFor(a.id);
       const path = hist.map(({ at, due }, i) =>
         `${i === 0 ? 'M' : 'L'} ${xFor(parseDate(at)).toFixed(1)} ${yFor(parseDate(due)).toFixed(1)}`).join(' ');
@@ -16957,6 +17104,17 @@ body.is-row-dragging *        { user-select: none !important; }
         <text class="chart-axis-label" x="${padL + innerW/2}" y="${H - 2}" text-anchor="middle">snapshot date →</text>
         <text class="chart-axis-label" x="${padL - 50}" y="${padT + innerH/2}" text-anchor="middle" transform="rotate(-90 ${padL - 50} ${padT + innerH/2})">forecast due →</text>
       </svg>
+      <div class="chart-legend chart-legend-wf" data-legend="waterfall" title="Click a name to hide / show that action's line">
+        ${top.map(({ proj, a }) => {
+          const c = colorFor(a.id);
+          const hidden = _wfHidden.has(a.id);
+          const projSuffix = state.projects.length > 1 ? ` · ${escapeHTML(proj.name)}` : '';
+          return `
+            <button type="button" class="legend-item ${hidden ? 'is-hidden' : ''}" data-wf-id="${escapeHTML(a.id)}" title="${hidden ? 'Show' : 'Hide'} — ${escapeHTML(a.title)}${projSuffix}">
+              <span class="dot" style="background:rgba(${c.rgb},.95)"></span>${escapeHTML(a.title)}
+            </button>`;
+        }).join('')}
+      </div>
       <div class="chart-foot">A line going up steeper than 45° = slipping faster than time. Horizontal = stable forecast. Crossing the diagonal = delivered.</div>`;
   }
 
@@ -19580,7 +19738,15 @@ body.is-row-dragging *        { user-select: none !important; }
       // before any component is mapped) so they're visible in the Budgets page.
       (p.costCenters || []).forEach((cc) => { if (cc) set.add(cc); });
     });
-    return [...set].sort();
+    // Order: user-defined via drag on the Budgets page, then any newly-seen
+    // CCs alphabetically at the end. Cleared entries (deleted CCs) are
+    // filtered out.
+    const persisted = Array.isArray(state.settings?.costCentreOrder) ? state.settings.costCentreOrder : [];
+    const known = new Set(set);
+    const ordered = persisted.filter((cc) => known.has(cc));
+    const seen = new Set(ordered);
+    [...set].sort().forEach((cc) => { if (!seen.has(cc)) ordered.push(cc); });
+    return ordered;
   }
 
   function componentsForCC(cc) {
@@ -19740,6 +19906,63 @@ body.is-row-dragging *        { user-select: none !important; }
     else _budgetHidden[cc].add(id);
   };
 
+  // Wire HTML5 drag-and-drop on the budgets list. The ⋮⋮ handle carries
+  // draggable=true; on dragstart we stash the card's cc code; on dragover
+  // of another card we position an .is-drop-target class so the user
+  // sees where the drop will land; on drop we splice into the persisted
+  // order and re-render.
+  function _wireCostCentreDrag(list) {
+    if (!list) return;
+    let dragCc = null;
+    list.querySelectorAll('.cc-drag-handle').forEach((h) => {
+      h.addEventListener('dragstart', (e) => {
+        const card = h.closest('.budget-card');
+        if (!card) return;
+        dragCc = card.dataset.cc;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', dragCc);
+        card.classList.add('is-dragging');
+        // Use the whole card as the drag ghost.
+        try { e.dataTransfer.setDragImage(card, 20, 20); } catch (_) {}
+      });
+      h.addEventListener('dragend', () => {
+        list.querySelectorAll('.budget-card.is-dragging').forEach((el) => el.classList.remove('is-dragging'));
+        list.querySelectorAll('.budget-card.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+        dragCc = null;
+      });
+    });
+    list.addEventListener('dragover', (e) => {
+      if (!dragCc) return;
+      const overCard = e.target.closest('.budget-card');
+      if (!overCard || overCard.dataset.cc === dragCc) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      list.querySelectorAll('.budget-card.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
+      overCard.classList.add('is-drop-target');
+    });
+    list.addEventListener('drop', (e) => {
+      if (!dragCc) return;
+      const overCard = e.target.closest('.budget-card');
+      if (!overCard || overCard.dataset.cc === dragCc) return;
+      e.preventDefault();
+      const targetCc = overCard.dataset.cc;
+      // Rebuild the order: drop dragged before target (or after if we
+      // dragged upward from below — determined by pre-existing position).
+      const currentOrder = getCostCentres();
+      const from = currentOrder.indexOf(dragCc);
+      const to   = currentOrder.indexOf(targetCc);
+      if (from === -1 || to === -1) return;
+      currentOrder.splice(from, 1);
+      currentOrder.splice(to, 0, dragCc);
+      state.settings = state.settings || {};
+      state.settings.costCentreOrder = currentOrder;
+      saveState();
+      // Re-render whole panel — cheapest way to redraw every chart in
+      // the new order.
+      render();
+    });
+  }
+
   function renderBudgets(root) {
     state.budgets = state.budgets || {};
     state.settings = state.settings || {};
@@ -19869,6 +20092,7 @@ body.is-row-dragging *        { user-select: none !important; }
         return `
           <div class="budget-card copyable-chart" data-cc="${escapeHTML(cc)}" data-chart="budget-${safe}">
             <div class="budget-head">
+              <span class="cc-drag-handle" draggable="true" title="Drag to reorder cost centres" aria-label="Drag handle">⋮⋮</span>
               <h3>${escapeHTML(cc)}</h3>
               <span class="budget-range" title="Time range for this cost centre — snaps to weeks">
                 <input type="date" class="bc-start" data-cc="${escapeHTML(cc)}" value="${range.start}" />
@@ -19882,6 +20106,10 @@ body.is-row-dragging *        { user-select: none !important; }
             <div class="budget-chart-wrap"><svg class="budget-chart" id="chart-${safe}"></svg></div>
           </div>`;
       }).join('');
+      // Native HTML5 drag on the ⋮⋮ handle. The whole card follows because
+      // dragstart on the handle bubbles up — we set the effect + dataTransfer
+      // once, then handle dragover / drop at the list level to reorder.
+      _wireCostCentreDrag(list);
       visible.forEach((cc) => {
         const weeks = weekStartsForRange(getBudgetRange(cc));
         drawChart(cc, weeks);
@@ -23375,6 +23603,9 @@ body.is-row-dragging *        { user-select: none !important; }
     if (typeof s.settings.walkthroughsSeen !== 'object' || !s.settings.walkthroughsSeen) {
       s.settings.walkthroughsSeen = {};
     }
+    // Manual ordering for the Budgets page cost-centre cards. Newly-seen
+    // CCs get appended alphabetically by getCostCentres.
+    if (!Array.isArray(s.settings.costCentreOrder)) s.settings.costCentreOrder = [];
     if (s.settings.tourSeen && !s.settings.walkthroughsSeen['getting-started']) {
       s.settings.walkthroughsSeen['getting-started'] = 'completed';
     }

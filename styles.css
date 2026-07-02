@@ -3126,6 +3126,38 @@ body.is-card-dragging * { cursor: grabbing !important; }
 /* Schedule-adherence chart */
 .adh-bar-on { fill: var(--ok);  opacity: .65; }
 .adh-bar-sl { fill: var(--bad); opacity: .65; }
+.adh-bar-on.is-clickable,
+.adh-bar-sl.is-clickable { cursor: pointer; transition: opacity .12s ease; }
+.adh-bar-on.is-clickable:hover,
+.adh-bar-sl.is-clickable:hover { opacity: 1; }
+
+/* Dashboard → Register drill chip */
+.drill-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-top: 6px;
+  padding: 4px 6px 4px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--text);
+}
+.drill-chip-lbl {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-right: 2px;
+}
+.drill-chip-clear {
+  background: transparent;
+  border: 0;
+  color: var(--text-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.drill-chip-clear:hover { color: var(--text); background: var(--bg-3); }
 .adh-line {
   fill: none;
   stroke: var(--accent-2);
@@ -4705,7 +4737,28 @@ body.is-step-dragging .op-step-grip { cursor: grabbing !important; }
   border-radius: var(--radius);
   padding: 14px 16px;
   margin-bottom: 14px;
+  transition: opacity .12s ease, border-color .12s ease, box-shadow .12s ease;
 }
+.budget-card.is-dragging {
+  opacity: .55;
+}
+.budget-card.is-drop-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb, 91, 140, 255), .15);
+}
+.cc-drag-handle {
+  cursor: grab;
+  color: var(--text-faint);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 14px;
+  line-height: 1;
+  user-select: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  transition: color .12s ease, background .12s ease;
+}
+.cc-drag-handle:hover { color: var(--text); background: var(--bg-3); }
+.cc-drag-handle:active { cursor: grabbing; }
 .budget-head {
   display: flex; align-items: center; gap: 12px;
   margin-bottom: 10px;
@@ -6497,6 +6550,20 @@ body.is-folder-dragging .folder-grip { cursor: grabbing !important; }
   margin-top: 6px;
   font-size: 11px;
   color: var(--text-dim);
+}
+.chart-legend-wf {
+  gap: 6px 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-2);
+  max-height: 80px;
+  overflow-y: auto;
+}
+.chart-legend-wf .legend-item {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .small-multiples {
