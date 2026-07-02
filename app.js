@@ -1655,7 +1655,8 @@
     const list = Array.isArray(actionOrList) ? actionOrList : [actionOrList];
     let pv = 0, ev = 0, ac = 0, bac = 0;
     for (const a of list) {
-      if (!a || a.deletedAt) continue;
+      if (!a) continue;
+      // Archived actions still contributed budget and effort — count them.
       const rate = ownerRate(a);
       const phTotal  = plannedHoursTotal(a);
       const phToDate = plannedHoursToDate(a);
@@ -1755,7 +1756,7 @@
       __history: [],
       __lastEditor: null,
       __lastEditAt: null,
-      deletedAt: null,
+      archivedAt: null,
       snoozedUntil: null,
       // Keep the recurrence on the new instance so the chain continues
       recurrence: { ...r },
@@ -1766,7 +1767,7 @@
   }
 
   function actionMatchesFilters(a) {
-    if (a.deletedAt) return false; // archived items are hidden by default
+    if (a.archivedAt) return false; // archived items are hidden by default
     if (isSnoozed(a)) return false; // snoozed actions hidden until their date
     const fOwner = $('#filterOwner').value;
     const fComp = $('#filterComponent').value;
@@ -1861,7 +1862,8 @@
     let plannedHrs = 0, loggedHrs = 0, doneInWindow = 0;
     _projectsForDeliveryScope().forEach((p) => {
       (p.actions || []).forEach((a) => {
-        if (a.deletedAt) return;
+        // Archived done items were real completions — include them in
+        // schedule adherence and productivity numbers.
         const completedAt = actionCompletedAt(a);
         const promised = actionPromisedDue(a);
         const closedHere = completedAt && (!sinceISO || completedAt >= sinceISO) && completedAt <= cap;
@@ -1910,7 +1912,11 @@
 
   function kpis() {
     const proj = curProject();
-    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    // Archived actions are hidden from list views (via actionMatchesFilters)
+    // but every KPI counts them — archiving is a visibility change, not a
+    // data one. If you truly no longer owe an action, cancel it; archiving
+    // is meant for tidying the board.
+    const acts = (proj.actions || []);
     const today = todayISO();
     const total = acts.length;
     const done = acts.filter((a) => a.status === 'done').length;
@@ -2135,8 +2141,8 @@
 
     const head = document.createElement('div');
     head.className = 'page-head';
-    const liveActions = (proj.actions || []).filter((a) => !a.deletedAt);
-    const archivedCount = (proj.actions || []).filter((a) => a.deletedAt).length;
+    const liveActions = (proj.actions || []).filter((a) => !a.archivedAt);
+    const archivedCount = (proj.actions || []).filter((a) => a.archivedAt).length;
     head.innerHTML = `
       <div>
         <div class="page-title">${escapeHTML(proj.name)}</div>
@@ -2166,7 +2172,7 @@
       const rows = [];
       STATUSES.forEach((s) => {
         (proj.actions || [])
-          .filter((a) => a.status === s.id && actionMatchesFilters(a) && !a.deletedAt)
+          .filter((a) => a.status === s.id && actionMatchesFilters(a) && !a.archivedAt)
           .forEach((a) => rows.push([
             s.name, a.id, a.title,
             findComponent(proj, a.component)?.name || '',
@@ -2237,7 +2243,7 @@
         if (!confirm(`Archive ${toArchive.length} done action${toArchive.length === 1 ? '' : 's'}${scope}? They can be restored from the Archive view.`)) return;
         const today = todayISO();
         toArchive.forEach((a) => {
-          a.deletedAt = today;
+          a.archivedAt = today;
           a.history.push({ at: today, what: 'Archived (bulk-clear from Done)' });
           a.updatedAt = today;
         });
@@ -2472,14 +2478,14 @@
             toast('Marked done');
           } else {
             // Already done → archive it (leaves the board, recoverable from Archive)
-            a.deletedAt = todayISO();
+            a.archivedAt = todayISO();
             a.history.push({ at: todayISO(), what: 'Archived from Done' });
             a.updatedAt = todayISO();
             commit('archive-done');
             toast('Archived — restore from Archive view');
           }
         } else {
-          a.deletedAt = todayISO();
+          a.archivedAt = todayISO();
           a.history.push({ at: todayISO(), what: 'Moved to Archive' });
           a.updatedAt = todayISO();
           commit('archive');
@@ -2587,7 +2593,7 @@
       { divider: true },
       { icon: '×', label: 'Move to Archive', danger: true, onClick: () => {
         if (!confirm(`Move "${a.title}" to Archive?`)) return;
-        a.deletedAt = todayISO();
+        a.archivedAt = todayISO();
         a.history.push({ at: todayISO(), what: 'Moved to Archive' });
         a.updatedAt = todayISO();
         commit('delete');
@@ -3029,10 +3035,10 @@
     view.className = 'view';
     // Always cross-project — show every soft-deleted action
     const items = state.projects.flatMap((p) => (p.actions || [])
-      .filter((a) => a.deletedAt)
+      .filter((a) => a.archivedAt)
       .filter((a) => matchesSearch(a.title, personName(a.owner), a.notes, p.name))
       .map((a) => ({ a, proj: p })));
-    items.sort((x, y) => (y.a.deletedAt || '').localeCompare(x.a.deletedAt || ''));
+    items.sort((x, y) => (y.a.archivedAt || '').localeCompare(x.a.archivedAt || ''));
     view.innerHTML = `
       <div class="page-head">
         <div>
@@ -3058,7 +3064,7 @@
                 <div class="reg-cell muted">${escapeHTML(pr.name)}</div>
                 <div class="reg-cell"><span class="avatar">${initials(personName(a.owner))}</span> ${escapeHTML(personName(a.owner))}</div>
                 <div class="reg-cell muted">${escapeHTML(a.status)}</div>
-                <div class="reg-cell muted">${fmtDate(a.deletedAt)}</div>
+                <div class="reg-cell muted">${fmtDate(a.archivedAt)}</div>
                 <div class="reg-cell">
                   <button class="ghost archive-restore" title="Restore">↺ Restore</button>
                 </div>
@@ -3078,7 +3084,7 @@
         const proj = state.projects.find((p) => p.id === pid);
         const a = (proj?.actions || []).find((x) => x.id === id);
         if (!a) return;
-        a.deletedAt = null;
+        a.archivedAt = null;
         a.history.push({ at: todayISO(), what: 'Restored from Archive' });
         a.updatedAt = todayISO();
         commit('restore');
@@ -3464,7 +3470,7 @@
     // cloud's purpose is triage — closed items shouldn't take up
     // canvas real estate.
     const allActions = scopeProjects.flatMap((p) => (p.actions || [])
-      .filter((a) => !a.deletedAt && a.status !== 'done' && a.status !== 'cancelled' && actionMatchesFilters(a))
+      .filter((a) => !a.archivedAt && a.status !== 'done' && a.status !== 'cancelled' && actionMatchesFilters(a))
       .filter((a) => !_cloudState.riskLinkedOnly || ctx.riskLinks.has(a.id))
       .filter((a) => !_cloudState.priorityFilter || (a.priorityLevel || 'med') === _cloudState.priorityFilter)
       .map((a) => ({ a, proj: p })));
@@ -3746,9 +3752,9 @@
     const owners = state.people.filter((p) => ownersWithActions.has(p.id));
     owners.sort((a, b) => {
       const la = (a._load = scopeProjects.reduce((s, p) =>
-        s + (p.actions || []).filter((x) => x.owner === a.id && !x.deletedAt && x.status !== 'done' && x.status !== 'cancelled').length, 0));
+        s + (p.actions || []).filter((x) => x.owner === a.id && !x.archivedAt && x.status !== 'done' && x.status !== 'cancelled').length, 0));
       const lb = (b._load = scopeProjects.reduce((s, p) =>
-        s + (p.actions || []).filter((x) => x.owner === b.id && !x.deletedAt && x.status !== 'done' && x.status !== 'cancelled').length, 0));
+        s + (p.actions || []).filter((x) => x.owner === b.id && !x.archivedAt && x.status !== 'done' && x.status !== 'cancelled').length, 0));
       return lb - la;
     });
     const ownerIdx = new Map(owners.map((p, i) => [p.id, i]));
@@ -5568,7 +5574,7 @@
           <div class="page-sub">Editable table — change any cell to update. KPIs above reflect the current filters. Click the row checkbox or shift-click rows to select multiple, then use the bulk toolbar.</div>
         </div>
         <div class="page-actions">
-          <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${(proj.actions || []).filter((a) => a.deletedAt).length ? ` <span class="badge-count">${(proj.actions || []).filter((a) => a.deletedAt).length}</span>` : ''}</button>
+          <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${(proj.actions || []).filter((a) => a.archivedAt).length ? ` <span class="badge-count">${(proj.actions || []).filter((a) => a.archivedAt).length}</span>` : ''}</button>
           <button class="ghost" id="btnArchiveDone" title="Move all currently visible done actions to Archive">⌫ Archive done</button>
           <button class="ghost" id="btnAddAction">+ Action</button>
         </div>
@@ -6109,7 +6115,7 @@
       const sourceProj = projectOfAction(id) || proj;
       const target = (sourceProj.actions || []).find((x) => x.id === id);
       if (target) {
-        target.deletedAt = todayISO();
+        target.archivedAt = todayISO();
         target.history.push({ at: todayISO(), what: 'Moved to Archive' });
         target.updatedAt = todayISO();
       }
@@ -6257,7 +6263,7 @@
       if (!confirm(`Move ${items.length} selected action${items.length === 1 ? '' : 's'} to Archive?`)) return;
       const today = todayISO();
       items.forEach((a) => {
-        a.deletedAt = today;
+        a.archivedAt = today;
         a.history = a.history || [];
         a.history.push({ at: today, what: 'Moved to Archive (bulk)' });
         a.updatedAt = today;
@@ -6280,12 +6286,12 @@
     // → they disappear from the register, remain visible in the Archive panel.
     $('#btnArchiveDone').addEventListener('click', () => {
       const proj2 = curProject();
-      const candidates = (proj2.actions || []).filter((a) => !a.deletedAt && a.status === 'done' && actionMatchesFilters(a));
+      const candidates = (proj2.actions || []).filter((a) => !a.archivedAt && a.status === 'done' && actionMatchesFilters(a));
       if (!candidates.length) { toast('No done actions match the current filters'); return; }
       if (!confirm(`Archive ${candidates.length} done action${candidates.length === 1 ? '' : 's'}? They will move to the Archive panel and disappear from the register.`)) return;
       const today = todayISO();
       candidates.forEach((a) => {
-        a.deletedAt = today;
+        a.archivedAt = today;
         a.history = a.history || [];
         a.history.push({ at: today, what: 'Moved to Archive (bulk-archive done from Register)' });
         a.updatedAt = today;
@@ -6348,7 +6354,7 @@
     registerChartCapture('gantt', { expandSelectors: ['.tl-grid-wrap', '.timeline'] });
     registerChartData('gantt', () => ({
       headers: ['ID', 'Title', 'Component', 'Owner', 'Status', 'Start', 'Due', 'Baseline due', '% Complete', 'Logged hours', 'Planned hours'],
-      rows: acts.filter((a) => !a.deletedAt).map((a) => [
+      rows: acts.filter((a) => !a.archivedAt).map((a) => [
         a.id, a.title,
         findComponent(proj, a.component)?.name || '',
         personName(a.owner),
@@ -6867,7 +6873,7 @@
   // critical actions. Returns a Set of action ids on the longest chain to
   // each open milestone (plus the actions directly linked to it).
   function computeCriticalActions(proj) {
-    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    const acts = (proj.actions || []).filter((a) => !a.archivedAt);
     const byId = new Map(acts.map((a) => [a.id, a]));
     const critical = new Set();
     const depths = new Map();
@@ -7181,7 +7187,7 @@
 
     // 3. Stale actions — open and not updated in ≥ 14 days
     const STALE_DAYS = 14;
-    const open = (proj.actions || []).filter((a) => !a.deletedAt && !isClosedStatus(a.status));
+    const open = (proj.actions || []).filter((a) => !a.archivedAt && !isClosedStatus(a.status));
     const stale = open.filter((a) => {
       if (!a.updatedAt) return true;
       return dayDiff(todayISO_, a.updatedAt) >= STALE_DAYS;
@@ -7829,7 +7835,7 @@
               { name: 'a.due',    desc: 'Current due date on each action.' },
               { name: 'today',    desc: 'Today\'s calendar date.' },
               { name: 'a.status', desc: 'One of Not started · In progress · Blocked · Done · Cancelled.' },
-              { name: 'live',     desc: 'Non-deleted, non-snoozed. Archived actions are excluded.' },
+              { name: 'live',     desc: 'Non-snoozed. Archived actions are counted — archiving is a UI hide, not a data drop.' },
             ],
             minimumData: [
               { scope: 'Per action', desc: 'a due date and a status (default status is "Not started"). Actions without a due date are ignored — the KPI can\'t know if they\'re late.' },
@@ -7846,7 +7852,7 @@
             formula: 'count( actions where a.status == "Blocked" AND a is live )',
             inputs: [
               { name: 'a.status', desc: 'The action\'s current status column on the Board.' },
-              { name: 'live',     desc: 'Non-deleted, non-snoozed. Archived actions are excluded.' },
+              { name: 'live',     desc: 'Non-snoozed. Archived actions are counted — archiving is a UI hide, not a data drop.' },
             ],
             minimumData: [
               { scope: 'Per action', desc: 'a status — move the card to the Blocked column on the Board (or set status to Blocked in the Register / drawer) as soon as work stops.' },
@@ -8097,7 +8103,7 @@
     // Uses the action-level helpers so it Just Works without cost-centre setup.
     $('#btnProjBaseline')?.addEventListener('click', () => {
       const targetProjects = curProjectIsMerged() ? state.projects : [proj];
-      const live = targetProjects.flatMap((p) => (p.actions || []).filter((a) => !a.deletedAt && !isClosedStatus(a.status)));
+      const live = targetProjects.flatMap((p) => (p.actions || []).filter((a) => !a.archivedAt && !isClosedStatus(a.status)));
       const already = live.filter((a) => a.baseline).length;
       const fresh   = live.length - already;
       const summary = already
@@ -8311,11 +8317,12 @@
     // ── Earned-value rollup ────────────────────────────────────────────
     const evmEl = $('#evmRollup');
     if (evmEl) {
-      // Scope = live (non-archived, non-cancelled) actions in either the
-      // current project or all projects when the user is in merged mode.
+      // EVM rollup — archived actions still contributed real budget and
+      // effort, so they belong here. Only cancelled actions are excluded
+      // because their value never earned.
       const scope = curProjectIsMerged() ? state.projects : [proj];
       const liveActs = scope.flatMap((p) => (p.actions || [])
-        .filter((a) => !a.deletedAt && a.status !== 'cancelled'));
+        .filter((a) => a.status !== 'cancelled'));
       const evm = evmForActions(liveActs);
       const baselined = liveActs.filter((a) => a.baseline).length;
       const withActuals = liveActs.filter((a) => totalLoggedHours(a) > 0).length;
@@ -8683,7 +8690,7 @@
 
     state.projects.forEach((proj) => {
       (proj.actions || []).forEach((a) => {
-        if (a.deletedAt) return;
+        // Flow chart is a historical view — archived actions still count.
         // created
         if (a.createdAt) {
           const idx = Math.floor((parseDate(a.createdAt) - start) / dayMs / 7);
@@ -8807,7 +8814,7 @@
 
     // Pick top N actions by current due date (focus on most relevant).
     const acts = state.projects.flatMap((p) => (p.actions || []).map((a) => ({ proj: p, a })));
-    const candidates = acts.filter(({ a }) => a.due && !a.deletedAt).map(({ proj, a }) => ({
+    const candidates = acts.filter(({ a }) => a.due && !a.archivedAt).map(({ proj, a }) => ({
       proj, a, hist: scheduleHistory(a),
     })).filter(({ hist }) => hist.length >= 1);
     // Prefer those with movement
@@ -10332,7 +10339,7 @@
       let opts = [];
       if (tt === 'risk')   opts = (proj.risks || []).map((r) => ({ id: r.id, label: (r.identifier ? r.identifier + ' — ' : '') + r.title }));
       if (tt === 'cr')     opts = (proj.changes || []).map((c) => ({ id: c.id, label: c.title }));
-      if (tt === 'action') opts = (proj.actions || []).filter((a) => !a.deletedAt).map((a) => ({ id: a.id, label: a.title }));
+      if (tt === 'action') opts = (proj.actions || []).filter((a) => !a.archivedAt).map((a) => ({ id: a.id, label: a.title }));
       const cur = (d.triggerRef && typeof d.triggerRef === 'object') ? d.triggerRef.id : '';
       sel.innerHTML = '<option value="">—</option>' + opts.map((o) =>
         `<option value="${escapeHTML(o.id)}" ${o.id === cur ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('');
@@ -11535,7 +11542,7 @@
     const ids = new Set(componentsForCC(cc).map(({ component }) => component.id));
     const out = [];
     projectsInScope().forEach((p) => (p.actions || []).forEach((a) => {
-      if (a.deletedAt) return;
+      // Cost-centre rollups include archived — they were real spend.
       if (ids.has(a.component)) out.push(a);
     }));
     return out;
@@ -11877,7 +11884,8 @@
           });
           let linkedActions = 0;
           state.projects.forEach((p) => (p.actions || []).forEach((a) => {
-            if (a.deletedAt) return;
+            // Archived actions still count — the warning should reflect
+            // everything real, hidden or not.
             if (compIds.has(a.component)) linkedActions++;
           }));
           const weekRows = Object.values(state.budgets?.[cc] || {}).filter((v) => Number(v) > 0).length;
@@ -12565,7 +12573,8 @@
       let commitmentSum = 0;
       state.projects.forEach((proj) => {
         (proj.actions || []).forEach((a) => {
-          if (a.deletedAt) return;
+          // Archived-but-open work still consumes capacity — archiving
+          // hides it from lists, not from a person's real load.
           // Closed actions (done OR cancelled) don't consume capacity
           if (a.owner !== personId || isClosedStatus(a.status)) return;
           if (!a.due) return;
@@ -12742,7 +12751,7 @@
     $('#drawerTitle').textContent = 'Person dashboard';
     const today = todayISO();
     const allActs = state.projects.flatMap((pr) =>
-      (pr.actions || []).filter((a) => !a.deletedAt && a.owner === p.id).map((a) => ({ a, pr })));
+      (pr.actions || []).filter((a) => !a.archivedAt && a.owner === p.id).map((a) => ({ a, pr })));
     const open  = allActs.filter(({ a }) => !isClosedStatus(a.status));
     const late  = open.filter(({ a }) => a.due && dayDiff(a.due, today) < 0);
     const blocked = open.filter(({ a }) => a.status === 'blocked');
@@ -13021,7 +13030,7 @@
     }
     function renderDepsUI() {
       const wrap = $('#dDependsWrap');
-      const acts = (proj.actions || []).filter((x) => !x.deletedAt);
+      const acts = (proj.actions || []).filter((x) => !x.archivedAt);
       const byId = new Map(acts.map((x) => [x.id, x]));
       const blocked = reverseDepGraph(acts); // includes a.id itself
       wrap.innerHTML = `
@@ -13495,7 +13504,7 @@
       const sourceProj = projectOfAction(a.id) || proj;
       const target = (sourceProj.actions || []).find((x) => x.id === a.id);
       if (target) {
-        target.deletedAt = todayISO();
+        target.archivedAt = todayISO();
         target.history.push({ at: todayISO(), what: 'Moved to Archive' });
         target.updatedAt = todayISO();
       }
@@ -14872,7 +14881,7 @@
       }
     } else {
       items = state.projects
-        .flatMap((proj) => (proj.actions || []).filter((a) => !a.deletedAt).map((a) => ({ ...a, _proj: proj })))
+        .flatMap((proj) => (proj.actions || []).filter((a) => !a.archivedAt).map((a) => ({ ...a, _proj: proj })))
         .filter((a) => a.title.toLowerCase().includes(q))
         .slice(0, 8);
     }
@@ -15423,6 +15432,13 @@
         // the drawer; auto-filled to today whenever status transitions
         // from anything else INTO 'done' and the field is still null.
         if (typeof a.completedAt !== 'string' || !a.completedAt) a.completedAt = null;
+        // Archive semantics: `archivedAt` is a UI-visibility flag, not a
+        // tombstone. Hides the action from lists but keeps it counted in
+        // every KPI. Historic field name was `deletedAt` (which was a
+        // misnomer — nothing was ever deleted). Migrate in place.
+        if (a.deletedAt && !a.archivedAt) a.archivedAt = a.deletedAt;
+        if ('deletedAt' in a) delete a.deletedAt;
+        if (typeof a.archivedAt !== 'string' || !a.archivedAt) a.archivedAt = null;
         a.owner = a.owner || null;
         a.originator = a.originator || null;
         a.due = a.due || null;
@@ -15491,7 +15507,7 @@
         // Snooze — ISO date; while today < snoozedUntil, the action is
         // hidden from default views.
         if (a.snoozedUntil === undefined) a.snoozedUntil = null;
-        // a.deletedAt is null for live, ISO string for archived — preserve as-is
+        // a.archivedAt is null for live, ISO string for archived — preserve as-is
       });
 
       p.deliverables.forEach((d) => {
@@ -16317,7 +16333,7 @@
     projects.forEach((p) => {
       const mMap = milestoneIndex.get(p);
       const dMap = deliverableIndex.get(p);
-      (p.actions || []).filter((a) => !a.deletedAt).forEach((a) => {
+      (p.actions || []).filter((a) => !a.archivedAt).forEach((a) => {
         const planned = Number(plannedHoursTotal(a).toFixed(2));
         const pct = percentComplete(a);
         const evCached = Number(((planned * pct) / 100).toFixed(2));
@@ -16423,7 +16439,7 @@
     const milestoneRows = [];
     projects.forEach((p) => {
       (p.milestones || []).forEach((m) => {
-        const linked = (p.actions || []).filter((a) => !a.deletedAt && a.milestone === m.id);
+        const linked = (p.actions || []).filter((a) => !a.archivedAt && a.milestone === m.id);
         const open = linked.filter((a) => !isClosedStatus(a.status)).length;
         const done = linked.filter((a) => a.status === 'done').length;
         const dueStr = m.date || '';
@@ -16461,7 +16477,7 @@
     const deliverableRows = [];
     projects.forEach((p) => {
       (p.deliverables || []).forEach((d) => {
-        const linked = (p.actions || []).filter((a) => !a.deletedAt && a.deliverable === d.id);
+        const linked = (p.actions || []).filter((a) => !a.archivedAt && a.deliverable === d.id);
         const open = linked.filter((a) => !isClosedStatus(a.status)).length;
         const done = linked.filter((a) => a.status === 'done').length;
         const dueStr = d.dueDate || '';
@@ -16754,7 +16770,8 @@
     projects.forEach((p) => {
       // Cached values mirror the runtime computation so Excel shows the
       // right number even before a recalc. Reuses the existing JS logic.
-      const live = (p.actions || []).filter((a) => !a.deletedAt && (multiProject ? true : true));
+      // KPI rollup — archived actions still count toward every metric.
+      const live = (p.actions || []);
       const scopedLive = live.filter((a) => true); // already scoped to p
       const total = scopedLive.length;
       const done = scopedLive.filter((a) => a.status === 'done').length;
@@ -16904,7 +16921,8 @@
       // Portfolio-wide cached values for the headline tiles. Multi-project
       // mode aggregates across every in-scope project; single-project
       // uses just the current project.
-      const allLive = projects.flatMap((p) => (p.actions || []).filter((a) => !a.deletedAt));
+      // Dashboard rollup — archived actions still count toward every metric.
+      const allLive = projects.flatMap((p) => (p.actions || []));
       const _todayStr = todayISO();
       const dashTotal    = allLive.length;
       const dashDone     = allLive.filter((a) => a.status === 'done').length;
@@ -19009,7 +19027,7 @@
     state.projects.forEach((proj) => {
       // Late actions
       (proj.actions || []).forEach((a) => {
-        if (a.deletedAt) return;
+        if (a.archivedAt) return;
         if (isClosedStatus(a.status)) return;
         if (a.due && dayDiff(a.due, today) < 0) {
           out.push({
@@ -19206,7 +19224,7 @@
     return { since, until: today };
   }
   function buildReportData(proj, since, until) {
-    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    const acts = (proj.actions || []).filter((a) => !a.archivedAt);
     const today = todayISO();
     const horizon = fmtISO(new Date(parseDate(today).getTime() + 14 * dayMs));
     const inRange = (d) => d && d >= since && d <= until;
@@ -19447,7 +19465,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           if (dt) dates.push(parseDate(dt).getTime());
         });
         (proj.actions || []).forEach((a) => {
-          if (!a.deletedAt && a.due) dates.push(parseDate(a.due).getTime());
+          if (!a.archivedAt && a.due) dates.push(parseDate(a.due).getTime());
         });
         (proj.changes || []).forEach((c) => {
           if (c.decisionDate) dates.push(parseDate(c.decisionDate).getTime());
@@ -19528,7 +19546,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   function buildCalendarItems(proj, year, month, gridStartISO, gridEndISO) {
     const inRange = (d) => d && d >= gridStartISO && d <= gridEndISO;
     const items = []; // { date, kind, label, tone, run, icon, rangePos }
-    const acts = (proj.actions || []).filter((a) => !a.deletedAt);
+    const acts = (proj.actions || []).filter((a) => !a.archivedAt);
     acts.forEach((a) => {
       if (!a.due || !inRange(a.due)) return;
       const cmp = a.component ? findComponent(proj, a.component) : null;
@@ -19691,7 +19709,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       if (dt) dates.push(parseDate(dt).getTime());
     });
     (proj.actions || []).forEach((a) => {
-      if (!a.deletedAt && a.due) dates.push(parseDate(a.due).getTime());
+      if (!a.archivedAt && a.due) dates.push(parseDate(a.due).getTime());
     });
     (proj.changes || []).forEach((c) => {
       if (c.decisionDate) dates.push(parseDate(c.decisionDate).getTime());
@@ -19839,7 +19857,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       if (dt) allDates.push(parseDate(dt).getTime());
     });
     (proj.actions || []).forEach((a) => {
-      if (!a.deletedAt && a.due) allDates.push(parseDate(a.due).getTime());
+      if (!a.archivedAt && a.due) allDates.push(parseDate(a.due).getTime());
     });
     (proj.changes || []).forEach((c) => {
       if (c.decisionDate) allDates.push(parseDate(c.decisionDate).getTime());
@@ -20992,7 +21010,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         saveState(); render();
       }});
       (proj.actions || []).forEach((a) => {
-        if (a.deletedAt) return;
+        if (a.archivedAt) return;
         const haystack = [a.title, personName(a.owner), a.notes || '', a.description || ''].join(' ');
         out.push({ kind: 'action', label: a.title, hint: `${proj.name} · ${personName(a.owner)} · ${a.due ? fmtDate(a.due) : 'no date'}`, hay: haystack, run: () => {
           state.currentProjectId = proj.id;
