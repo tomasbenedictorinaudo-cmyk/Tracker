@@ -3131,6 +3131,44 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .adh-bar-on.is-clickable:hover,
 .adh-bar-sl.is-clickable:hover { opacity: 1; }
 
+/* Person editor — project assignments */
+.assign-hint {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin: 2px 0 6px;
+}
+.assign-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.assign-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 20px;
+  gap: 8px;
+  align-items: center;
+}
+.assign-name {
+  color: var(--text);
+  font-size: 13px;
+}
+.assign-input {
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 12px;
+  text-align: right;
+}
+.assign-unit {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+#pEdAssignSum.over {
+  color: var(--bad);
+}
+
 /* Dashboard → Register drill chip */
 .drill-chip {
   display: inline-flex; align-items: center; gap: 6px;
@@ -5521,6 +5559,11 @@ input[type="date"].reg-inp {
 .rh-cell.rh-mid    { fill: rgba(245,193,80,.55); }
 .rh-cell.rh-warn   { fill: rgba(255,150,90,.65); }
 .rh-cell.rh-severe { fill: rgba(248,113,121,.75); }
+/* Opportunity mode: same cell severity semantics, cool colour palette
+   so it reads as upside — green/teal instead of amber/red. */
+.risk-heat-panel[data-heat-kind="opportunity"] .rh-cell.rh-mid    { fill: rgba(120,200,150,.5); }
+.risk-heat-panel[data-heat-kind="opportunity"] .rh-cell.rh-warn   { fill: rgba(80,180,150,.65); }
+.risk-heat-panel[data-heat-kind="opportunity"] .rh-cell.rh-severe { fill: rgba(60,180,180,.75); }
 .rh-cell-num {
   fill: var(--text);
   font-size: 11px;

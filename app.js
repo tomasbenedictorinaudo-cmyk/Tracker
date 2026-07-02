@@ -332,13 +332,30 @@
       return m;
     });
   }
-  // Cross-project people are top-level, not per-project.
+  // Cross-project people are top-level, not per-project. The map is
+  // union(state.people, state.stakeholders) — resolves either kind by id.
+  // Stakeholders are external contacts (customer POCs, regulators, sister
+  // projects). They don't have a team capacity but they CAN own or
+  // originate actions, so any owner/originator lookup must find them.
   function peopleMap() {
     return memo('idmap:people', () => {
       const m = new Map();
       (state.people || []).forEach((p) => { if (p?.id) m.set(p.id, p); });
+      (state.stakeholders || []).forEach((s) => { if (s?.id) m.set(s.id, s); });
       return m;
     });
+  }
+  // Union of team members + external stakeholders, for owner / originator
+  // pickers. Team members first, stakeholders second (with a divider hint
+  // via the `kind` field). Callers can filter by kind when they need to.
+  function allActors() {
+    const team = (state.people || []).map((p) => ({ ...p, kind: 'person' }));
+    const ext  = (state.stakeholders || []).map((s) => ({ ...s, kind: 'stakeholder' }));
+    return [...team, ...ext];
+  }
+  function isExternalActor(id) {
+    if (!id) return false;
+    return (state.stakeholders || []).some((s) => s.id === id);
   }
 
   // Mark the in-memory state as dirty — any code path that mutates state
@@ -581,17 +598,26 @@
     const chance = (p) => rnd() < p;
 
     // capacity is in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year)
+    // assignments split each person's FTE across the three demo projects.
     const people = [
-      { id: 'p_sofia', name: 'Sofia Reyes',     role: 'Project Manager',     capacity: 100, hourlyRate: 140 },
-      { id: 'p_marie', name: 'Marie Laurent',   role: 'Systems Engineer',    capacity: 100, hourlyRate: 130 },
-      { id: 'p_arjun', name: 'Arjun Patel',     role: 'Avionics Lead',       capacity: 100, hourlyRate: 145 },
-      { id: 'p_jonas', name: 'Jonas Becker',    role: 'Mechanical',          capacity:  80, hourlyRate: 120 },
-      { id: 'p_kira',  name: 'Kira Nakamura',   role: 'Software Architect',  capacity: 100, hourlyRate: 150 },
-      { id: 'p_omar',  name: 'Omar El-Sayed',   role: 'Power Systems',       capacity:  80, hourlyRate: 125 },
-      { id: 'p_lena',  name: 'Lena Holmberg',   role: 'Thermal Engineer',    capacity:  80, hourlyRate: 125 },
-      { id: 'p_diego', name: 'Diego Ferreira',  role: 'AOCS',                capacity: 100, hourlyRate: 135 },
-      { id: 'p_yuki',  name: 'Yuki Tanaka',     role: 'Software Developer',  capacity: 100, hourlyRate: 110 },
-      { id: 'p_nadia', name: 'Nadia Rahman',    role: 'Test Engineer',       capacity: 100, hourlyRate: 115 },
+      { id: 'p_sofia', name: 'Sofia Reyes',     role: 'Project Manager',     capacity: 100, hourlyRate: 140, assignments: [{ projectId: 'pr_orbit', commitment: 60 }, { projectId: 'pr_helios', commitment: 40 }] },
+      { id: 'p_marie', name: 'Marie Laurent',   role: 'Systems Engineer',    capacity: 100, hourlyRate: 130, assignments: [{ projectId: 'pr_orbit', commitment: 80 }, { projectId: 'pr_falcon', commitment: 20 }] },
+      { id: 'p_arjun', name: 'Arjun Patel',     role: 'Avionics Lead',       capacity: 100, hourlyRate: 145, assignments: [{ projectId: 'pr_orbit', commitment: 100 }] },
+      { id: 'p_jonas', name: 'Jonas Becker',    role: 'Mechanical',          capacity:  80, hourlyRate: 120, assignments: [{ projectId: 'pr_orbit', commitment: 60 }, { projectId: 'pr_falcon', commitment: 20 }] },
+      { id: 'p_kira',  name: 'Kira Nakamura',   role: 'Software Architect',  capacity: 100, hourlyRate: 150, assignments: [{ projectId: 'pr_orbit', commitment: 50 }, { projectId: 'pr_helios', commitment: 50 }] },
+      { id: 'p_omar',  name: 'Omar El-Sayed',   role: 'Power Systems',       capacity:  80, hourlyRate: 125, assignments: [{ projectId: 'pr_orbit', commitment: 80 }] },
+      { id: 'p_lena',  name: 'Lena Holmberg',   role: 'Thermal Engineer',    capacity:  80, hourlyRate: 125, assignments: [{ projectId: 'pr_orbit', commitment: 60 }, { projectId: 'pr_falcon', commitment: 20 }] },
+      { id: 'p_diego', name: 'Diego Ferreira',  role: 'AOCS',                capacity: 100, hourlyRate: 135, assignments: [{ projectId: 'pr_orbit', commitment: 70 }, { projectId: 'pr_falcon', commitment: 30 }] },
+      { id: 'p_yuki',  name: 'Yuki Tanaka',     role: 'Software Developer',  capacity: 100, hourlyRate: 110, assignments: [{ projectId: 'pr_helios', commitment: 100 }] },
+      { id: 'p_nadia', name: 'Nadia Rahman',    role: 'Test Engineer',       capacity: 100, hourlyRate: 115, assignments: [{ projectId: 'pr_orbit', commitment: 100 }] },
+    ];
+    // External stakeholders — customer POCs, regulators, sister-project
+    // liaisons. No capacity; still ownable / originatable so we can
+    // track "waiting on X" actions against them.
+    const stakeholders = [
+      { id: 'st_customer',  name: 'Isabelle Fournier', role: 'Programme POC',     organization: 'CNES' },
+      { id: 'st_regulator', name: 'Hendrik van Loon',  role: 'Frequency Officer', organization: 'ITU' },
+      { id: 'st_sister',    name: 'Mateus Vieira',     role: 'Sister-mission SE',  organization: 'Mosaic-3' },
     ];
 
     // Title pools per component
@@ -1345,6 +1371,34 @@
         loggedHours: [], baseline: null, percentComplete: null,
         recurrence: { unit: 'week', interval: 1 }, snoozedUntil: null,
       });
+      // External-stakeholder ownership: the customer is on the hook to
+      // deliver a formal PDR ICD sign-off. Tracked here so we can chase.
+      proj1.actions.push({
+        id: 'a_o_extown', identifier: null, title: 'PDR data-pack ICD sign-off',
+        owner: 'st_customer', originator: 'p_sofia', status: 'blocked', priority: 998,
+        priorityLevel: 'high', commitment: 100,
+        due: d(10), startDate: d(-3), originatorDate: d(-14),
+        component: 'pt_pm', deliverable: null, milestone: null,
+        description: 'Waiting on formal ICD sign-off from CNES programme office.',
+        notes: '', createdAt: d(-14), updatedAt: d(-2),
+        history: [], dependsOn: [], tags: ['tg_o_cust'], comments: [],
+        loggedHours: [], baseline: null, percentComplete: null,
+        recurrence: null, snoozedUntil: null,
+      });
+      // External-stakeholder origination: sister-mission SE flagged a
+      // heritage-reuse opportunity we should chase internally.
+      proj1.actions.push({
+        id: 'a_o_extorig', identifier: null, title: 'Evaluate Mosaic-3 FSW heritage transfer',
+        owner: 'p_kira', originator: 'st_sister', status: 'todo', priority: 997,
+        priorityLevel: 'med', commitment: 40,
+        due: d(21), startDate: d(0), originatorDate: d(-2),
+        component: 'pt_sw', deliverable: null, milestone: null,
+        description: 'Sister-mission SE proposed IP transfer — assess integration cost.',
+        notes: '', createdAt: d(-2), updatedAt: d(-1),
+        history: [], dependsOn: [], tags: [], comments: [],
+        loggedHours: [], baseline: null, percentComplete: null,
+        recurrence: null, snoozedUntil: null,
+      });
 
       // Snoozed action — re-emerges in 10 days.
       proj1.actions.push({
@@ -1425,6 +1479,7 @@
 
     return {
       people,
+      stakeholders,
       projects: [proj1, proj2, proj3],
       currentProjectId: proj1.id,
       currentView: 'board',
@@ -1535,6 +1590,21 @@
     if (!id) return '—';
     return peopleMap().get(id)?.name || '—';
   }
+  // Return the `<option>` markup for a select that must pick an actor
+  // (owner or originator). Team members first, then a separator, then
+  // external stakeholders. The `includeBlank` flag adds a "— same as owner"
+  // top row for originator pickers.
+  function actorOptionsHTML(selectedId, includeBlank = false) {
+    const team = state.people || [];
+    const ext  = state.stakeholders || [];
+    let html = includeBlank ? '<option value="">— same as owner</option>' : '';
+    html += team.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === selectedId ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('');
+    if (ext.length) {
+      html += `<option value="" disabled>── External stakeholders ──</option>`;
+      html += ext.map((s) => `<option value="${escapeHTML(s.id)}" ${s.id === selectedId ? 'selected' : ''}>◇ ${escapeHTML(s.name)}${s.organization ? ' (' + escapeHTML(s.organization) + ')' : ''}</option>`).join('');
+    }
+    return html;
+  }
   function statusOfDue(dueISO, status) {
     if (!dueISO) return 'ok';
     if (status === 'done') return 'ok';
@@ -1640,9 +1710,13 @@
     return 50;
   }
   // Hourly rate of an action's owner, defaulting to 100 when unknown so
-  // EVM is still meaningful when seed data is sparse.
+  // EVM is still meaningful when seed data is sparse. External
+  // stakeholders (state.stakeholders) have no team-side rate — their
+  // actions contribute PV/EV/AC of zero, keeping CPI/SPI honest.
   function ownerRate(a) {
-    const p = a?.owner ? peopleMap().get(a.owner) : null;
+    if (!a?.owner) return 100;
+    if (isExternalActor(a.owner)) return 0;
+    const p = peopleMap().get(a.owner);
     return (p && typeof p.hourlyRate === 'number' && p.hourlyRate > 0) ? p.hourlyRate : 100;
   }
   // EVM bundle for a single action OR an iterable of actions. Returns
@@ -1956,10 +2030,15 @@
     const since = fmtISO(new Date(Date.now() - 14 * dayMs));
     const throughput = acts.filter((a) => a.status === 'done' && a.updatedAt >= since).length;
 
-    // Workload by person — closed actions (done or cancelled) don't load capacity
+    // Workload by person — expressed in % of FTE, not action headcount.
+    // committed = Σ commitment% across every open action they own.
+    // capacity = person.capacity (also % of FTE — 100 = 1 FTE).
+    // Externals (stakeholders) don't have a capacity to compare against
+    // and are never surfaced here.
     const workload = state.people.map((p) => {
-      const open = acts.filter((a) => a.owner === p.id && !isClosedStatus(a.status)).length;
-      return { id: p.id, name: p.name, open, capacity: p.capacity || 5 };
+      const owned = acts.filter((a) => a.owner === p.id && !isClosedStatus(a.status));
+      const committed = owned.reduce((s, a) => s + (typeof a.commitment === 'number' ? a.commitment : 100), 0);
+      return { id: p.id, name: p.name, committed, openCount: owned.length, capacity: p.capacity || 100 };
     });
 
     return { total, done, doing, blocked, late, upcoming, completionRate, lateRate, blockedRatio, throughput, workload };
@@ -2105,8 +2184,7 @@
 
     const fOwner = $('#filterOwner');
     const cur = fOwner.value;
-    fOwner.innerHTML = `<option value="">All owners</option>` +
-      state.people.map((p) => `<option value="${p.id}" ${p.id === cur ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('');
+    fOwner.innerHTML = `<option value="">All owners</option>` + actorOptionsHTML(cur);
 
     const fComp = $('#filterComponent');
     const curC = fComp.value;
@@ -5630,7 +5708,7 @@
         <span class="bulk-bar-count"><span id="bulkCount">0</span> selected</span>
         <span class="bulk-bar-divider"></span>
         <select class="bulk-bar-select" id="bulkStatus"><option value="">Set status…</option>${STATUSES.map((s) => `<option value="${s.id}">${s.name}</option>`).join('')}</select>
-        <select class="bulk-bar-select" id="bulkOwner"><option value="">Set owner…</option>${state.people.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('')}</select>
+        <select class="bulk-bar-select" id="bulkOwner"><option value="">Set owner…</option>${actorOptionsHTML('')}</select>
         <select class="bulk-bar-select" id="bulkComp"><option value="">Set component…</option><option value="__none__">— None —</option>${(proj.components || []).map((c) => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join('')}</select>
         <select class="bulk-bar-select" id="bulkPrio"><option value="">Set priority…</option>${PRIORITY_LEVELS.map((p) => `<option value="${p.id}">${p.label}</option>`).join('')}</select>
         <button class="ghost" id="bulkSnooze7" title="Snooze 7 days">⏰ +7 d</button>
@@ -5910,7 +5988,7 @@
           </div>
           <div class="reg-cell">
             <select class="reg-inp" data-field="owner">
-              ${state.people.map((p) => `<option value="${p.id}" ${p.id === a.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}
+              ${actorOptionsHTML(a.owner)}
             </select>
           </div>
           <div class="reg-cell status-cell">
@@ -7217,6 +7295,20 @@
     });
     const reduction = inh > 0 ? Math.round((1 - res / inh) * 100) : 0;
 
+    // 2b. Opportunity value — same P×I lattice but interpreted upward:
+    // baseline = value if nothing is done, captured = value after capture.
+    // Reuses inherent / residual JSON keys for backwards compat.
+    const opps = (proj.risks || []).filter((r) => (r.kind || 'risk') === 'opportunity');
+    let oppBase = 0, oppCap = 0, oppUnactioned = 0;
+    opps.forEach((r) => {
+      const b = ((r.inherent && r.inherent.probability) || 0) * ((r.inherent && r.inherent.impact) || 0);
+      const c = ((r.residual && r.residual.probability) || 0) * ((r.residual && r.residual.impact) || 0);
+      oppBase += b;
+      oppCap  += c;
+      if (!r.actionId) oppUnactioned += c;
+    });
+    const oppLift = oppBase > 0 ? Math.round(((oppCap - oppBase) / oppBase) * 100) : 0;
+
     // 3. Stale actions — open and not updated in ≥ 14 days
     const STALE_DAYS = 14;
     const open = (proj.actions || []).filter((a) => !a.archivedAt && !isClosedStatus(a.status));
@@ -7267,6 +7359,7 @@
     return {
       util: { u4, u8, u12 },
       risk: { inh, res, unmitigated, reduction, count: risks.length },
+      opp:  { base: oppBase, captured: oppCap, unactioned: oppUnactioned, lift: oppLift, count: opps.length },
       stale: { count: stale.length, totalOpen: open.length, stalePct, top: topStale },
       evm: { BAC, PV, AC, EV, CPI, SPI, hasData: ccs.length > 0 && AC > 0 },
       cr: { medianTurn, pending: pending.length, stalePending, decided: decided.length, total: changes.length },
@@ -7316,6 +7409,18 @@
             ${d.risk.unmitigated > 0
               ? `<span class="dkpi-strip-warn">⚠ ${d.risk.unmitigated} unmitigated</span>`
               : (d.risk.count > 0 ? '<span class="dkpi-strip-ok">all linked</span>' : '<span class="dkpi-strip-muted">none logged</span>')}
+          </div>
+        </div>
+
+        <div class="dkpi">
+          <div class="dkpi-label">Opportunity value</div>
+          <div class="dkpi-num ${d.opp.captured >= 25 ? 'ok' : d.opp.count === 0 ? '' : 'muted'}">${d.opp.captured}</div>
+          <div class="dkpi-sub">captured P×I · ${d.opp.count} opportunit${d.opp.count === 1 ? 'y' : 'ies'}</div>
+          <div class="dkpi-strip">
+            ${d.opp.count > 0 ? `<span class="dkpi-strip-pill">↑ ${d.opp.lift}% from ${d.opp.base}</span>` : ''}
+            ${d.opp.unactioned > 0
+              ? `<span class="dkpi-strip-warn">⚠ ${d.opp.unactioned} unactioned</span>`
+              : (d.opp.count > 0 ? '<span class="dkpi-strip-ok">all pursued</span>' : '<span class="dkpi-strip-muted">none logged</span>')}
           </div>
         </div>
 
@@ -7840,6 +7945,10 @@
     window.addEventListener('resize', hide);
   }
 
+  // Dashboard heatmap segment — 'risk' or 'opportunity'. Session-scoped;
+  // persists across renders but not across reloads.
+  let _heatKind = 'risk';
+
   function renderDashboard(root) {
     const proj = curProject();
     const k = kpis();
@@ -7944,15 +8053,15 @@
             <span class="tt-info" aria-label="Info">i
               ${_kpiTooltip({
                 title: 'Workload by person',
-                meaning: 'Each row is one person; the bar shows how many OPEN actions they own vs their configured capacity. Bars turn amber above 80 % of capacity and red above 100 %. This is a coarse capacity check, not a resource planner — anyone consistently in the red is a hand-off waiting to happen.',
-                formula: 'load%(p) = open_actions(p) ÷ capacity(p) × 100',
+                meaning: 'Each row is one team member; the bar shows what share of their FTE is currently committed across their open actions vs their configured capacity. Amber above 80 %, red above 100 %. External stakeholders don\'t appear here — they don\'t have a team-side capacity.',
+                formula: 'load%(p) = Σ commitment%(a) ÷ capacity%(p) × 100  ·  over open actions owned by p',
                 inputs: [
-                  { name: 'open_actions(p)', desc: 'Count of the person\'s actions whose status is NOT Done or Cancelled.' },
-                  { name: 'capacity(p)',     desc: 'The person\'s "Capacity %" field on the People page. Interpreted as the number of actions they can carry at once — set it to whatever fits your team\'s cadence (e.g. 5 for a typical week).' },
+                  { name: 'commitment%(a)', desc: 'The action\'s Commitment slider in the drawer — its share of one FTE while it\'s in flight.' },
+                  { name: 'capacity%(p)',   desc: 'The person\'s "Capacity %" on the People page. 100 = 1 full FTE, 50 = half-time.' },
                 ],
                 minimumData: [
-                  { scope: 'Per action', desc: 'an assigned owner and a status. Unassigned actions don\'t contribute to anyone\'s load — a common blind spot.' },
-                  { scope: 'Per person', desc: 'a capacity value (defaults to 5). Zero-capacity people always look red; unset defaults are usually enough to spot outliers.' },
+                  { scope: 'Per action', desc: 'an assigned owner, a status, and a commitment %. Actions with no commitment default to 100 %.' },
+                  { scope: 'Per person', desc: 'a capacity % (defaults to 100). Zero-capacity people are treated as unavailable.' },
                 ],
               })}
             </span>
@@ -7989,8 +8098,15 @@
           <div id="evmRollup"></div>
         </div>
 
-        <div class="panel risk-heat-panel copyable-chart" data-chart="risk-heatmap">
-          <div class="panel-title">Portfolio risk heatmap <span class="legend">5×5 residual risk · cells aggregate matching items across projects · click a cell to filter the register</span></div>
+        <div class="panel risk-heat-panel copyable-chart" data-chart="risk-heatmap" data-heat-kind="${_heatKind}">
+          <div class="panel-title">
+            Portfolio heatmap
+            <div class="seg" role="tablist" style="margin-left:10px;">
+              <button type="button" class="seg-btn ${_heatKind === 'risk' ? 'active' : ''}" data-heat-kind="risk">▲ Risks</button>
+              <button type="button" class="seg-btn ${_heatKind === 'opportunity' ? 'active' : ''}" data-heat-kind="opportunity">▽ Opportunities</button>
+            </div>
+            <span class="legend">5×5 · cells aggregate matching items across projects · click a cell to filter the register</span>
+          </div>
           <div id="riskHeat"></div>
         </div>
       </div>
@@ -8128,6 +8244,13 @@
     root.appendChild(view);
     wireCumWlLegend();
     _wireDashboardTooltips(view);
+    // Heatmap segment toggle — flip between risks and opportunities.
+    view.querySelector('[data-chart="risk-heatmap"]')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.seg-btn[data-heat-kind]');
+      if (!btn) return;
+      _heatKind = btn.dataset.heatKind;
+      render();
+    });
     // Waterfall legend → toggle a line's visibility (matches the
     // cumulative-workload chart's pattern).
     view.querySelector('[data-chart="waterfall"]')?.addEventListener('click', (e) => {
@@ -8229,16 +8352,16 @@
       $$('.crit-item', list).forEach((el) => el.addEventListener('click', () => openDrawer(el.dataset.id)));
     }
 
-    // Workload bars
+    // Workload bars — % of FTE committed vs available.
     const w = $('#workload');
     w.innerHTML = k.workload.map((p) => {
-      const pct = clamp(Math.round((p.open / p.capacity) * 100), 0, 200);
+      const pct = p.capacity > 0 ? clamp(Math.round((p.committed / p.capacity) * 100), 0, 200) : 0;
       const cls = pct > 100 ? 'over' : pct > 80 ? 'warn' : 'ok';
       return `
-        <div class="bar-row">
+        <div class="bar-row" title="${p.openCount} open action${p.openCount === 1 ? '' : 's'} · ${p.committed}% committed against ${p.capacity}% capacity">
           <div>${escapeHTML(p.name)}</div>
           <div class="bar-track"><div class="bar-fill ${cls}" style="width:${Math.min(100, pct)}%"></div></div>
-          <div class="bar-val">${p.open}/${p.capacity}</div>
+          <div class="bar-val">${p.committed}/${p.capacity}%</div>
         </div>`;
     }).join('');
 
@@ -8266,7 +8389,11 @@
       const scopeProjs = curProjectIsMerged()
         ? state.projects.filter((p) => !p.archived)
         : [proj];
-      const riskItems = scopeProjs.flatMap((p) => (p.risks || []).map((r) => ({ r, proj: p })));
+      // Filter by the segment toggle above the heatmap. Default 'risk'
+      // (initialised in the closure above renderDashboard).
+      const riskItems = scopeProjs.flatMap((p) => (p.risks || [])
+        .filter((r) => (r.kind || 'risk') === _heatKind)
+        .map((r) => ({ r, proj: p })));
       // Build a 5×5 cell index keyed by `${p}-${i}` of residual scores
       // (1-5 each axis). Cells store the matching items so the cell click
       // can drill in.
@@ -9263,7 +9390,7 @@
                 ${STATUSES.map((s) => `<option value="${s.id}" ${s.id === a.status ? 'selected' : ''}>${s.name}</option>`).join('')}
               </select>
               <select class="inline" data-id="${a.id}" data-action="owner">
-                ${state.people.map((p) => `<option value="${p.id}" ${p.id === a.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}
+                ${actorOptionsHTML(a.owner)}
               </select>
               <input class="inline" type="date" data-id="${a.id}" data-action="due" value="${a.due || ''}" />
             </span>
@@ -9726,15 +9853,15 @@
             <div class="field" style="flex: 1;"><label>Title</label><input id="reTitle" value="${escapeHTML(r.title)}" /></div>
           </div>
           <div class="qa-row">
-            <div class="field"><label>Inherent P (1-5)</label><input id="rePI" type="number" min="1" max="5" value="${r.inherent.probability}" /></div>
-            <div class="field"><label>Inherent I (1-5)</label><input id="reII" type="number" min="1" max="5" value="${r.inherent.impact}" /></div>
+            <div class="field"><label id="rePILbl">${isOpp ? 'Baseline P (1-5)' : 'Inherent P (1-5)'}</label><input id="rePI" type="number" min="1" max="5" value="${r.inherent.probability}" title="${isOpp ? 'Baseline — value if you do nothing to pursue this opportunity.' : 'Inherent — worst case if nothing is done to mitigate.'}" /></div>
+            <div class="field"><label id="reIILbl">${isOpp ? 'Baseline I (1-5)' : 'Inherent I (1-5)'}</label><input id="reII" type="number" min="1" max="5" value="${r.inherent.impact}" /></div>
           </div>
           <div class="qa-row">
-            <div class="field"><label>Residual P (post-action)</label><input id="rePR" type="number" min="1" max="5" value="${r.residual.probability}" /></div>
-            <div class="field"><label>Residual I (post-action)</label><input id="reIR" type="number" min="1" max="5" value="${r.residual.impact}" /></div>
+            <div class="field"><label id="rePRLbl">${isOpp ? 'Captured P (post-action)' : 'Residual P (post-action)'}</label><input id="rePR" type="number" min="1" max="5" value="${r.residual.probability}" title="${isOpp ? 'Captured — value if you successfully pursue the capture plan below. Should be higher than baseline.' : 'Residual — what survives after mitigation. Should be lower than inherent.'}" /></div>
+            <div class="field"><label id="reIRLbl">${isOpp ? 'Captured I (post-action)' : 'Residual I (post-action)'}</label><input id="reIR" type="number" min="1" max="5" value="${r.residual.impact}" /></div>
           </div>
           <div class="field"><label>Owner</label>
-            <select id="reOwner">${state.people.map((p) => `<option value="${p.id}" ${p.id === r.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+            <select id="reOwner">${actorOptionsHTML(r.owner)}</select>
           </div>
           <div class="field"><label id="reMitLbl">${isOpp ? 'Capture plan' : 'Mitigation'}</label><textarea id="reMit" style="min-height:80px;">${escapeHTML(r.mitigation || '')}</textarea></div>
           <div class="field"><label>Linked action (optional)</label>
@@ -9769,8 +9896,14 @@
         kind = b.dataset.reKind;
         overlay.querySelectorAll('.seg-btn[data-re-kind]').forEach((x) =>
           x.classList.toggle('active', x.dataset.reKind === kind));
-        document.getElementById('reMitLbl').textContent =
-          kind === 'opportunity' ? 'Capture plan' : 'Mitigation';
+        const isOppNow = kind === 'opportunity';
+        document.getElementById('reMitLbl').textContent = isOppNow ? 'Capture plan' : 'Mitigation';
+        // Flip the P×I labels too — "residual" is a misnomer for upside.
+        const setLbl = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
+        setLbl('rePILbl', isOppNow ? 'Baseline P (1-5)' : 'Inherent P (1-5)');
+        setLbl('reIILbl', isOppNow ? 'Baseline I (1-5)' : 'Inherent I (1-5)');
+        setLbl('rePRLbl', isOppNow ? 'Captured P (post-action)' : 'Residual P (post-action)');
+        setLbl('reIRLbl', isOppNow ? 'Captured I (post-action)' : 'Residual I (post-action)');
       });
     });
 
@@ -10838,7 +10971,7 @@
             <div class="field"><label>Originator</label>
               <select id="crOriginator">
                 <option value="">—</option>
-                ${state.people.map((p) => `<option value="${p.id}" ${p.id === c.originator ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}
+                ${actorOptionsHTML(c.originator)}
               </select>
             </div>
             <div class="field"><label>Originated</label><input id="crOrigDate" type="date" value="${c.originatedDate || ''}" /></div>
@@ -10869,7 +11002,7 @@
             <div class="field"><label>Decision by</label>
               <select id="crDecisionBy">
                 <option value="">—</option>
-                ${state.people.map((p) => `<option value="${p.id}" ${p.id === c.decisionBy ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}
+                ${actorOptionsHTML(c.decisionBy)}
               </select>
             </div>
             <div class="field"><label>Decision date</label><input id="crDecisionDate" type="date" value="${c.decisionDate || ''}" /></div>
@@ -13034,10 +13167,10 @@
       <div class="field"><label>Title</label><input id="dTitle" value="${escapeHTML(a.title)}" /></div>
       <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
         <div class="field"><label>Owner</label>
-          <select id="dOwner">${state.people.map((p) => `<option value="${p.id}" ${p.id === a.owner ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+          <select id="dOwner">${actorOptionsHTML(a.owner)}</select>
         </div>
         <div class="field"><label>Originator</label>
-          <select id="dOriginator"><option value="">— same as owner</option>${state.people.map((p) => `<option value="${p.id}" ${p.id === a.originator ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select>
+          <select id="dOriginator">${actorOptionsHTML(a.originator, true)}</select>
         </div>
         <div class="field"><label>Originator date</label>
           <input id="dOriginatorDate" type="date" value="${a.originatorDate || a.createdAt || ''}" title="When this action was originated" />
@@ -13685,7 +13818,7 @@
   function personOptionsHtml(selectedId, placeholder) {
     const placeOpt = placeholder ? `<option value="">${escapeHTML(placeholder)}</option>` : '';
     return placeOpt
-      + state.people.map((p) => `<option value="${escapeHTML(p.id)}"${p.id === selectedId ? ' selected' : ''}>${escapeHTML(p.name)}</option>`).join('')
+      + actorOptionsHTML(selectedId)
       + '<option disabled>──────────</option>'
       + '<option value="__new__">+ New person…</option>';
   }
@@ -14669,6 +14802,18 @@
   function openPersonEditor(personId) {
     const p = state.people.find((x) => x.id === personId);
     if (!p) return;
+    p.assignments = Array.isArray(p.assignments) ? p.assignments : [];
+    const projectRow = (proj) => {
+      const existing = p.assignments.find((a) => a.projectId === proj.id);
+      const val = existing ? existing.commitment : 0;
+      return `
+        <div class="assign-row">
+          <label class="assign-name" for="assign-${escapeHTML(proj.id)}">${escapeHTML(proj.name)}</label>
+          <input type="number" min="0" max="100" step="5" class="assign-input" id="assign-${escapeHTML(proj.id)}" data-project-id="${escapeHTML(proj.id)}" value="${val}" />
+          <span class="assign-unit">%</span>
+        </div>`;
+    };
+    const visibleProjects = state.projects.filter((pr) => !pr.archived);
     $('#drawerTitle').textContent = 'Edit person';
     $('#drawerBody').innerHTML = `
       <div class="field"><label>Name</label><input id="pEdName" value="${escapeHTML(p.name)}" /></div>
@@ -14678,11 +14823,34 @@
         <div class="field"><label>Capacity (% of FTE)</label><input id="pEdCap" type="number" min="0" max="200" value="${p.capacity || 100}" title="100% = full-time. 1 FTE = 8h/day × 5 days/week, 212 working days/year." /></div>
         <div class="field"><label>Hourly rate (€/h)</label><input id="pEdRate" type="number" min="0" step="5" value="${p.hourlyRate || 100}" /></div>
       </div>
+      <div class="field">
+        <label>Project assignments <span class="muted" id="pEdAssignSum">— % assigned</span></label>
+        <div class="assign-hint">Share of this person's FTE dedicated to each active project. Sum should be ≤ Capacity above.</div>
+        <div class="assign-list">
+          ${visibleProjects.length ? visibleProjects.map(projectRow).join('') : '<div class="empty">No live projects to assign to.</div>'}
+        </div>
+      </div>
       <div style="display:flex; gap:8px; margin-top:6px;">
         <button class="primary" id="pEdSave">Save</button>
         <button class="ghost" id="pEdDelete" style="margin-left:auto; color:var(--bad);">Delete</button>
       </div>`;
     $('#drawer').hidden = false;
+    // Live sum indicator — updates as the user types.
+    const refreshSum = () => {
+      const inputs = document.querySelectorAll('#drawerBody .assign-input');
+      let sum = 0;
+      inputs.forEach((inp) => { sum += Math.max(0, Number(inp.value) || 0); });
+      const cap = Math.max(0, parseInt($('#pEdCap').value, 10) || 0);
+      const el = $('#pEdAssignSum');
+      if (el) {
+        const over = cap > 0 && sum > cap;
+        el.textContent = `${sum}% assigned of ${cap}% capacity${over ? ' — over-committed' : ''}`;
+        el.classList.toggle('over', !!over);
+      }
+    };
+    document.querySelectorAll('#drawerBody .assign-input').forEach((inp) => inp.addEventListener('input', refreshSum));
+    $('#pEdCap').addEventListener('input', refreshSum);
+    refreshSum();
     $('#pEdSave').addEventListener('click', () => {
       const oldName = p.name;
       p.name = $('#pEdName').value.trim() || p.name;
@@ -14690,6 +14858,13 @@
       p.expertise = $('#pEdSkills').value.trim();
       p.capacity = clamp(parseInt($('#pEdCap').value, 10) || 100, 0, 200);
       p.hourlyRate = Math.max(0, parseFloat($('#pEdRate').value) || 100);
+      const newAssignments = [];
+      document.querySelectorAll('#drawerBody .assign-input').forEach((inp) => {
+        const projectId = inp.dataset.projectId;
+        const commitment = clamp(parseInt(inp.value, 10) || 0, 0, 100);
+        if (commitment > 0) newAssignments.push({ projectId, commitment });
+      });
+      p.assignments = newAssignments;
       commit('person-edit');
       closeDrawer();
       toast(oldName !== p.name ? 'Renamed to ' + p.name : 'Saved');
@@ -15424,7 +15599,27 @@
   function normalizeState(s) {
     if (!s || typeof s !== 'object') throw new Error('Invalid state');
     s.people = Array.isArray(s.people) ? s.people : [];
+    s.stakeholders = Array.isArray(s.stakeholders) ? s.stakeholders : [];
     s.projects = Array.isArray(s.projects) ? s.projects : [];
+    // People carry per-project assignments — see the People panel editor.
+    // Shape: [{ projectId, commitment }] where commitment is % of THIS
+    // person's FTE. Sum should be ≤ capacity. Missing = not on project.
+    s.people.forEach((p) => {
+      if (!Array.isArray(p.assignments)) p.assignments = [];
+      p.assignments = p.assignments.filter((a) => a && typeof a.projectId === 'string' && a.projectId);
+      p.assignments.forEach((a) => {
+        a.commitment = Math.max(0, Math.min(100, Number(a.commitment) || 0));
+      });
+    });
+    // Stakeholders — external contacts (customer POCs, regulators, sister
+    // projects). No capacity, no hourly rate. Still ownable so we can
+    // track actions we're waiting on outside the team.
+    s.stakeholders.forEach((st) => {
+      st.id = st.id || uid('st');
+      st.name = st.name || 'Unnamed stakeholder';
+      st.role = st.role || '';
+      st.organization = st.organization || '';
+    });
     s.settings = s.settings || {};
     s.settings.theme = s.settings.theme || 'dark';
     s.settings.holidayCountries = s.settings.holidayCountries || [];
