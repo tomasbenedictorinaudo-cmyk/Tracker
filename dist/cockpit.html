@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-03T08:59:32.404Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-03T09:31:12.858Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3191,6 +3191,179 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 #pEdAssignSum.over {
   color: var(--bad);
+}
+
+/* Planner view */
+.planner-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.planner-picker .muted {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.planner-picker select {
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.planner-panel {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.planner-info {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px dashed var(--line-2);
+}
+.planner-cap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+.planner-cap .muted { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.planner-cap b { color: var(--text); }
+.planner-legend {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.pln-lg-item { display: inline-flex; align-items: center; gap: 5px; }
+.pln-lg-diam {
+  display: inline-block;
+  width: 8px; height: 8px;
+  background: var(--accent);
+  transform: rotate(45deg);
+  border-radius: 1px;
+}
+.pln-lg-margin.ok  { color: var(--ok); font-weight: 700; font-size: 13px; }
+.pln-lg-margin.bad { color: var(--bad); font-weight: 700; font-size: 13px; }
+.planner-scroll {
+  overflow: auto;
+  max-height: calc(100vh - 240px);
+}
+.planner-axis {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-2);
+}
+.pln-axis-svg { display: block; }
+.pln-tick { fill: var(--text-faint); font-size: 10px; }
+.pln-today, .pln-today-full {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: .85;
+}
+.pln-grid-week {
+  stroke: var(--line-2);
+  stroke-width: 1;
+  opacity: .35;
+}
+.planner-grid {
+  position: relative;
+}
+.pln-grid-svg {
+  position: absolute; inset: 0;
+  pointer-events: none;
+}
+.planner-rows {
+  position: relative;
+}
+.pln-row {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--line-2);
+}
+.pln-row:last-child { border-bottom: 0; }
+.pln-row.is-done { opacity: .55; }
+.pln-row-label {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 6px;
+  row-gap: 1px;
+  padding: 4px 8px;
+  min-width: 0;
+  font-size: 12px;
+  align-content: center;
+}
+.pln-row-label > .col-dot { grid-row: 1 / span 2; align-self: center; }
+.pln-row-title {
+  grid-column: 2;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pln-row-meta {
+  grid-column: 2;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pln-row-chart {
+  position: relative;
+  height: 100%;
+}
+.pln-row-svg { display: block; }
+.pln-row-bg { fill: transparent; }
+.pln-bar {
+  cursor: pointer;
+  transition: filter .12s ease;
+}
+.pln-bar:hover { filter: brightness(1.25); }
+.pln-due {
+  pointer-events: none;
+}
+.pln-row-badge {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.pln-margin {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+}
+.pln-margin.ok  { color: var(--ok); border-color: rgba(74, 222, 128, .3); }
+.pln-margin.bad { color: var(--bad); border-color: rgba(248, 113, 121, .3); }
+.pln-margin.warn { color: var(--warn); border-color: rgba(251, 191, 36, .3); }
+.pln-row-empty {
+  display: inline-block;
+  padding: 8px 10px;
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 12px;
 }
 
 /* Owner-load strip in the action drawer */
@@ -8223,6 +8396,9 @@ body.is-row-dragging *        { user-select: none !important; }
         <button class="nav-item" data-view="dashboard">
           <span class="nav-icon">◰</span><span>Dashboard</span>
         </button>
+        <button class="nav-item" data-view="planner">
+          <span class="nav-icon">◱</span><span>Planner</span>
+        </button>
         <button class="nav-item" data-view="review">
           <span class="nav-icon">▶</span><span>Review</span>
         </button>
@@ -10789,6 +10965,7 @@ body.is-row-dragging *        { user-select: none !important; }
       inbox: renderInbox,
       calendar: renderCalendar,
       reports: renderReports,
+      planner: renderPlanner,
     };
     (fns[view] || renderBoard)(main);
   }
@@ -24852,6 +25029,11 @@ body.is-row-dragging *        { user-select: none !important; }
         a.dependsOn = Array.isArray(a.dependsOn) ? a.dependsOn : [];
         a.tags      = Array.isArray(a.tags) ? a.tags : [];
         a.comments  = Array.isArray(a.comments) ? a.comments : [];
+        // Planner anchor — total workload in hours for this action. Null
+        // by default; the Planner view initialises it from the current
+        // commitment × window on first drag, then preserves it while
+        // the user reshapes the bar.
+        if (typeof a.plannedHours !== 'number' || a.plannedHours < 0) a.plannedHours = null;
         // Subtasks — small checklist items with the same 5 statuses as the
         // parent action. Kept flat + simple by design: no owner, no due
         // date, no history. If a task grows real complexity, promote it
@@ -28790,6 +28972,297 @@ ${data.next.actions.length ? '<p><b>Due actions</b></p>' + list(data.next.action
 ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.actions.length) ? '<p class="empty">Nothing scheduled in the next 14 days.</p>' : ''}
 </body></html>`;
   }
+  /* ----------------------------- Planner ----------------------------- */
+
+  // Session-scoped planner state — the selected person + scope survives
+  // navigation within the session but not reloads. plannedHours anchors
+  // live on the action itself (a.plannedHours).
+  let _plannerState = null;
+  function _plannerInit() {
+    if (_plannerState) return;
+    const firstOwner = (state.people || []).find((p) => p.id);
+    _plannerState = {
+      personId: firstOwner?.id || null,
+      scope: 'all',              // 'all' | 'project'
+      windowWeeks: 12,           // visible span from today back-anchor
+      highlightedActionId: null, // planner phase 4
+    };
+  }
+  // Read the "effective" workload window for an action. If the user has
+  // pinned plannedHours it wins; otherwise we derive from
+  // (commitment / 100) × HOURS_PER_WEEK × weeksInWindow so unset actions
+  // still show a sensible bar.
+  function _plannerEffectiveHours(a) {
+    if (typeof a.plannedHours === 'number' && a.plannedHours > 0) return a.plannedHours;
+    return plannedHoursTotal(a);
+  }
+  function renderPlanner(root) {
+    _plannerInit();
+    const s = _plannerState;
+    const view = document.createElement('div');
+    view.className = 'view';
+
+    // Person picker — internal team only (externals have no capacity).
+    const people = (state.people || []).slice().sort((x, y) => (x?.name || '').localeCompare(y?.name || ''));
+    if (!s.personId && people.length) s.personId = people[0].id;
+    const person = people.find((p) => p.id === s.personId) || null;
+
+    // Determine "available FTE" per week for the capacity line + warnings:
+    //   - scope=all       → person.capacity / 100 × HOURS_PER_WEEK
+    //   - scope=project   → person's assignment for the current project
+    //                        (falls back to capacity when no assignment).
+    const curProj = curProject();
+    const curProjId = curProj?.id || null;
+    let capacityPct = person?.capacity || 100;
+    if (s.scope === 'project' && person) {
+      const asg = (person.assignments || []).find((a) => a.projectId === curProjId);
+      if (asg && typeof asg.commitment === 'number') capacityPct = asg.commitment;
+    }
+    const weeklyCapHours = (capacityPct / 100) * HOURS_PER_WEEK;
+
+    // Collect actions to show. Rules from the spec:
+    //   - Open actions always shown.
+    //   - Done actions in the PAST shown (they represent completed work).
+    //   - Done actions in the FUTURE hidden (weird edge case, but we
+    //     don't want them cluttering plans).
+    //   - Cancelled actions hidden.
+    //   - Snoozed actions hidden until their re-emerge date.
+    const todayISO_ = todayISO();
+    const scopeProjects = s.scope === 'project'
+      ? [curProj].filter(Boolean)
+      : (state.projects || []).filter((p) => p && !p.archived);
+    const actions = scopeProjects.flatMap((pr) =>
+      (pr.actions || []).map((a) => ({ a, project: pr }))
+    ).filter(({ a }) => {
+      if (!person) return false;
+      if (a.owner !== person.id) return false;
+      if (a.archivedAt) return false;
+      if (isSnoozed(a)) return false;
+      if (a.status === 'cancelled') return false;
+      if (a.status === 'done') {
+        // Show done actions only if the completion is in the past AND
+        // recent enough to fall in the visible window (otherwise old
+        // completions dominate the list on established projects).
+        const completedAt = actionCompletedAt(a);
+        return completedAt && completedAt <= todayISO_;
+      }
+      return true;
+    });
+
+    // Sort: overdue first, then by due ascending, then done items at the bottom.
+    actions.sort((x, y) => {
+      const xd = x.a.due || '9999-99-99';
+      const yd = y.a.due || '9999-99-99';
+      if (xd !== yd) return xd.localeCompare(yd);
+      return (x.a.title || '').localeCompare(y.a.title || '');
+    });
+
+    // Second-stage filter: drop done + open actions that fall entirely
+    // outside the visible time window. Prevents ancient completed work
+    // from dominating the list on established projects.
+    const halfWeeks = Math.floor(s.windowWeeks / 2);
+    const _today = new Date(); _today.setHours(0, 0, 0, 0);
+    const _anchor = new Date(_today);
+    while (_anchor.getDay() !== 1) _anchor.setDate(_anchor.getDate() - 1);
+    const winStartISO = fmtISO(new Date(_anchor.getTime() - halfWeeks * 7 * dayMs));
+    const winEndISO   = fmtISO(new Date(_anchor.getTime() + halfWeeks * 7 * dayMs));
+    const visibleActions = actions.filter(({ a }) => {
+      const start = a.startDate || (a.due ? fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs)) : null);
+      const end = a.due || a.startDate || null;
+      if (!start || !end) return true;
+      // Overlaps window if start <= winEnd AND end >= winStart.
+      return start <= winEndISO && end >= winStartISO;
+    });
+
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Planner</div>
+          <div class="page-sub">One person, one calendar. Total workload is the anchor — reshape the bar and the commitment adjusts to preserve the hours.</div>
+        </div>
+        <div class="page-actions">
+          <label class="planner-picker">
+            <span class="muted">Person</span>
+            <select id="plnPerson">
+              ${people.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === s.personId ? 'selected' : ''}>${escapeHTML(p.name)}${p.role ? ' · ' + escapeHTML(p.role) : ''}</option>`).join('')}
+            </select>
+          </label>
+          <div class="seg" role="tablist" aria-label="Scope">
+            <button class="seg-btn ${s.scope === 'all' ? 'active' : ''}" data-pln-scope="all">All projects</button>
+            <button class="seg-btn ${s.scope === 'project' ? 'active' : ''}" data-pln-scope="project">This project</button>
+          </div>
+          <label class="planner-picker">
+            <span class="muted">Window</span>
+            <select id="plnWindow">
+              <option value="8"  ${s.windowWeeks === 8  ? 'selected' : ''}>8 weeks</option>
+              <option value="12" ${s.windowWeeks === 12 ? 'selected' : ''}>12 weeks</option>
+              <option value="16" ${s.windowWeeks === 16 ? 'selected' : ''}>16 weeks</option>
+              <option value="26" ${s.windowWeeks === 26 ? 'selected' : ''}>26 weeks</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      ${person ? renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s) : `<div class="empty">No team members yet — add one from the People page.</div>`}
+    `;
+    root.appendChild(view);
+
+    // Wire controls
+    view.querySelector('#plnPerson')?.addEventListener('change', (e) => {
+      s.personId = e.target.value;
+      render();
+    });
+    view.querySelectorAll('[data-pln-scope]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        s.scope = btn.dataset.plnScope;
+        render();
+      });
+    });
+    view.querySelector('#plnWindow')?.addEventListener('change', (e) => {
+      s.windowWeeks = parseInt(e.target.value, 10) || 12;
+      render();
+    });
+  }
+
+  // The top half — one row per action, laid out on a day-precision axis.
+  // Phase 1 is read-only. Later phases add drag interactions.
+  function renderPlannerGantt(person, items, weeklyCapHours, capacityPct, s) {
+    if (!items.length) {
+      return `<div class="empty">${escapeHTML(person.name)} has no open actions${s.scope === 'project' ? ' on this project' : ''}. Assign one to see it here.</div>`;
+    }
+    // Time window — anchor today in the middle. windowWeeks total,
+    // half in the past (for recent-done context), half in the future.
+    const halfWeeks = Math.floor(s.windowWeeks / 2);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    // Anchor start on a Monday so week columns line up cleanly.
+    const anchor = new Date(today);
+    while (anchor.getDay() !== 1) anchor.setDate(anchor.getDate() - 1);
+    const winStart = new Date(anchor.getTime() - halfWeeks * 7 * dayMs);
+    const winEnd   = new Date(anchor.getTime() + halfWeeks * 7 * dayMs);
+    const totalDays = Math.round((winEnd - winStart) / dayMs);
+    const dayW = 8; // pixels per day at default zoom
+    const chartW = totalDays * dayW;
+    const rowH = 44;
+
+    const xFor = (iso) => {
+      const t = parseDate(iso)?.getTime();
+      if (!t) return 0;
+      return Math.round(((t - winStart.getTime()) / dayMs) * dayW);
+    };
+    const clampX = (x) => Math.max(0, Math.min(chartW, x));
+    const todayX = xFor(todayISO());
+
+    // Per-action bar geometry
+    const bars = items.map(({ a, project }, i) => {
+      const dueX = a.due ? xFor(a.due) : null;
+      // Work window — use startDate/due; fall back to due-2d if no start.
+      let workStart = a.startDate;
+      let workEnd = a.due;
+      if (!workEnd) {
+        return { a, project, skip: true, i };
+      }
+      if (!workStart) {
+        const d = parseDate(a.due);
+        workStart = fmtISO(new Date(d.getTime() - 2 * dayMs));
+      }
+      const barX = clampX(xFor(workStart));
+      const barX2 = clampX(xFor(workEnd));
+      const barW  = Math.max(4, barX2 - barX);
+      const hours = Math.round(_plannerEffectiveHours(a));
+      // Margin — where does the work end vs the due date? For phase 1
+      // they're the same; drag will separate them once plannedHours is
+      // anchored and commitment shifts.
+      const workEndX = barX + barW;
+      const marginPx = dueX == null ? 0 : dueX - workEndX;
+      const marginDays = Math.round(marginPx / dayW);
+      const marginBadge = dueX == null
+        ? ''
+        : marginDays > 0
+          ? `<span class="pln-margin ok">+${marginDays}d</span>`
+          : marginDays < 0
+            ? `<span class="pln-margin bad">${marginDays}d</span>`
+            : `<span class="pln-margin warn">±0d</span>`;
+      // Color per action for later cross-highlight
+      const c = colorFor(a.id);
+      return { a, project, hours, barX, barW, workEndX, dueX, marginBadge, color: c, i };
+    });
+
+    // Weekly grid columns
+    const gridLines = [];
+    const monthLabels = [];
+    for (let d = 0; d <= totalDays; d++) {
+      const date = new Date(winStart.getTime() + d * dayMs);
+      if (date.getDay() === 1) {
+        const x = d * dayW;
+        gridLines.push(`<line class="pln-grid-week" x1="${x}" x2="${x}" y1="0" y2="${bars.length * rowH}" />`);
+        if (date.getDate() <= 7) {
+          monthLabels.push(`<text class="pln-tick" x="${x + 2}" y="10">${date.toLocaleDateString(undefined, { month: 'short' })}</text>`);
+        }
+      }
+    }
+
+    // Row backgrounds and bar SVG
+    const rowsHTML = bars.map((row, i) => {
+      if (row.skip) {
+        return `<div class="pln-row" style="height:${rowH}px">
+          <div class="pln-row-label"><b>${escapeHTML(row.a.title)}</b> <span class="muted">no due date</span></div>
+          <div class="pln-row-bar"><span class="pln-row-empty">Set a due date to plan this action.</span></div>
+        </div>`;
+      }
+      const doneCls = row.a.status === 'done' ? 'is-done' : '';
+      const statusDot = STATUSES.find((st) => st.id === row.a.status);
+      return `<div class="pln-row ${doneCls}" style="height:${rowH}px" data-action-id="${escapeHTML(row.a.id)}">
+        <div class="pln-row-label">
+          <span class="col-dot ${statusDot?.dot || ''}"></span>
+          <span class="pln-row-title" title="${escapeHTML(row.a.title)}">${escapeHTML(row.a.title)}</span>
+          <span class="pln-row-meta">${row.hours}h · ${escapeHTML(row.project.name)}</span>
+        </div>
+        <div class="pln-row-chart">
+          <svg class="pln-row-svg" viewBox="0 0 ${chartW} ${rowH}" preserveAspectRatio="none" width="${chartW}" height="${rowH}">
+            <rect class="pln-row-bg" x="0" y="0" width="${chartW}" height="${rowH}" />
+            <rect class="pln-bar" x="${row.barX}" y="8" width="${row.barW}" height="${rowH - 16}" rx="3" fill="rgba(${row.color.rgb},.35)" stroke="rgba(${row.color.rgb},.9)" stroke-width="1" data-action-id="${escapeHTML(row.a.id)}">
+              <title>${escapeHTML(row.a.title)} — ${row.hours}h · commitment ${(typeof row.a.commitment === 'number' ? row.a.commitment : 100)}%</title>
+            </rect>
+            ${row.dueX != null ? `<polygon class="pln-due" points="${row.dueX - 5},${rowH/2 - 6} ${row.dueX + 5},${rowH/2} ${row.dueX - 5},${rowH/2 + 6} ${row.dueX + 5},${rowH/2}" fill="rgb(${row.color.rgb})" stroke="var(--bg-1)" stroke-width="1"><title>Due ${row.a.due}</title></polygon>` : ''}
+          </svg>
+          <span class="pln-row-badge">${row.marginBadge}</span>
+        </div>
+      </div>`;
+    }).join('');
+
+    // Assemble
+    return `
+      <div class="planner-panel">
+        <div class="planner-info">
+          <div class="planner-cap">
+            <span class="muted">Capacity</span>
+            <b>${capacityPct}% FTE</b>
+            <span class="muted">· ${Math.round(weeklyCapHours)} h/week</span>
+          </div>
+          <div class="planner-legend">
+            <span class="pln-lg-item"><span class="pln-lg-diam"></span> due date</span>
+            <span class="pln-lg-item"><span class="pln-lg-margin ok">+</span> positive margin</span>
+            <span class="pln-lg-item"><span class="pln-lg-margin bad">−</span> late</span>
+          </div>
+        </div>
+        <div class="planner-scroll" id="plnScroll">
+          <div class="planner-axis" style="width:${chartW}px">
+            <svg viewBox="0 0 ${chartW} 16" width="${chartW}" height="16" class="pln-axis-svg">
+              ${monthLabels.join('')}
+              ${todayX != null ? `<line x1="${todayX}" x2="${todayX}" y1="0" y2="16" class="pln-today" />` : ''}
+            </svg>
+          </div>
+          <div class="planner-grid" style="width:${chartW}px">
+            <svg viewBox="0 0 ${chartW} ${bars.length * rowH}" width="${chartW}" height="${bars.length * rowH}" class="pln-grid-svg" preserveAspectRatio="none">
+              ${gridLines.join('')}
+              ${todayX != null ? `<line x1="${todayX}" x2="${todayX}" y1="0" y2="${bars.length * rowH}" class="pln-today-full" />` : ''}
+            </svg>
+            <div class="planner-rows">${rowsHTML}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
   // Reports is merged into Review — keep the function name for any
   // remaining callers (palette, stale state.currentView), but route to
   // the merged Review in 'full' mode so the old entry-point gives the

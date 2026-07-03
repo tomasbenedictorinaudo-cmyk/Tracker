@@ -3184,6 +3184,179 @@ body.is-card-dragging * { cursor: grabbing !important; }
   color: var(--bad);
 }
 
+/* Planner view */
+.planner-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.planner-picker .muted {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: .08em;
+}
+.planner-picker select {
+  background: var(--bg-2);
+  color: var(--text);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.planner-panel {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+.planner-info {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px dashed var(--line-2);
+}
+.planner-cap {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 13px;
+}
+.planner-cap .muted { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .06em; }
+.planner-cap b { color: var(--text); }
+.planner-legend {
+  margin-left: auto;
+  display: flex;
+  gap: 14px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.pln-lg-item { display: inline-flex; align-items: center; gap: 5px; }
+.pln-lg-diam {
+  display: inline-block;
+  width: 8px; height: 8px;
+  background: var(--accent);
+  transform: rotate(45deg);
+  border-radius: 1px;
+}
+.pln-lg-margin.ok  { color: var(--ok); font-weight: 700; font-size: 13px; }
+.pln-lg-margin.bad { color: var(--bad); font-weight: 700; font-size: 13px; }
+.planner-scroll {
+  overflow: auto;
+  max-height: calc(100vh - 240px);
+}
+.planner-axis {
+  position: sticky; top: 0; z-index: 3;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line-2);
+}
+.pln-axis-svg { display: block; }
+.pln-tick { fill: var(--text-faint); font-size: 10px; }
+.pln-today, .pln-today-full {
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: .85;
+}
+.pln-grid-week {
+  stroke: var(--line-2);
+  stroke-width: 1;
+  opacity: .35;
+}
+.planner-grid {
+  position: relative;
+}
+.pln-grid-svg {
+  position: absolute; inset: 0;
+  pointer-events: none;
+}
+.planner-rows {
+  position: relative;
+}
+.pln-row {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  gap: 8px;
+  align-items: center;
+  border-bottom: 1px solid var(--line-2);
+}
+.pln-row:last-child { border-bottom: 0; }
+.pln-row.is-done { opacity: .55; }
+.pln-row-label {
+  display: grid;
+  grid-template-columns: 10px 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 6px;
+  row-gap: 1px;
+  padding: 4px 8px;
+  min-width: 0;
+  font-size: 12px;
+  align-content: center;
+}
+.pln-row-label > .col-dot { grid-row: 1 / span 2; align-self: center; }
+.pln-row-title {
+  grid-column: 2;
+  color: var(--text);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pln-row-meta {
+  grid-column: 2;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.pln-row-chart {
+  position: relative;
+  height: 100%;
+}
+.pln-row-svg { display: block; }
+.pln-row-bg { fill: transparent; }
+.pln-bar {
+  cursor: pointer;
+  transition: filter .12s ease;
+}
+.pln-bar:hover { filter: brightness(1.25); }
+.pln-due {
+  pointer-events: none;
+}
+.pln-row-badge {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.pln-margin {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+}
+.pln-margin.ok  { color: var(--ok); border-color: rgba(74, 222, 128, .3); }
+.pln-margin.bad { color: var(--bad); border-color: rgba(248, 113, 121, .3); }
+.pln-margin.warn { color: var(--warn); border-color: rgba(251, 191, 36, .3); }
+.pln-row-empty {
+  display: inline-block;
+  padding: 8px 10px;
+  color: var(--text-faint);
+  font-style: italic;
+  font-size: 12px;
+}
+
 /* Owner-load strip in the action drawer */
 .owner-load-strip {
   background: var(--bg-2);
