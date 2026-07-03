@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-03T07:42:19.486Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-03T08:04:19.564Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -798,17 +798,29 @@ input, select, textarea { font: inherit; color: inherit; }
 .tour-mask {
   position: absolute; inset: 0;
   pointer-events: auto;
-  background: radial-gradient(
-    circle at var(--spot-x, 50%) var(--spot-y, 50%),
-    rgba(0,0,0,0)   0,
-    rgba(0,0,0,0)   var(--spot-r, 0px),
-    rgba(0,0,0,.55) calc(var(--spot-r, 0px) + 3px),
-    rgba(0,0,0,.7)  100%
-  );
-  transition: background .18s ease;
+  /* No background here — the rectangular cutout element (.tour-spot)
+     handles the darkening via a giant box-shadow, which draws the mask
+     around whatever shape it has. This matches the target's actual
+     bounds exactly, so a 938×637px board is spotlit as a full rounded
+     rectangle rather than a circle that either misses the corners or
+     bleeds beyond the target. */
 }
+/* Full-viewport dark — used only when there's no target (or the tour
+   can't find one). The spotlight element is hidden in that case. */
 .tour-mask.full {
   background: rgba(0,0,0,.6);
+}
+/* Rectangular cutout matching the target rect. The huge box-shadow
+   draws darkness in every direction around this element; the accent
+   ring is the second shadow layer. */
+.tour-spot {
+  position: absolute;
+  border-radius: 6px;
+  box-shadow:
+    0 0 0 9999px rgba(0, 0, 0, .62),
+    0 0 0 2px var(--accent);
+  pointer-events: none;
+  transition: top .12s ease, left .12s ease, width .12s ease, height .12s ease;
 }
 .tour-card {
   position: absolute;
@@ -841,16 +853,10 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .tour-foot .primary { margin-left: auto; padding: 6px 12px; }
 .tour-highlight {
-  /* Outline-only — no z-index bump. If we raise the target into a new
-     stacking context (as the old rule did with z-index: 801), it can
-     land ABOVE the overlay's card in some layouts because the target
-     stacks at the ROOT while the card stacks INSIDE the overlay's own
-     context. The overlay's z-index (9500) already sits above every
-     normal-flow element, so the outline is enough to signal the anchor
-     without any stacking change. */
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 4px;
+  /* The accent ring is now on the .tour-spot cutout element, so the
+     target itself doesn't need an outline — leaving one just double-
+     draws a border. Keeping the class as a hook for future per-target
+     styling. */
 }
 .tour-dots {
   display: flex;
@@ -30605,6 +30611,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const isFirst = idx === 0;
     overlay.innerHTML = `
       <div class="tour-mask" id="tourMask"></div>
+      <div class="tour-spot" id="tourSpot" hidden></div>
       <div class="tour-card" id="tourCard">
         <div class="tour-step">${escapeHTML(topic.label)} · step ${idx + 1} of ${topic.steps.length}</div>
         <div class="tour-title">${escapeHTML(step.title)}</div>
@@ -30619,15 +30626,26 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     document.body.appendChild(overlay);
     const card = overlay.querySelector('#tourCard');
     const mask = overlay.querySelector('#tourMask');
+    const spot = overlay.querySelector('#tourSpot');
+    // Reset mask state for this step. The .full class from a prior step
+    // must not carry over — otherwise the whole viewport stays dark
+    // regardless of the current step's target.
+    mask.classList.remove('full');
     if (target) {
       target.classList.add('tour-highlight');
       // Ensure the anchor is visible before we measure — nothing shipped
       // gets less useful than a spotlight aimed off-screen.
       try { target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' }); } catch (_) {}
       const r = target.getBoundingClientRect();
-      mask.style.setProperty('--spot-x', (r.left + r.width / 2) + 'px');
-      mask.style.setProperty('--spot-y', (r.top + r.height / 2) + 'px');
-      mask.style.setProperty('--spot-r', (Math.max(r.width, r.height) / 2 + 12) + 'px');
+      // Rectangular cutout via .tour-spot: darkens everything around the
+      // target's real bounds. Small padding around the rect so the ring
+      // reads as focus rather than a border on the target itself.
+      const pad = 6;
+      spot.hidden = false;
+      spot.style.left   = Math.max(0, r.left - pad) + 'px';
+      spot.style.top    = Math.max(0, r.top - pad) + 'px';
+      spot.style.width  = Math.min(innerWidth,  r.width  + pad * 2) + 'px';
+      spot.style.height = Math.min(innerHeight, r.height + pad * 2) + 'px';
       const W = card.getBoundingClientRect().width || 340;
       const H = card.getBoundingClientRect().height || 200;
       const margin = 16;
@@ -30683,16 +30701,21 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         else if (spaceTop >= H + margin) { y = Math.max(margin, r.top - H - margin); x = clamp(r.left, margin, innerWidth - W - margin); }
         else if (spaceRight >= W + margin) { x = Math.min(innerWidth - W - margin, r.right + margin); y = clamp(r.top, margin, innerHeight - H - margin); }
         else if (spaceLeft >= W + margin) { x = Math.max(margin, r.left - W - margin); y = clamp(r.top, margin, innerHeight - H - margin); }
-        // Last-resort: center the card and darken the whole mask — the
-        // target is genuinely too big or too crammed to caption on the side.
-        else { mask.classList.add('full'); card.style.transform = 'translate(-50%, -50%)'; card.style.left = '50%'; card.style.top = '50%'; }
+        // Last-resort: no side fits — center the card. The rectangular
+        // .tour-spot cutout already darkens everything outside the
+        // target via box-shadow, so we don't need the .full class; the
+        // card at z-index 802 floats above the spot with the target
+        // still visible through it.
+        else { card.style.transform = 'translate(-50%, -50%)'; card.style.left = '50%'; card.style.top = '50%'; }
       }
       if (!card.style.transform) {
         card.style.left = x + 'px';
         card.style.top = y + 'px';
       }
     } else {
+      // No target — full darkness, no cutout, centered card.
       mask.classList.add('full');
+      spot.hidden = true;
       card.style.left = '50%';
       card.style.top = '50%';
       card.style.transform = 'translate(-50%, -50%)';

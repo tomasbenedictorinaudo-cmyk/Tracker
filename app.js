@@ -22297,6 +22297,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const isFirst = idx === 0;
     overlay.innerHTML = `
       <div class="tour-mask" id="tourMask"></div>
+      <div class="tour-spot" id="tourSpot" hidden></div>
       <div class="tour-card" id="tourCard">
         <div class="tour-step">${escapeHTML(topic.label)} · step ${idx + 1} of ${topic.steps.length}</div>
         <div class="tour-title">${escapeHTML(step.title)}</div>
@@ -22311,15 +22312,26 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     document.body.appendChild(overlay);
     const card = overlay.querySelector('#tourCard');
     const mask = overlay.querySelector('#tourMask');
+    const spot = overlay.querySelector('#tourSpot');
+    // Reset mask state for this step. The .full class from a prior step
+    // must not carry over — otherwise the whole viewport stays dark
+    // regardless of the current step's target.
+    mask.classList.remove('full');
     if (target) {
       target.classList.add('tour-highlight');
       // Ensure the anchor is visible before we measure — nothing shipped
       // gets less useful than a spotlight aimed off-screen.
       try { target.scrollIntoView({ block: 'center', inline: 'center', behavior: 'auto' }); } catch (_) {}
       const r = target.getBoundingClientRect();
-      mask.style.setProperty('--spot-x', (r.left + r.width / 2) + 'px');
-      mask.style.setProperty('--spot-y', (r.top + r.height / 2) + 'px');
-      mask.style.setProperty('--spot-r', (Math.max(r.width, r.height) / 2 + 12) + 'px');
+      // Rectangular cutout via .tour-spot: darkens everything around the
+      // target's real bounds. Small padding around the rect so the ring
+      // reads as focus rather than a border on the target itself.
+      const pad = 6;
+      spot.hidden = false;
+      spot.style.left   = Math.max(0, r.left - pad) + 'px';
+      spot.style.top    = Math.max(0, r.top - pad) + 'px';
+      spot.style.width  = Math.min(innerWidth,  r.width  + pad * 2) + 'px';
+      spot.style.height = Math.min(innerHeight, r.height + pad * 2) + 'px';
       const W = card.getBoundingClientRect().width || 340;
       const H = card.getBoundingClientRect().height || 200;
       const margin = 16;
@@ -22375,16 +22387,21 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         else if (spaceTop >= H + margin) { y = Math.max(margin, r.top - H - margin); x = clamp(r.left, margin, innerWidth - W - margin); }
         else if (spaceRight >= W + margin) { x = Math.min(innerWidth - W - margin, r.right + margin); y = clamp(r.top, margin, innerHeight - H - margin); }
         else if (spaceLeft >= W + margin) { x = Math.max(margin, r.left - W - margin); y = clamp(r.top, margin, innerHeight - H - margin); }
-        // Last-resort: center the card and darken the whole mask — the
-        // target is genuinely too big or too crammed to caption on the side.
-        else { mask.classList.add('full'); card.style.transform = 'translate(-50%, -50%)'; card.style.left = '50%'; card.style.top = '50%'; }
+        // Last-resort: no side fits — center the card. The rectangular
+        // .tour-spot cutout already darkens everything outside the
+        // target via box-shadow, so we don't need the .full class; the
+        // card at z-index 802 floats above the spot with the target
+        // still visible through it.
+        else { card.style.transform = 'translate(-50%, -50%)'; card.style.left = '50%'; card.style.top = '50%'; }
       }
       if (!card.style.transform) {
         card.style.left = x + 'px';
         card.style.top = y + 'px';
       }
     } else {
+      // No target — full darkness, no cutout, centered card.
       mask.classList.add('full');
+      spot.hidden = true;
       card.style.left = '50%';
       card.style.top = '50%';
       card.style.transform = 'translate(-50%, -50%)';
