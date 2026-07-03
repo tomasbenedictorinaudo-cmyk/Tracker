@@ -20668,20 +20668,33 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const badgeEl = rowEl?.querySelector('.pln-row-badge');
       const dueGlyph = svg?.querySelector('.pln-due');
 
+      // The bar spans [startISO, endISO] where endISO is the COMPUTED
+      // work-end (start + plannedHours ÷ commitment), not the due date.
+      // Due date is captured separately and never touched by drag.
       const startISO = a.startDate || (a.due ? fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs)) : null);
-      const endISO = a.due;
-      if (!startISO || !endISO) return;
-      const startD = parseDate(startISO);
-      const endD = parseDate(endISO);
-      const initialSpanDays = Math.max(1, Math.round((endD - startD) / dayMs) + 1);
+      if (!startISO) return;
       const initialCommitment = typeof a.commitment === 'number' ? a.commitment : 100;
       let anchorHours = a.plannedHours;
       if (typeof anchorHours !== 'number' || anchorHours <= 0) {
-        anchorHours = (initialCommitment / 100) * HOURS_PER_WEEK * (initialSpanDays / 7);
+        // No stored hours yet — infer from the current commitment × the
+        // current bar geometry (which itself came from a.due when
+        // plannedHours was null; the seed is inherited so behavior
+        // matches what the user sees).
+        const seedEnd = a.due
+          ? parseDate(a.due)
+          : new Date(parseDate(startISO).getTime() + 6 * dayMs);
+        const seedDays = Math.max(1, Math.round((seedEnd - parseDate(startISO)) / dayMs) + 1);
+        anchorHours = (initialCommitment / 100) * HOURS_PER_WEEK * (seedDays / 7);
       }
+      // Derive the current work-end from anchor + commitment so drag
+      // math operates on the same geometry the user sees.
+      const weeksNeeded = anchorHours / ((initialCommitment / 100) * HOURS_PER_WEEK);
+      const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
+      const endISO = fmtISO(new Date(parseDate(startISO).getTime() + (daysNeeded - 1) * dayMs));
+      const dueISO = a.due || null;
 
       _plannerDrag.drag = {
-        a, zone, startISO, endISO, initialCommitment, anchorHours,
+        a, zone, startISO, endISO, dueISO, initialCommitment, anchorHours,
         group, bar, label, handleLeft, handleRight, badgeEl, dueGlyph,
         pressX: e.clientX,
         dragged: false,
@@ -20717,14 +20730,20 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     let newEnd = drag.endISO;
 
     if (drag.zone === 'body') {
+      // Shift the whole work window. Commitment untouched → workEnd
+      // shifts by the same amount as start.
       newStart = fmtISO(new Date(startD.getTime() + deltaDays * dayMs));
       newEnd = fmtISO(new Date(endD.getTime() + deltaDays * dayMs));
     } else if (drag.zone === 'left') {
+      // Reshape from the left. Bar's right edge (workEnd) stays put;
+      // start moves and commitment adjusts to preserve plannedHours.
       let ns = new Date(startD.getTime() + deltaDays * dayMs);
       const maxNs = new Date(endD.getTime() - dayMs);
       if (ns > maxNs) ns = maxNs;
       newStart = fmtISO(ns);
     } else if (drag.zone === 'right') {
+      // Reshape from the right. Start stays put; work-end moves and
+      // commitment adjusts. NEVER touches the due date.
       let ne = new Date(endD.getTime() + deltaDays * dayMs);
       const minNe = new Date(startD.getTime() + dayMs);
       if (ne < minNe) ne = minNe;
@@ -20779,18 +20798,15 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       drag.handleRight.setAttribute('x', x1 + w - hw + 2);
       drag.handleRight.setAttribute('width', hw);
     }
-    if (drag.dueGlyph && drag.zone !== 'left') {
-      const dx = dayToX(newEnd);
-      const rowH = 44;
-      drag.dueGlyph.setAttribute('points', `${dx - 5},${rowH/2 - 6} ${dx + 5},${rowH/2} ${dx - 5},${rowH/2 + 6} ${dx + 5},${rowH/2}`);
-    }
+    // Due-glyph never moves — the whole point of this drag model is
+    // that the due date is fixed by the customer, not by the plan.
     if (drag.group) {
       drag.group.classList.toggle('is-over-cap', newCommitment > 100);
       drag.group.classList.toggle('is-way-over-cap', newCommitment > 150);
     }
-    if (drag.badgeEl) {
-      const dueISO = drag.zone === 'left' ? drag.endISO : newEnd;
-      const marginDays = Math.round((parseDate(dueISO) - parseDate(newEnd)) / dayMs);
+    if (drag.badgeEl && drag.dueISO) {
+      // Margin = fixed due minus the live work-end.
+      const marginDays = Math.round((parseDate(drag.dueISO) - parseDate(newEnd)) / dayMs);
       drag.badgeEl.innerHTML = marginDays > 0
         ? `<span class="pln-margin ok">+${marginDays}d</span>`
         : marginDays < 0
@@ -20807,8 +20823,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     if (d.bar) d.bar.style.cursor = 'grab';
     if (!d.dragged) return;
     const a = d.a;
+    // Never touch a.due — the due date is fixed by the customer, not
+    // by dragging. Body drag shifts start (workEnd follows via the
+    // hours-and-commitment computation); edge drags reshape the
+    // window and commitment.
     if (d.zone === 'body' || d.zone === 'left') a.startDate = d.newStartISO;
-    if (d.zone === 'body' || d.zone === 'right') a.due = d.newEndISO;
     if (d.zone !== 'body') {
       a.commitment = d.newCommitment;
       a.plannedHours = Math.round(d.anchorHours);
@@ -20856,40 +20875,44 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const clampX = (x) => Math.max(0, Math.min(chartW, x));
     const todayX = xFor(todayISO());
 
-    // Per-action bar geometry
+    // Per-action bar geometry.
+    // Work window is workStart..workEnd where workEnd is COMPUTED from
+    // plannedHours ÷ commitment (not the due date). Due date is a
+    // fixed marker that drag never touches.
     const bars = items.map(({ a, project }, i) => {
       const dueX = a.due ? xFor(a.due) : null;
-      // Work window — use startDate/due; fall back to due-2d if no start.
       let workStart = a.startDate;
-      let workEnd = a.due;
-      if (!workEnd) {
+      if (!workStart && !a.due) {
         return { a, project, skip: true, i };
       }
       if (!workStart) {
-        const d = parseDate(a.due);
-        workStart = fmtISO(new Date(d.getTime() - 2 * dayMs));
+        // No explicit start — anchor 2 days before due as a sensible
+        // default.
+        workStart = fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs));
       }
+      const commitment = typeof a.commitment === 'number' ? a.commitment : 100;
+      const hoursRaw = _plannerEffectiveHours(a);
+      // How many days does the work take at this commitment?
+      const weeksNeeded = hoursRaw / ((commitment / 100) * HOURS_PER_WEEK);
+      const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
+      const workEnd = fmtISO(new Date(parseDate(workStart).getTime() + (daysNeeded - 1) * dayMs));
       const barX = clampX(xFor(workStart));
       const barX2 = clampX(xFor(workEnd));
       const barW  = Math.max(4, barX2 - barX);
-      const hours = Math.round(_plannerEffectiveHours(a));
-      const commitment = typeof a.commitment === 'number' ? a.commitment : 100;
+      const hours = Math.round(hoursRaw);
       const isOver = commitment > 100;
       const isOverHard = commitment > 150;
-      // Margin — where does the work end vs the due date? Once
-      // plannedHours is anchored and commitment shifts, the work
-      // window and the due date genuinely diverge.
+      // Margin — days between work-end and due. Positive = slack;
+      // negative = late. Only meaningful when a due date is set.
       const workEndX = barX + barW;
-      const marginPx = dueX == null ? 0 : dueX - workEndX;
-      const marginDays = Math.round(marginPx / dayW);
-      const marginBadge = dueX == null
+      const marginDays = a.due ? Math.round((parseDate(a.due) - parseDate(workEnd)) / dayMs) : null;
+      const marginBadge = marginDays == null
         ? ''
         : marginDays > 0
           ? `<span class="pln-margin ok">+${marginDays}d</span>`
           : marginDays < 0
             ? `<span class="pln-margin bad">${marginDays}d</span>`
             : `<span class="pln-margin warn">±0d</span>`;
-      // Color per action for later cross-highlight
       const c = colorFor(a.id);
       return { a, project, hours, commitment, isOver, isOverHard, barX, barW, workStart, workEnd, workEndX, dueX, marginBadge, color: c, i };
     });
