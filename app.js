@@ -20401,6 +20401,54 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     if (typeof a.plannedHours === 'number' && a.plannedHours > 0) return a.plannedHours;
     return plannedHoursTotal(a);
   }
+
+  // Peak-load lookahead for the Person picker. Looks at every open
+  // action assigned to this person across all non-archived projects,
+  // rolls them into weekly buckets for the next 12 weeks, and reports
+  // whether any bucket exceeds the person's capacity (warn) or blows
+  // past 150 % of it (severe). Also returns the peak week's ratio so
+  // the option label can show "· 145% peak" style detail.
+  function _plannerPersonOverload(person) {
+    const empty = { over: false, severe: false, peakPct: 0 };
+    if (!person) return empty;
+    const cap = ((person.capacity || 100) / 100) * HOURS_PER_WEEK;
+    if (cap <= 0) return empty;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const monday = new Date(today);
+    while (monday.getDay() !== 1) monday.setDate(monday.getDate() - 1);
+    const weekStarts = [];
+    for (let i = 0; i < 12; i++) weekStarts.push(new Date(monday.getTime() + i * 7 * dayMs));
+    const weekHours = weekStarts.map(() => 0);
+    for (const proj of (state.projects || [])) {
+      if (!proj || proj.archived) continue;
+      for (const a of (proj.actions || [])) {
+        if (!a || a.owner !== person.id) continue;
+        if (a.archivedAt) continue;
+        if (a.status === 'cancelled' || a.status === 'done') continue;
+        if (isSnoozed(a)) continue;
+        const hours = _plannerEffectiveHours(a);
+        if (!(hours > 0)) continue;
+        const commitmentPct = typeof a.commitment === 'number' ? a.commitment : 100;
+        const weeksNeeded = hours / ((commitmentPct / 100) * HOURS_PER_WEEK);
+        const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
+        const startD = a.startDate ? parseDate(a.startDate) : (a.due ? new Date(parseDate(a.due).getTime() - (daysNeeded - 1) * dayMs) : null);
+        if (!startD) continue;
+        const endD = new Date(startD.getTime() + (daysNeeded - 1) * dayMs);
+        const perDayHours = hours / daysNeeded;
+        weekStarts.forEach((wStart, i) => {
+          const wEnd = new Date(wStart.getTime() + 7 * dayMs);
+          const overlapStart = Math.max(startD.getTime(), wStart.getTime());
+          const overlapEnd = Math.min(endD.getTime() + dayMs, wEnd.getTime());
+          if (overlapEnd <= overlapStart) return;
+          const overlapDays = (overlapEnd - overlapStart) / dayMs;
+          weekHours[i] += overlapDays * perDayHours;
+        });
+      }
+    }
+    const peak = weekHours.length ? Math.max(...weekHours) : 0;
+    const peakPct = Math.round((peak / cap) * 100);
+    return { over: peak > cap, severe: peak > cap * 1.5, peakPct };
+  }
   function renderPlanner(root) {
     _plannerInit();
     const s = _plannerState;
@@ -20493,7 +20541,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           <label class="planner-picker">
             <span class="muted">Person</span>
             <select id="plnPerson">
-              ${people.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === s.personId ? 'selected' : ''}>${escapeHTML(p.name)}${p.role ? ' · ' + escapeHTML(p.role) : ''}</option>`).join('')}
+              ${people.map((p) => {
+                const ol = _plannerPersonOverload(p);
+                const mark = ol.severe ? '\u{1F534} ' : ol.over ? '⚠️ ' : '';
+                const suffix = ol.over ? ` — ${ol.peakPct}% peak` : '';
+                return `<option value="${escapeHTML(p.id)}" ${p.id === s.personId ? 'selected' : ''}>${mark}${escapeHTML(p.name)}${p.role ? ' · ' + escapeHTML(p.role) : ''}${suffix}</option>`;
+              }).join('')}
             </select>
           </label>
           <div class="seg" role="tablist" aria-label="Scope">
