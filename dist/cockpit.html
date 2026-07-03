@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-03T22:25:08.822Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-03T22:37:11.979Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3280,7 +3280,8 @@ body.is-card-dragging * { cursor: grabbing !important; }
   position: relative;
 }
 .pln-grid-svg {
-  position: absolute; inset: 0;
+  /* left/width set inline so overlay aligns with the chart column. */
+  position: absolute; top: 0; bottom: 0;
   pointer-events: none;
 }
 .planner-rows {
@@ -3337,6 +3338,11 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .pln-bar:hover { filter: brightness(1.25); }
 .pln-due {
+  pointer-events: none;
+  /* Slight glow so the marker pops even when sitting inside a bar. */
+  filter: drop-shadow(0 0 2px var(--bg-1));
+}
+.pln-due-line {
   pointer-events: none;
 }
 .pln-row-badge {
@@ -29237,9 +29243,29 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           </label>
         </div>
       </div>
-      ${person ? renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s) : `<div class="empty">No team members yet — add one from the People page.</div>`}
+      ${person ? renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s, _plannerChartWidth(root, s)) : `<div class="empty">No team members yet — add one from the People page.</div>`}
     `;
     root.appendChild(view);
+
+    // Post-mount refit — the pre-render estimate was based on #main width,
+    // but the actual scroll container may be a bit narrower due to
+    // padding/border. If the fit differs by more than a couple pixels
+    // per day, re-render with the true measurement.
+    if (person) {
+      const scroll = view.querySelector('#plnScroll');
+      if (scroll) {
+        const target = _plannerChartWidth(root, s, scroll);
+        const current = { dayW: parseFloat(scroll.dataset.dayW), chartW: parseFloat(scroll.dataset.chartW) };
+        if (target.dayW !== current.dayW) {
+          // Swap the panel HTML for the fitted version.
+          const oldPanel = view.querySelector('.planner-panel');
+          const wrap = document.createElement('div');
+          wrap.innerHTML = renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s, target);
+          const newPanel = wrap.firstElementChild;
+          oldPanel.replaceWith(newPanel);
+        }
+      }
+    }
 
     // Wire controls
     view.querySelector('#plnPerson')?.addEventListener('change', (e) => {
@@ -29271,7 +29297,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     while (_wlAnchor.getDay() !== 1) _wlAnchor.setDate(_wlAnchor.getDate() - 1);
     const winStartClosure = new Date(_wlAnchor.getTime() - _wlHalfWeeks * 7 * dayMs);
     const winEndClosure = new Date(_wlAnchor.getTime() + _wlHalfWeeks * 7 * dayMs);
-    const dayWClosure = 8;
+    const dayWClosure = _plannerChartWidth(root, s).dayW;
     const capacityHoursClosure = (capacityPct / 100) * HOURS_PER_WEEK;
     _plannerLiveUpdateWorkload = () => {
       const wl = view.querySelector('#plnWorkload');
@@ -29545,9 +29571,37 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     render();
   });
 
+  // Available chart width — the Gantt/workload area to the right of the
+  // row-label column. Reads the layout at render time so the chart fills
+  // whatever viewport we get, no wasted horizontal real estate.
+  // Takes an optional live `.planner-scroll` element to measure directly,
+  // otherwise estimates from #main width.
+  function _plannerChartWidth(root, s, liveScrollEl) {
+    const halfWeeks = Math.floor(s.windowWeeks / 2);
+    const totalDays = halfWeeks * 14;
+    const labelSide = 240 + 8; // label col + gap
+    let available;
+    if (liveScrollEl && liveScrollEl.clientWidth) {
+      // Exact — scroll width minus label col + grid gap.
+      available = liveScrollEl.clientWidth - labelSide;
+    } else {
+      const containerW = (root?.clientWidth || document.querySelector('#main')?.clientWidth || 1000);
+      // Estimate: view padding + panel padding + border + label + gap + scrollbar
+      available = containerW - 34 - 26 - labelSide - 8;
+    }
+    available = Math.max(300, available);
+    // dayW fills the available width; clamp only at the upper end.
+    const dayW = Math.max(4, Math.min(24, Math.floor(available / totalDays)));
+    return { dayW, chartW: totalDays * dayW };
+  }
+
+  // Layout constants — the row-label column width and the gap between
+  // label and chart. Used by axis/grid alignment math.
+  const LABEL_COL_W = 240;
+  const LABEL_GAP = 8;
+
   // The top half — one row per action, laid out on a day-precision axis.
-  // Phase 1 is read-only. Later phases add drag interactions.
-  function renderPlannerGantt(person, items, weeklyCapHours, capacityPct, s) {
+  function renderPlannerGantt(person, items, weeklyCapHours, capacityPct, s, sizing) {
     if (!items.length) {
       return `<div class="empty">${escapeHTML(person.name)} has no open actions${s.scope === 'project' ? ' on this project' : ''}. Assign one to see it here.</div>`;
     }
@@ -29561,8 +29615,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const winStart = new Date(anchor.getTime() - halfWeeks * 7 * dayMs);
     const winEnd   = new Date(anchor.getTime() + halfWeeks * 7 * dayMs);
     const totalDays = Math.round((winEnd - winStart) / dayMs);
-    const dayW = 8; // pixels per day at default zoom
-    const chartW = totalDays * dayW;
+    const dayW = sizing?.dayW || 8;
+    const chartW = sizing?.chartW || totalDays * dayW;
     const rowH = 44;
 
     const xFor = (iso) => {
@@ -29652,7 +29706,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
               <rect class="pln-handle pln-handle-left" x="${row.barX - 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="left" fill="transparent" style="cursor:ew-resize"><title>Drag to shift start date</title></rect>
               <rect class="pln-handle pln-handle-right" x="${row.barX + row.barW - Math.min(8, row.barW/3) + 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="right" fill="transparent" style="cursor:ew-resize"><title>Drag to shift due date</title></rect>
             </g>
-            ${row.dueX != null ? `<polygon class="pln-due" points="${row.dueX - 5},${rowH/2 - 6} ${row.dueX + 5},${rowH/2} ${row.dueX - 5},${rowH/2 + 6} ${row.dueX + 5},${rowH/2}" fill="rgb(${row.color.rgb})" stroke="var(--bg-1)" stroke-width="1"><title>Due ${row.a.due}</title></polygon>` : ''}
+            ${row.dueX != null ? `
+              <line class="pln-due-line" x1="${row.dueX}" x2="${row.dueX}" y1="4" y2="${rowH - 4}" stroke="rgb(${row.color.rgb})" stroke-width="1" stroke-dasharray="2 3" opacity=".55" />
+              <polygon class="pln-due" points="${row.dueX - 6},${rowH/2} ${row.dueX},${rowH/2 - 7} ${row.dueX + 6},${rowH/2} ${row.dueX},${rowH/2 + 7}" fill="var(--bg-1)" stroke="rgb(${row.color.rgb})" stroke-width="2"><title>Due ${row.a.due}</title></polygon>` : ''}
           </svg>
           <span class="pln-row-badge">${row.marginBadge}</span>
         </div>
@@ -29675,14 +29731,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           </div>
         </div>
         <div class="planner-scroll" id="plnScroll" data-day-w="${dayW}" data-win-start="${fmtISO(winStart)}" data-chart-w="${chartW}">
-          <div class="planner-axis" style="width:${chartW}px">
+          <div class="planner-axis" style="padding-left:${LABEL_COL_W + LABEL_GAP}px">
             <svg viewBox="0 0 ${chartW} 16" width="${chartW}" height="16" class="pln-axis-svg">
               ${monthLabels.join('')}
               ${todayX != null ? `<line x1="${todayX}" x2="${todayX}" y1="0" y2="16" class="pln-today" />` : ''}
             </svg>
           </div>
-          <div class="planner-grid" style="width:${chartW}px">
-            <svg viewBox="0 0 ${chartW} ${bars.length * rowH}" width="${chartW}" height="${bars.length * rowH}" class="pln-grid-svg" preserveAspectRatio="none">
+          <div class="planner-grid" style="width:${LABEL_COL_W + LABEL_GAP + chartW}px">
+            <svg viewBox="0 0 ${chartW} ${bars.length * rowH}" width="${chartW}" height="${bars.length * rowH}" class="pln-grid-svg" preserveAspectRatio="none" style="left:${LABEL_COL_W + LABEL_GAP}px; width:${chartW}px">
               ${gridLines.join('')}
               ${todayX != null ? `<line x1="${todayX}" x2="${todayX}" y1="0" y2="${bars.length * rowH}" class="pln-today-full" />` : ''}
             </svg>
@@ -29815,7 +29871,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           </div>
           <span class="pln-wl-cap-badge ${capBadgeCls}">${Math.round(capHours)} h/week</span>
         </div>
-        <div class="pln-wl-chart" style="width:${chartW}px; height:${chartH}px">
+        <div class="pln-wl-chart" style="width:${chartW}px; height:${chartH}px; margin-left:${LABEL_COL_W + LABEL_GAP}px">
           <svg width="${chartW}" height="${chartH}" viewBox="0 0 ${chartW} ${chartH}" class="pln-wl-svg">
             ${gridMarks.join('')}
             ${stacks}

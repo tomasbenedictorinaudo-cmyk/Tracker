@@ -3271,7 +3271,8 @@ body.is-card-dragging * { cursor: grabbing !important; }
   position: relative;
 }
 .pln-grid-svg {
-  position: absolute; inset: 0;
+  /* left/width set inline so overlay aligns with the chart column. */
+  position: absolute; top: 0; bottom: 0;
   pointer-events: none;
 }
 .planner-rows {
@@ -3328,6 +3329,11 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .pln-bar:hover { filter: brightness(1.25); }
 .pln-due {
+  pointer-events: none;
+  /* Slight glow so the marker pops even when sitting inside a bar. */
+  filter: drop-shadow(0 0 2px var(--bg-1));
+}
+.pln-due-line {
   pointer-events: none;
 }
 .pln-row-badge {
