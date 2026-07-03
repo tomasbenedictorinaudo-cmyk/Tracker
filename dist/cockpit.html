@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-03T08:51:07.555Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-03T08:59:32.404Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -10371,6 +10371,18 @@ body.is-row-dragging *        { user-select: none !important; }
         });
       }
     }
+    if (_dashDrill.kind === 'urgency-high') {
+      if (isClosedStatus(a.status)) return false;
+      if (!a.due) return false;
+      const origin = a.originatorDate || a.createdAt;
+      if (!origin) return false;
+      const oMs = parseDate(origin)?.getTime();
+      const dMs = parseDate(a.due)?.getTime();
+      const tMs = parseDate(todayISO())?.getTime();
+      if (!oMs || !dMs || !tMs || dMs <= oMs) return false;
+      const u = Math.max(0, Math.min(1, (tMs - oMs) / (dMs - oMs)));
+      return u >= (_dashDrill.threshold ?? 0.75);
+    }
     return true;
   }
   function actionMatchesFilters(a) {
@@ -10553,7 +10565,41 @@ body.is-row-dragging *        { user-select: none !important; }
       return { id: p.id, name: p.name, committed, openCount: owned.length, capacity: p.capacity || 100 };
     });
 
-    return { total, done, doing, blocked, late, upcoming, completionRate, lateRate, blockedRatio, throughput, workload };
+    // Urgency — how much of each open action's originally-planned
+    // runway has already been burnt.
+    //   totalRunway = daysBetween(originatorDate, due)  // what you had
+    //   elapsed     = daysBetween(originatorDate, today) // what you've used
+    //   urgency     = clamp(elapsed / totalRunway, 0, 1) // fraction burnt
+    //
+    // originatorDate falls back to createdAt so old data doesn't sit at
+    // 0. Actions without a due date (or with due < origin) are skipped
+    // — nothing to measure against. Cancelled / done actions excluded.
+    const HIGH_URGENCY_THRESHOLD = 0.75;
+    const urgencyRows = acts
+      .filter((a) => !isClosedStatus(a.status))
+      .map((a) => {
+        if (!a.due) return null;
+        const origin = a.originatorDate || a.createdAt;
+        if (!origin) return null;
+        const oMs = parseDate(origin)?.getTime();
+        const dMs = parseDate(a.due)?.getTime();
+        const tMs = parseDate(today)?.getTime();
+        if (!oMs || !dMs || !tMs || dMs <= oMs) return null;
+        const elapsed = tMs - oMs;
+        const total = dMs - oMs;
+        // Overdue actions clamp at 1 (max urgency) — the KPI is about
+        // pressure, and overdue is maximal pressure. The Late tile
+        // already surfaces the count separately.
+        const u = Math.max(0, Math.min(1, elapsed / total));
+        return u;
+      })
+      .filter((u) => u !== null);
+    const urgencyN = urgencyRows.length;
+    const urgencyAvg = urgencyN ? Math.round((urgencyRows.reduce((s, u) => s + u, 0) / urgencyN) * 100) : 0;
+    const highUrgency = urgencyRows.filter((u) => u >= HIGH_URGENCY_THRESHOLD).length;
+
+    return { total, done, doing, blocked, late, upcoming, completionRate, lateRate, blockedRatio, throughput, workload,
+             urgency: { avg: urgencyAvg, high: highUrgency, measured: urgencyN, threshold: Math.round(HIGH_URGENCY_THRESHOLD * 100) } };
   }
 
   /* ---------------------------- rendering ---------------------------- */
@@ -15042,7 +15088,9 @@ body.is-row-dragging *        { user-select: none !important; }
     const wrap = $('#tlGridWrap');
     if (!wrap) return;
     const todayX = -tlState.startOffsetDays * tlState.dayWidth;
-    wrap.scrollLeft = Math.max(0, todayX - wrap.clientWidth / 3);
+    // Centre today in the viewport, not 1/3 in — the user asked
+    // explicitly for centred so they can scroll evenly back or forward.
+    wrap.scrollLeft = Math.max(0, todayX - wrap.clientWidth / 2);
   }
 
   function updateHolidayBadge() {
@@ -15173,11 +15221,46 @@ body.is-row-dragging *        { user-select: none !important; }
     if (!lanesEl) return;
 
     const g = GRANULARITIES[tlState.granularity];
-    const totalDays = g.totalDays;
     const dw = tlState.dayWidth;
+
+    // Compute the natural project span from the actual actions —
+    // earliest event (createdAt / startDate / first history entry)
+    // vs latest event (due / completedAt). This makes the Gantt
+    // scrollable through the full history AND future plan, rather
+    // than a fixed forward-oriented window.
+    const todayMs = (() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); })();
+    const PAD_DAYS = 30;
+    let earliestMs = todayMs;
+    let latestMs = todayMs;
+    (actions || []).forEach((a) => {
+      const candidatesEarly = [a.createdAt, a.startDate, a.originatorDate];
+      (a.history || []).forEach((h) => { if (h?.at) candidatesEarly.push(h.at); });
+      candidatesEarly.forEach((iso) => {
+        if (typeof iso !== 'string' || !iso) return;
+        const t = parseDate(iso)?.getTime();
+        if (t && t < earliestMs) earliestMs = t;
+      });
+      const candidatesLate = [a.due, a.completedAt, a.baseline?.due];
+      candidatesLate.forEach((iso) => {
+        if (typeof iso !== 'string' || !iso) return;
+        const t = parseDate(iso)?.getTime();
+        if (t && t > latestMs) latestMs = t;
+      });
+    });
+    earliestMs -= PAD_DAYS * dayMs;
+    latestMs   += PAD_DAYS * dayMs;
+    // Never shrink below the granularity's default forward runway —
+    // keeps the Gantt useful for planning even on brand-new projects.
+    if ((latestMs - todayMs) < g.totalDays * dayMs) {
+      latestMs = todayMs + g.totalDays * dayMs;
+    }
+    // Update tlState so the "Today" button + scroll positioning use
+    // the same numbers the render uses.
+    tlState.startOffsetDays = Math.floor((earliestMs - todayMs) / dayMs);
+    const totalDays = Math.max(g.totalDays, Math.ceil((latestMs - earliestMs) / dayMs));
     const width = totalDays * dw;
     // Align start to the granularity unit
-    let start = new Date(Date.now() + tlState.startOffsetDays * dayMs);
+    let start = new Date(earliestMs);
     start.setHours(0, 0, 0, 0);
     if (tlState.granularity === 'week') {
       while (start.getDay() !== 1) start = new Date(start.getTime() - dayMs);
@@ -16534,6 +16617,28 @@ body.is-row-dragging *        { user-select: none !important; }
             ],
           })}
         </div>
+        <div class="kpi clickable" data-dash-filter="urgent">
+          <div class="kpi-label">Urgency</div>
+          <div class="kpi-value ${k.urgency.high >= 8 ? 'bad' : k.urgency.high >= 3 ? 'warn' : 'ok'}">${k.urgency.high}</div>
+          <div class="kpi-sub">avg <b>${k.urgency.avg}%</b> runway burnt · ${k.urgency.high} above ${k.urgency.threshold}%</div>
+          ${_kpiTooltip({
+            title: 'Urgency',
+            meaning: 'How much of an action\'s originally-planned runway has already been burnt. The big number is the count of actions with ≥ 75% of their time gone — the pressure list. The sub-line gives the portfolio-wide average so you can spot creeping crunch even before actions turn late.',
+            formula: 'per action: urgency = elapsed ÷ total_runway, clamped [0, 1]\n  elapsed     = today − originator_date\n  total_runway = due − originator_date\n\ntile.value = count( urgency ≥ 0.75 )\ntile.avg   = mean( urgency ) over measurable actions',
+            inputs: [
+              { name: 'originator_date', desc: 'When the action was received (defaults to createdAt when the field is blank).' },
+              { name: 'a.due',           desc: 'Current due date. Actions with no due are skipped — nothing to measure against.' },
+              { name: 'today',           desc: 'Today\'s calendar date.' },
+              { name: 'a.status',        desc: 'Done / Cancelled actions are excluded — the metric measures pressure on OPEN work.' },
+            ],
+            minimumData: [
+              { scope: 'Per action', desc: 'a due date AND an originator date (or createdAt, which is auto-set). Without one of these the action is skipped, and the tile\'s "measured" count drops.' },
+            ],
+            notComputable: k.urgency.measured === 0
+              ? 'Cannot compute — no open action has both an originator date and a due date. Add dates in the drawer to enable pressure tracking.'
+              : null,
+          })}
+        </div>
         <div class="kpi clickable" data-dash-filter="done">
           <div class="kpi-label">Completion</div>
           <div class="kpi-value ${k.completionRate >= 70 ? 'ok' : ''}">${k.completionRate}%</div>
@@ -16858,6 +16963,14 @@ body.is-row-dragging *        { user-select: none !important; }
         const f = el.dataset.dashFilter;
         if (f === 'late' || f === 'week') applyTopbarFilter({ due: f, status: '', view: 'register' });
         else if (f === 'blocked' || f === 'done') applyTopbarFilter({ status: f, due: '', view: 'register' });
+        else if (f === 'urgent') {
+          // Urgency isn't a stored field — reuse the drill infrastructure
+          // to expose the same open actions the tile counted.
+          _dashDrill = { kind: 'urgency-high', threshold: 0.75, label: 'Urgency ≥ 75% of runway burnt' };
+          state.currentView = 'register';
+          saveState();
+          render();
+        }
       });
       el.addEventListener('dblclick', (e) => {
         e.preventDefault();
