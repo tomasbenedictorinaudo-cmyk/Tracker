@@ -20503,7 +20503,294 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       s.windowWeeks = parseInt(e.target.value, 10) || 12;
       render();
     });
+
+    // Drag wire-up (Phase 2 — workload-preserving drag).
+    _wirePlannerDrag(view);
+
+    // Bidirectional highlighting (Phase 4)
+    _wirePlannerHighlight(view, person, s);
+
+    // Live workload chart redraw during drag (Phase 3).
+    // Derive the same time window the Gantt uses so both stay in sync.
+    const _wlHalfWeeks = Math.floor(s.windowWeeks / 2);
+    const _wlToday = new Date(); _wlToday.setHours(0, 0, 0, 0);
+    const _wlAnchor = new Date(_wlToday);
+    while (_wlAnchor.getDay() !== 1) _wlAnchor.setDate(_wlAnchor.getDate() - 1);
+    const winStartClosure = new Date(_wlAnchor.getTime() - _wlHalfWeeks * 7 * dayMs);
+    const winEndClosure = new Date(_wlAnchor.getTime() + _wlHalfWeeks * 7 * dayMs);
+    const dayWClosure = 8;
+    const capacityHoursClosure = (capacityPct / 100) * HOURS_PER_WEEK;
+    _plannerLiveUpdateWorkload = () => {
+      const wl = view.querySelector('#plnWorkload');
+      if (!wl || !person) return;
+      const drag = _plannerDrag.drag;
+      const substituted = visibleActions.map((it) => {
+        if (drag && it.a.id === drag.a.id) {
+          const cloned = { ...it.a };
+          cloned.startDate = drag.newStartISO;
+          cloned.due = drag.newEndISO;
+          if (drag.zone !== 'body') cloned.commitment = drag.newCommitment;
+          return { a: cloned, project: it.project };
+        }
+        return it;
+      });
+      const html = _plannerWorkloadHTML(substituted, null, winStartClosure, winEndClosure, dayWClosure, capacityHoursClosure);
+      // Preserve highlight
+      const prevHl = s.highlightedActionId;
+      wl.outerHTML = html;
+      if (prevHl) {
+        view.querySelectorAll(`.pln-wl-seg[data-action-id="${prevHl}"]`).forEach((el) => el.classList.add('is-highlight'));
+        view.querySelectorAll(`.pln-wl-lg-item[data-action-id="${prevHl}"]`).forEach((el) => el.classList.add('is-highlight'));
+      }
+      // Re-wire click handlers on the new segments.
+      view.querySelectorAll('#plnWorkload .pln-wl-seg').forEach((seg) => {
+        seg.addEventListener('click', () => {
+          const id = seg.dataset.actionId;
+          _plannerToggleHighlight(view, s, id);
+        });
+      });
+      view.querySelectorAll('#plnWorkload .pln-wl-lg-item').forEach((li) => {
+        li.addEventListener('click', () => {
+          const id = li.dataset.actionId;
+          _plannerToggleHighlight(view, s, id);
+        });
+      });
+    };
   }
+
+  function _plannerToggleHighlight(view, s, actionId) {
+    if (!actionId) return;
+    const clearAll = () => {
+      view.querySelectorAll('.pln-bar-group.is-highlight').forEach((el) => el.classList.remove('is-highlight'));
+      view.querySelectorAll('.pln-wl-seg.is-highlight').forEach((el) => el.classList.remove('is-highlight'));
+      view.querySelectorAll('.pln-wl-lg-item.is-highlight').forEach((el) => el.classList.remove('is-highlight'));
+    };
+    if (s.highlightedActionId === actionId) { s.highlightedActionId = null; clearAll(); return; }
+    clearAll();
+    s.highlightedActionId = actionId;
+    view.querySelectorAll(`.pln-bar-group[data-action-id="${actionId}"]`).forEach((el) => el.classList.add('is-highlight'));
+    view.querySelectorAll(`.pln-wl-seg[data-action-id="${actionId}"]`).forEach((el) => el.classList.add('is-highlight'));
+    view.querySelectorAll(`.pln-wl-lg-item[data-action-id="${actionId}"]`).forEach((el) => el.classList.add('is-highlight'));
+  }
+
+  function _wirePlannerHighlight(view, person, s) {
+    if (!view) return;
+    view.querySelectorAll('.pln-bar[data-drag-zone="body"]').forEach((bar) => {
+      bar.addEventListener('click', () => {
+        // Skip if a drag just happened — the mousemove clears the click.
+        _plannerToggleHighlight(view, s, bar.dataset.actionId);
+      });
+    });
+    view.querySelectorAll('.pln-wl-seg').forEach((seg) => {
+      seg.addEventListener('click', () => _plannerToggleHighlight(view, s, seg.dataset.actionId));
+    });
+    view.querySelectorAll('.pln-wl-lg-item').forEach((li) => {
+      li.addEventListener('click', () => _plannerToggleHighlight(view, s, li.dataset.actionId));
+    });
+    // Restore prior selection after re-render (session-scoped).
+    if (s.highlightedActionId) {
+      const prev = s.highlightedActionId;
+      s.highlightedActionId = null;
+      _plannerToggleHighlight(view, s, prev);
+    }
+  }
+
+  // Attach drag handlers to every bar in the planner. Delegated at the
+  // scroll container so we don't need per-row wiring.
+  //
+  // Semantics — the workload (plannedHours) is the anchor:
+  //   - body drag  → shift both start + due by delta days.
+  //   - left edge  → shift start earlier/later, preserving plannedHours.
+  //   - right edge → shift due earlier/later, preserving plannedHours.
+  // On any edge drag, commitment% is recomputed so that
+  //   commitment × HOURS_PER_WEEK × weeksInWindow ≈ plannedHours.
+  // Hard-stopped at 200% commitment to prevent a runaway drag.
+  function _wirePlannerDrag(view) {
+    const scroll = view.querySelector('#plnScroll');
+    if (!scroll) return;
+    const dayW = parseFloat(scroll.dataset.dayW) || 8;
+    const winStartISO = scroll.dataset.winStart;
+    if (!winStartISO) return;
+    const winStart = parseDate(winStartISO);
+    // Store current run's axis on the module-level state so the
+    // one-time window listeners can access it after re-renders.
+    _plannerDrag.dayW = dayW;
+    _plannerDrag.winStart = winStart;
+
+    scroll.addEventListener('mousedown', (e) => {
+      // Walk up to the nearest element with a data-drag-zone attr — the
+      // event may originate from a <title> inside the rect.
+      const target = e.target?.closest?.('[data-drag-zone]');
+      const zone = target?.dataset?.dragZone;
+      const actionId = target?.dataset?.actionId;
+      if (!zone || !actionId) return;
+      let found = null;
+      for (const p of state.projects || []) {
+        const a = (p.actions || []).find((x) => x.id === actionId);
+        if (a) { found = { a, project: p }; break; }
+      }
+      if (!found) return;
+      const a = found.a;
+      if (a.status === 'cancelled' || a.status === 'done') return;
+
+      const group = target.closest('.pln-bar-group');
+      const svg = group?.closest('svg');
+      const bar = group?.querySelector('.pln-bar');
+      const label = group?.querySelector('.pln-bar-label');
+      const handleLeft = group?.querySelector('.pln-handle-left');
+      const handleRight = group?.querySelector('.pln-handle-right');
+      const rowEl = target.closest('.pln-row');
+      const badgeEl = rowEl?.querySelector('.pln-row-badge');
+      const dueGlyph = svg?.querySelector('.pln-due');
+
+      const startISO = a.startDate || (a.due ? fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs)) : null);
+      const endISO = a.due;
+      if (!startISO || !endISO) return;
+      const startD = parseDate(startISO);
+      const endD = parseDate(endISO);
+      const initialSpanDays = Math.max(1, Math.round((endD - startD) / dayMs) + 1);
+      const initialCommitment = typeof a.commitment === 'number' ? a.commitment : 100;
+      let anchorHours = a.plannedHours;
+      if (typeof anchorHours !== 'number' || anchorHours <= 0) {
+        anchorHours = (initialCommitment / 100) * HOURS_PER_WEEK * (initialSpanDays / 7);
+      }
+
+      _plannerDrag.drag = {
+        a, zone, startISO, endISO, initialCommitment, anchorHours,
+        group, bar, label, handleLeft, handleRight, badgeEl, dueGlyph,
+        pressX: e.clientX,
+        dragged: false,
+        newStartISO: startISO,
+        newEndISO: endISO,
+        newCommitment: initialCommitment,
+      };
+      if (bar) bar.style.cursor = zone === 'body' ? 'grabbing' : 'ew-resize';
+      e.preventDefault();
+    });
+  }
+
+  // Module-level drag state + one-time global mousemove/mouseup handlers.
+  // Renders can replace the scroll container without leaking listeners.
+  const _plannerDrag = { drag: null, dayW: 8, winStart: null };
+  // Filled in by renderPlanner — re-computes and re-draws the bottom
+  // workload chart from the (possibly mid-drag) action state.
+  let _plannerLiveUpdateWorkload = () => {};
+  window.addEventListener('mousemove', (e) => {
+    const drag = _plannerDrag.drag;
+    if (!drag) return;
+    const dayW = _plannerDrag.dayW;
+    const winStart = _plannerDrag.winStart;
+    if (!winStart) return;
+    const totalDelta = e.clientX - drag.pressX;
+    if (!drag.dragged && Math.abs(totalDelta) < 3) return;
+    drag.dragged = true;
+    const deltaDays = Math.round(totalDelta / dayW);
+    const startD = parseDate(drag.startISO);
+    const endD = parseDate(drag.endISO);
+
+    let newStart = drag.startISO;
+    let newEnd = drag.endISO;
+
+    if (drag.zone === 'body') {
+      newStart = fmtISO(new Date(startD.getTime() + deltaDays * dayMs));
+      newEnd = fmtISO(new Date(endD.getTime() + deltaDays * dayMs));
+    } else if (drag.zone === 'left') {
+      let ns = new Date(startD.getTime() + deltaDays * dayMs);
+      const maxNs = new Date(endD.getTime() - dayMs);
+      if (ns > maxNs) ns = maxNs;
+      newStart = fmtISO(ns);
+    } else if (drag.zone === 'right') {
+      let ne = new Date(endD.getTime() + deltaDays * dayMs);
+      const minNe = new Date(startD.getTime() + dayMs);
+      if (ne < minNe) ne = minNe;
+      newEnd = fmtISO(ne);
+    }
+
+    let newCommitment = drag.initialCommitment;
+    if (drag.zone !== 'body') {
+      const spanDays = Math.max(1, Math.round((parseDate(newEnd) - parseDate(newStart)) / dayMs) + 1);
+      const weeks = spanDays / 7;
+      newCommitment = Math.round((drag.anchorHours / (HOURS_PER_WEEK * weeks)) * 100);
+      if (newCommitment > 200) {
+        const minWeeks = drag.anchorHours / (HOURS_PER_WEEK * 2.0);
+        const minDays = Math.max(1, Math.ceil(minWeeks * 7));
+        if (drag.zone === 'left') {
+          const clampedStart = new Date(parseDate(newEnd).getTime() - (minDays - 1) * dayMs);
+          newStart = fmtISO(clampedStart);
+        } else {
+          const clampedEnd = new Date(parseDate(newStart).getTime() + (minDays - 1) * dayMs);
+          newEnd = fmtISO(clampedEnd);
+        }
+        newCommitment = 200;
+      }
+    }
+
+    drag.newStartISO = newStart;
+    drag.newEndISO = newEnd;
+    drag.newCommitment = newCommitment;
+
+    const dayToX = (iso) => {
+      const t = parseDate(iso).getTime();
+      return Math.round(((t - winStart.getTime()) / dayMs) * dayW);
+    };
+    const x1 = dayToX(newStart);
+    const x2 = dayToX(newEnd);
+    const w = Math.max(4, x2 - x1);
+    if (drag.bar) {
+      drag.bar.setAttribute('x', x1);
+      drag.bar.setAttribute('width', w);
+    }
+    if (drag.label) {
+      drag.label.setAttribute('x', x1 + w / 2);
+      drag.label.textContent = `${newCommitment}%`;
+    }
+    if (drag.handleLeft) {
+      const hw = Math.min(8, w / 3);
+      drag.handleLeft.setAttribute('x', x1 - 2);
+      drag.handleLeft.setAttribute('width', hw);
+    }
+    if (drag.handleRight) {
+      const hw = Math.min(8, w / 3);
+      drag.handleRight.setAttribute('x', x1 + w - hw + 2);
+      drag.handleRight.setAttribute('width', hw);
+    }
+    if (drag.dueGlyph && drag.zone !== 'left') {
+      const dx = dayToX(newEnd);
+      const rowH = 44;
+      drag.dueGlyph.setAttribute('points', `${dx - 5},${rowH/2 - 6} ${dx + 5},${rowH/2} ${dx - 5},${rowH/2 + 6} ${dx + 5},${rowH/2}`);
+    }
+    if (drag.group) {
+      drag.group.classList.toggle('is-over-cap', newCommitment > 100);
+      drag.group.classList.toggle('is-way-over-cap', newCommitment > 150);
+    }
+    if (drag.badgeEl) {
+      const dueISO = drag.zone === 'left' ? drag.endISO : newEnd;
+      const marginDays = Math.round((parseDate(dueISO) - parseDate(newEnd)) / dayMs);
+      drag.badgeEl.innerHTML = marginDays > 0
+        ? `<span class="pln-margin ok">+${marginDays}d</span>`
+        : marginDays < 0
+          ? `<span class="pln-margin bad">${marginDays}d</span>`
+          : `<span class="pln-margin warn">±0d</span>`;
+    }
+    // Also update the workload chart live if it's mounted.
+    _plannerLiveUpdateWorkload();
+  });
+  window.addEventListener('mouseup', () => {
+    const d = _plannerDrag.drag;
+    if (!d) return;
+    _plannerDrag.drag = null;
+    if (d.bar) d.bar.style.cursor = 'grab';
+    if (!d.dragged) return;
+    const a = d.a;
+    if (d.zone === 'body' || d.zone === 'left') a.startDate = d.newStartISO;
+    if (d.zone === 'body' || d.zone === 'right') a.due = d.newEndISO;
+    if (d.zone !== 'body') {
+      a.commitment = d.newCommitment;
+      a.plannedHours = Math.round(d.anchorHours);
+    }
+    commit('planner-drag');
+    render();
+  });
 
   // The top half — one row per action, laid out on a day-precision axis.
   // Phase 1 is read-only. Later phases add drag interactions.
@@ -20550,9 +20837,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const barX2 = clampX(xFor(workEnd));
       const barW  = Math.max(4, barX2 - barX);
       const hours = Math.round(_plannerEffectiveHours(a));
-      // Margin — where does the work end vs the due date? For phase 1
-      // they're the same; drag will separate them once plannedHours is
-      // anchored and commitment shifts.
+      const commitment = typeof a.commitment === 'number' ? a.commitment : 100;
+      const isOver = commitment > 100;
+      const isOverHard = commitment > 150;
+      // Margin — where does the work end vs the due date? Once
+      // plannedHours is anchored and commitment shifts, the work
+      // window and the due date genuinely diverge.
       const workEndX = barX + barW;
       const marginPx = dueX == null ? 0 : dueX - workEndX;
       const marginDays = Math.round(marginPx / dayW);
@@ -20565,7 +20855,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             : `<span class="pln-margin warn">±0d</span>`;
       // Color per action for later cross-highlight
       const c = colorFor(a.id);
-      return { a, project, hours, barX, barW, workEndX, dueX, marginBadge, color: c, i };
+      return { a, project, hours, commitment, isOver, isOverHard, barX, barW, workStart, workEnd, workEndX, dueX, marginBadge, color: c, i };
     });
 
     // Weekly grid columns
@@ -20601,9 +20891,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         <div class="pln-row-chart">
           <svg class="pln-row-svg" viewBox="0 0 ${chartW} ${rowH}" preserveAspectRatio="none" width="${chartW}" height="${rowH}">
             <rect class="pln-row-bg" x="0" y="0" width="${chartW}" height="${rowH}" />
-            <rect class="pln-bar" x="${row.barX}" y="8" width="${row.barW}" height="${rowH - 16}" rx="3" fill="rgba(${row.color.rgb},.35)" stroke="rgba(${row.color.rgb},.9)" stroke-width="1" data-action-id="${escapeHTML(row.a.id)}">
-              <title>${escapeHTML(row.a.title)} — ${row.hours}h · commitment ${(typeof row.a.commitment === 'number' ? row.a.commitment : 100)}%</title>
-            </rect>
+            <g class="pln-bar-group ${row.isOver ? 'is-over-cap' : ''} ${row.isOverHard ? 'is-way-over-cap' : ''}" data-action-id="${escapeHTML(row.a.id)}" data-start="${row.workStart}" data-end="${row.workEnd}" data-hours="${row.hours}">
+              <rect class="pln-bar" x="${row.barX}" y="8" width="${row.barW}" height="${rowH - 16}" rx="3" fill="rgba(${row.color.rgb},.35)" stroke="rgba(${row.color.rgb},.9)" stroke-width="1" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="body" style="cursor:grab">
+                <title>${escapeHTML(row.a.title)} — ${row.hours}h · commitment ${row.commitment}%</title>
+              </rect>
+              ${row.barW > 26 ? `<text class="pln-bar-label" x="${row.barX + row.barW/2}" y="${rowH/2 + 4}" text-anchor="middle" pointer-events="none">${row.commitment}%</text>` : ''}
+              <rect class="pln-handle pln-handle-left" x="${row.barX - 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="left" fill="transparent" style="cursor:ew-resize"><title>Drag to shift start date</title></rect>
+              <rect class="pln-handle pln-handle-right" x="${row.barX + row.barW - Math.min(8, row.barW/3) + 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="right" fill="transparent" style="cursor:ew-resize"><title>Drag to shift due date</title></rect>
+            </g>
             ${row.dueX != null ? `<polygon class="pln-due" points="${row.dueX - 5},${rowH/2 - 6} ${row.dueX + 5},${rowH/2} ${row.dueX - 5},${rowH/2 + 6} ${row.dueX + 5},${rowH/2}" fill="rgb(${row.color.rgb})" stroke="var(--bg-1)" stroke-width="1"><title>Due ${row.a.due}</title></polygon>` : ''}
           </svg>
           <span class="pln-row-badge">${row.marginBadge}</span>
@@ -20626,7 +20921,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <span class="pln-lg-item"><span class="pln-lg-margin bad">−</span> late</span>
           </div>
         </div>
-        <div class="planner-scroll" id="plnScroll">
+        <div class="planner-scroll" id="plnScroll" data-day-w="${dayW}" data-win-start="${fmtISO(winStart)}" data-chart-w="${chartW}">
           <div class="planner-axis" style="width:${chartW}px">
             <svg viewBox="0 0 ${chartW} 16" width="${chartW}" height="16" class="pln-axis-svg">
               ${monthLabels.join('')}
@@ -20640,7 +20935,133 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             </svg>
             <div class="planner-rows">${rowsHTML}</div>
           </div>
+          ${_plannerWorkloadHTML(items, bars, winStart, winEnd, dayW, weeklyCapHours)}
         </div>
+      </div>
+    `;
+  }
+
+  // Bottom half — stacked weekly workload bars per action, capacity line.
+  // Same time window as the Gantt on top.
+  function _plannerWorkloadHTML(items, _unusedBars, winStart, winEnd, dayW, capHours) {
+    const totalDays = Math.round((winEnd - winStart) / dayMs);
+    const chartW = totalDays * dayW;
+    const chartH = 130;
+    const padTop = 12, padBottom = 20;
+    const plotH = chartH - padTop - padBottom;
+
+    // Bucket weeks — Monday-anchored.
+    const weeks = [];
+    let cursor = new Date(winStart.getTime());
+    while (cursor.getDay() !== 1) cursor.setDate(cursor.getDate() + 1);
+    while (cursor < winEnd) {
+      const next = new Date(cursor.getTime() + 7 * dayMs);
+      weeks.push({ start: new Date(cursor), end: next });
+      cursor = next;
+    }
+
+    // Reconstruct bar-like structs from raw items so both first-render
+    // and drag-live-update flows share the same logic.
+    const actions = items.map(({ a, project }) => {
+      if (!a.due) return null;
+      const workStart = a.startDate || fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs));
+      const workEnd = a.due;
+      const hours = _plannerEffectiveHours(a);
+      return { a, project, workStart, workEnd, hours, color: colorFor(a.id) };
+    }).filter(Boolean);
+
+    // Per-week per-action hours.
+    const weekHours = weeks.map(() => actions.map(() => 0));
+    actions.forEach((row, aIdx) => {
+      const startD = parseDate(row.workStart);
+      const endD = parseDate(row.workEnd);
+      const spanDays = Math.max(1, Math.round((endD - startD) / dayMs) + 1);
+      const perDayHours = row.hours / spanDays;
+      weeks.forEach((w, wIdx) => {
+        const overlapStart = Math.max(startD.getTime(), w.start.getTime());
+        const overlapEnd = Math.min(endD.getTime() + dayMs, w.end.getTime());
+        if (overlapEnd <= overlapStart) return;
+        const overlapDays = (overlapEnd - overlapStart) / dayMs;
+        weekHours[wIdx][aIdx] = overlapDays * perDayHours;
+      });
+    });
+
+    // Find max weekly total for Y-scale — extend past cap so overflow
+    // visualizes clearly.
+    const weekTotals = weekHours.map((wh) => wh.reduce((s, h) => s + h, 0));
+    const maxTotal = Math.max(capHours * 1.2, ...weekTotals, 1);
+    const yFor = (h) => padTop + plotH * (1 - h / maxTotal);
+    const barW = Math.max(4, dayW * 7 - 4);
+
+    // Draw stacks
+    const stacks = weeks.map((w, wIdx) => {
+      const x0 = Math.round(((w.start.getTime() - winStart.getTime()) / dayMs) * dayW) + 2;
+      let cum = 0;
+      const segs = actions.map((row, aIdx) => {
+        const h = weekHours[wIdx][aIdx];
+        if (h < 0.01) return '';
+        const yBottom = yFor(cum);
+        cum += h;
+        const yTop = yFor(cum);
+        const hPx = yBottom - yTop;
+        const isOver = cum > capHours;
+        return `<rect class="pln-wl-seg ${isOver ? 'is-over-cap' : ''}" x="${x0}" y="${yTop}" width="${barW}" height="${hPx}" fill="rgba(${row.color.rgb},.75)" stroke="rgba(${row.color.rgb},1)" stroke-width=".5" data-action-id="${escapeHTML(row.a.id)}" data-week-idx="${wIdx}"><title>${escapeHTML(row.a.title)} · week of ${fmtISO(w.start)} · ${Math.round(h)}h</title></rect>`;
+      }).join('');
+      const totalH = weekTotals[wIdx];
+      const totalLabelCls = totalH > capHours ? 'over' : '';
+      const totalLabel = totalH >= 1
+        ? `<text class="pln-wl-total-label ${totalLabelCls}" x="${x0 + barW/2}" y="${Math.max(padTop + 8, yFor(totalH) - 3)}" text-anchor="middle">${Math.round(totalH)}h</text>`
+        : '';
+      const weekLabel = `<text class="pln-wl-week-label" x="${x0 + barW/2}" y="${chartH - 6}" text-anchor="middle">${(w.start.getMonth() + 1)}/${w.start.getDate()}</text>`;
+      return segs + totalLabel + weekLabel;
+    }).join('');
+
+    // Capacity line — labelled at the right so the label doesn't overlap
+    // the first week's total.
+    const capY = yFor(capHours);
+    const capLine = `<line class="pln-wl-cap-line" x1="0" x2="${chartW}" y1="${capY}" y2="${capY}"><title>Capacity: ${Math.round(capHours)}h/week</title></line>
+                     <text class="pln-wl-cap-label" x="${chartW - 6}" y="${capY - 3}" text-anchor="end">cap ${Math.round(capHours)}h</text>`;
+
+    // Y-axis gridlines at 25/50/75/100/125% of cap
+    const gridMarks = [0.5, 1.0, 1.5]
+      .map((frac) => {
+        const y = yFor(capHours * frac);
+        return `<line class="pln-wl-grid" x1="0" x2="${chartW}" y1="${y}" y2="${y}" />`;
+      }).join('');
+
+    // Legend from actions (top 8 by total hours, then "others")
+    const withTotals = actions.map((row, aIdx) => ({
+      row,
+      total: weekHours.reduce((s, wh) => s + wh[aIdx], 0),
+    })).sort((a, b) => b.total - a.total);
+    const legendTop = withTotals.slice(0, 8);
+    const legend = legendTop.map(({ row }) => `
+      <span class="pln-wl-lg-item" data-action-id="${escapeHTML(row.a.id)}">
+        <span class="pln-wl-lg-swatch" style="background: rgba(${row.color.rgb},.75); border-color: rgba(${row.color.rgb},1)"></span>
+        ${escapeHTML(row.a.title.length > 22 ? row.a.title.slice(0, 22) + '…' : row.a.title)}
+      </span>`).join('');
+    const legendMore = withTotals.length > 8 ? `<span class="pln-wl-sub">+${withTotals.length - 8} more</span>` : '';
+
+    const capBadgeCls = weekTotals.some((t) => t > capHours * 1.5) ? 'bad'
+      : weekTotals.some((t) => t > capHours) ? 'warn' : '';
+
+    return `
+      <div class="planner-workload" id="plnWorkload" data-cap-hours="${capHours}">
+        <div class="pln-wl-head">
+          <div>
+            <span class="pln-wl-title">Weekly workload</span>
+            <span class="pln-wl-sub">— hours stacked per week; dashed line = capacity</span>
+          </div>
+          <span class="pln-wl-cap-badge ${capBadgeCls}">${Math.round(capHours)} h/week</span>
+        </div>
+        <div class="pln-wl-chart" style="min-width:${chartW}px">
+          <svg viewBox="0 0 ${chartW} ${chartH}" width="${chartW}" height="${chartH}" class="pln-wl-svg" preserveAspectRatio="none">
+            ${gridMarks}
+            ${stacks}
+            ${capLine}
+          </svg>
+        </div>
+        <div class="pln-wl-legend">${legend}${legendMore}</div>
       </div>
     `;
   }

@@ -3356,6 +3356,126 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-style: italic;
   font-size: 12px;
 }
+/* On-bar commitment% label */
+.pln-bar-label {
+  fill: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  pointer-events: none;
+}
+/* Over-cap warning — pushes past 100% commitment. */
+.pln-bar-group.is-over-cap .pln-bar {
+  stroke: var(--warn) !important;
+  stroke-width: 1.5 !important;
+  stroke-dasharray: 3 2;
+}
+.pln-bar-group.is-way-over-cap .pln-bar {
+  stroke: var(--bad) !important;
+  stroke-width: 2 !important;
+  stroke-dasharray: 3 2;
+}
+/* Highlighted bar — accent ring, used by workload chart click-back. */
+.pln-bar-group.is-highlight .pln-bar {
+  filter: drop-shadow(0 0 4px var(--accent)) brightness(1.25);
+  stroke-width: 2 !important;
+}
+
+/* Bottom half — the workload chart. */
+.planner-workload {
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+  padding: 12px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pln-wl-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.pln-wl-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.pln-wl-sub { font-size: 11px; color: var(--text-faint); }
+.pln-wl-cap-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  color: var(--text);
+}
+.pln-wl-cap-badge.warn { color: var(--warn); border-color: rgba(251, 191, 36, .4); }
+.pln-wl-cap-badge.bad  { color: var(--bad); border-color: rgba(248, 113, 121, .4); }
+.pln-wl-chart {
+  position: relative;
+  height: 160px;
+  width: 100%;
+}
+.pln-wl-svg { display: block; width: 100%; height: 100%; }
+.pln-wl-axis {
+  fill: var(--text-faint);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.pln-wl-grid {
+  stroke: var(--line);
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+  opacity: .6;
+}
+.pln-wl-cap-line {
+  stroke: var(--warn);
+  stroke-width: 2;
+  stroke-dasharray: 4 3;
+}
+.pln-wl-cap-label {
+  fill: var(--warn);
+  font-size: 10px;
+  font-weight: 600;
+}
+.pln-wl-seg { cursor: pointer; transition: filter .12s ease; }
+.pln-wl-seg:hover { filter: brightness(1.3); }
+.pln-wl-seg.is-highlight { filter: brightness(1.4) drop-shadow(0 0 3px var(--accent)); }
+.pln-wl-seg.is-over-cap { stroke: var(--bad); stroke-width: 1; }
+.pln-wl-total-label {
+  fill: var(--text);
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.pln-wl-total-label.over { fill: var(--bad); }
+.pln-wl-week-label {
+  fill: var(--text-faint);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+.pln-wl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  padding: 2px 0 2px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.pln-wl-lg-item { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+.pln-wl-lg-item.is-highlight { color: var(--text); }
+.pln-wl-lg-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  display: inline-block;
+  border: 1px solid var(--line-2);
+}
 
 /* Owner-load strip in the action drawer */
 .owner-load-strip {
