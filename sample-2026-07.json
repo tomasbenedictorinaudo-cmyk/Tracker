@@ -1,0 +1,800 @@
+{
+  "__schemaVersion": 2,
+  "__exportedAt": "2026-07-03T08:00:00.000Z",
+  "__app": "cockpit",
+  "__summary": {
+    "projects": 3, "archivedProjects": 0, "people": 10, "stakeholders": 4,
+    "actions": 26, "deliverables": 10, "milestones": 8, "risks": 12,
+    "decisions": 4, "changes": 4, "components": 12, "meetings": 4,
+    "openPoints": 8, "links": 6, "linkFolders": 2, "costCenters": 5,
+    "tags": 9, "archived": 3, "recurringActions": 1, "snoozedActions": 1,
+    "actionsWithHistory": 20, "actionsWithSubtasks": 6, "totalSubtasks": 24,
+    "opportunities": 4
+  },
+
+  "people": [
+    {
+      "id": "p_sofia", "name": "Sofia Reyes", "role": "Programme Manager",
+      "expertise": "Space systems PM, PDR / CDR chair, customer-facing",
+      "capacity": 100, "hourlyRate": 145,
+      "assignments": [{ "projectId": "pr_orbit", "commitment": 60 }, { "projectId": "pr_helios", "commitment": 40 }]
+    },
+    {
+      "id": "p_marie", "name": "Marie Laurent", "role": "Systems Engineer",
+      "expertise": "Requirements, ICDs, verification matrices",
+      "capacity": 100, "hourlyRate": 135,
+      "assignments": [{ "projectId": "pr_orbit", "commitment": 80 }, { "projectId": "pr_falcon", "commitment": 20 }]
+    },
+    {
+      "id": "p_arjun", "name": "Arjun Patel", "role": "Avionics Lead",
+      "expertise": "OBC / RTOS, harness FMEA, EMC test",
+      "capacity": 100, "hourlyRate": 150,
+      "assignments": [{ "projectId": "pr_orbit", "commitment": 100 }]
+    },
+    {
+      "id": "p_jonas", "name": "Jonas Becker", "role": "Mechanical",
+      "expertise": "Primary structure FE, mass budget, vibration test",
+      "capacity": 80, "hourlyRate": 120,
+      "assignments": [{ "projectId": "pr_orbit", "commitment": 60 }, { "projectId": "pr_falcon", "commitment": 20 }]
+    },
+    {
+      "id": "p_kira", "name": "Kira Nakamura", "role": "Software Architect",
+      "expertise": "FSW, FDIR, memory scrubbing, boot loader",
+      "capacity": 100, "hourlyRate": 155,
+      "assignments": [{ "projectId": "pr_orbit", "commitment": 50 }, { "projectId": "pr_helios", "commitment": 50 }]
+    },
+    {
+      "id": "p_omar", "name": "Omar El-Sayed", "role": "Power Systems",
+      "expertise": "PCDU, Li-ion, solar arrays, EPS",
+      "capacity": 80, "hourlyRate": 125,
+      "assignments": [{ "projectId": "pr_orbit", "commitment": 80 }]
+    },
+    {
+      "id": "p_lena", "name": "Lena Holmberg", "role": "Thermal Engineer",
+      "expertise": "TVAC, radiators, MLI, thermal model",
+      "capacity": 80, "hourlyRate": 125,
+      "assignments": [{ "projectId": "pr_orbit", "commitment": 60 }, { "projectId": "pr_falcon", "commitment": 20 }]
+    },
+    {
+      "id": "p_diego", "name": "Diego Ferreira", "role": "AOCS",
+      "expertise": "Reaction wheels, star trackers, control laws",
+      "capacity": 100, "hourlyRate": 140,
+      "assignments": [{ "projectId": "pr_orbit", "commitment": 70 }, { "projectId": "pr_falcon", "commitment": 30 }]
+    },
+    {
+      "id": "p_yuki", "name": "Yuki Tanaka", "role": "Ground Software Developer",
+      "expertise": "Telemetry pipelines, Node.js, monitoring UIs",
+      "capacity": 100, "hourlyRate": 115,
+      "assignments": [{ "projectId": "pr_helios", "commitment": 100 }]
+    },
+    {
+      "id": "p_nadia", "name": "Nadia Rahman", "role": "Test Engineer",
+      "expertise": "TVAC, vibration, acceptance procedures",
+      "capacity": 100, "hourlyRate": 120,
+      "assignments": [{ "projectId": "pr_orbit", "commitment": 100 }]
+    }
+  ],
+
+  "stakeholders": [
+    { "id": "st_cnes",     "name": "Isabelle Fournier", "role": "Programme POC",      "organization": "CNES" },
+    { "id": "st_itu",      "name": "Hendrik van Loon",  "role": "Frequency Officer",  "organization": "ITU" },
+    { "id": "st_mosaic",   "name": "Mateus Vieira",     "role": "Sister-mission SE",  "organization": "Mosaic-3" },
+    { "id": "st_metsat",   "name": "Amelia Chen",       "role": "Ground Systems POC", "organization": "MetSat Corp" }
+  ],
+
+  "projects": [
+    {
+      "id": "pr_orbit",
+      "name": "Orbit-7 Satellite Bus",
+      "description": "150-kg Earth-observation satellite bus for CNES. PDR planned mid-July 2026, CDR October, launch Q1-2027.",
+      "archived": false,
+      "notes": "",
+      "archive": [],
+      "tags": [
+        { "id": "tg_o_cust",  "name": "customer",  "color": "#3b82f6" },
+        { "id": "tg_o_pdr",   "name": "pdr",       "color": "#a855f7" },
+        { "id": "tg_o_flight","name": "flight",    "color": "#f97316" }
+      ],
+      "costCenters": ["CC-ORB-PM", "CC-ORB-ENG", "CC-ORB-TEST"],
+      "linkFolders": [
+        { "id": "lf_cust", "name": "Customer",    "collapsed": false },
+        { "id": "lf_ref",  "name": "References",  "collapsed": false }
+      ],
+      "links": [
+        { "id": "lk_1", "title": "CNES programme portal", "url": "https://internal.example/cnes-orbit7", "folderId": "lf_cust", "createdAt": "2026-01-10" },
+        { "id": "lk_2", "title": "ECSS-E-ST-10 standards", "url": "https://www.ecss.nl", "folderId": "lf_ref", "createdAt": "2026-01-12" },
+        { "id": "lk_3", "title": "Mosaic-3 heritage repo", "url": "https://internal.example/mosaic3", "folderId": "lf_ref", "createdAt": "2026-05-20" }
+      ],
+      "components": [
+        { "id": "cp_pm",   "name": "Programme Mgmt",  "color": "#94a3b8", "costCenter": "CC-ORB-PM"  },
+        { "id": "cp_pow",  "name": "Power",            "color": "#f59e0b", "costCenter": "CC-ORB-ENG" },
+        { "id": "cp_aocs", "name": "AOCS",             "color": "#8b5cf6", "costCenter": "CC-ORB-ENG" },
+        { "id": "cp_str",  "name": "Structure",        "color": "#64748b", "costCenter": "CC-ORB-ENG" },
+        { "id": "cp_th",   "name": "Thermal",          "color": "#ef4444", "costCenter": "CC-ORB-ENG" },
+        { "id": "cp_sw",   "name": "Flight Software",  "color": "#10b981", "costCenter": "CC-ORB-ENG" },
+        { "id": "cp_avi",  "name": "Avionics",         "color": "#3b82f6", "costCenter": "CC-ORB-ENG" },
+        { "id": "cp_pl",   "name": "Payload",          "color": "#ec4899", "costCenter": "CC-ORB-ENG" },
+        { "id": "cp_test", "name": "AIT / Test",       "color": "#0ea5e9", "costCenter": "CC-ORB-TEST"}
+      ],
+      "milestones": [
+        { "id": "ms_srr",  "identifier": "ORB-M1", "name": "SRR — Systems Requirements Review", "date": "2026-01-15", "critical": true,  "notes": "Closed — actions all cleared." },
+        { "id": "ms_pdr",  "identifier": "ORB-M2", "name": "PDR — Preliminary Design Review",   "date": "2026-07-15", "critical": true,  "notes": "Data pack + review in 2 weeks." },
+        { "id": "ms_cdr",  "identifier": "ORB-M3", "name": "CDR — Critical Design Review",       "date": "2026-10-20", "critical": true,  "notes": "" },
+        { "id": "ms_trr",  "identifier": "ORB-M4", "name": "TRR — Test Readiness Review",         "date": "2027-01-10", "critical": false, "notes": "" }
+      ],
+      "deliverables": [
+        { "id": "dl_pdrpack",  "identifier": "ORB-D1", "name": "PDR Data Pack",           "due": "2026-07-10", "notes": "Bundle for PDR review — SW / HW ICDs, risk register, EVM snapshot." },
+        { "id": "dl_fdir",     "identifier": "ORB-D2", "name": "FDIR Matrix v2",           "due": "2026-08-15", "notes": "" },
+        { "id": "dl_baseline", "identifier": "ORB-D3", "name": "Baseline Design Report",   "due": "2026-10-05", "notes": "" },
+        { "id": "dl_atp",      "identifier": "ORB-D4", "name": "Acceptance Test Procedures","due": "2026-12-01","notes": "" }
+      ],
+      "meetings": [
+        { "id": "mt_o_srr",     "identifier": "ORB-MT1", "name": "SRR review",              "date": "2026-01-15", "notes": "" },
+        { "id": "mt_o_weekly",  "identifier": "ORB-MT2", "name": "Weekly PM sync",           "kind": "weekly", "startDate": "2026-01-19", "dayOfWeek": 1, "time": "10:00", "notes": "Sofia leads. Fortnightly customer update Fridays." },
+        { "id": "mt_o_pdrprep", "identifier": "ORB-MT3", "name": "PDR dry-run",              "date": "2026-07-08", "notes": "Internal rehearsal 2 days before customer." }
+      ],
+      "openPoints": [
+        { "id": "op_o_1", "identifier": "ORB-OP1", "title": "Radiation-tolerant SDRAM sourcing", "notes": "Two-vendor path required; primary on 12-week lead.", "component": "cp_avi", "criticality": "high", "priorityLevel": "high", "createdAt": "2026-05-08", "tags": [], "steps": [
+            { "id": "st_1", "text": "Confirm requirements with Arjun", "done": true },
+            { "id": "st_2", "text": "Get vendor A quote", "done": true },
+            { "id": "st_3", "text": "Backup vendor evaluation", "done": false }
+          ]
+        },
+        { "id": "op_o_2", "identifier": "ORB-OP2", "title": "TVAC slot deconfliction with Mosaic-3", "notes": "Talk to Mateus Vieira — potential pull-in.", "component": "cp_test", "criticality": "med", "priorityLevel": "high", "createdAt": "2026-06-01", "tags": [], "steps": []},
+        { "id": "op_o_3", "identifier": "ORB-OP3", "title": "Payload alignment procedure gaps", "notes": "Missing step in optics ATP.", "component": "cp_pl", "criticality": "med", "priorityLevel": "med", "createdAt": "2026-06-20", "tags": [], "steps": [] },
+        { "id": "op_o_4", "identifier": "ORB-OP4", "title": "Contingency for TT&C link margin", "notes": "Add margin analysis if ITU delays antenna licensing.", "component": "cp_avi", "criticality": "high", "priorityLevel": "med", "createdAt": "2026-06-24", "tags": [], "steps": [] }
+      ],
+      "risks": [
+        {
+          "id": "r_o_tvac", "identifier": "ORB-R1", "kind": "risk", "title": "TVAC facility availability slip",
+          "inherent": { "probability": 3, "impact": 4 }, "residual": { "probability": 2, "impact": 3 },
+          "mitigation": "Book partner facility as backup; pull-in AIT by 2 weeks if primary slips.",
+          "owner": "p_nadia", "actionId": "a_o_tvacbook"
+        },
+        {
+          "id": "r_o_pw", "identifier": "ORB-R2", "kind": "risk", "title": "Battery vendor lock-in",
+          "inherent": { "probability": 3, "impact": 4 }, "residual": { "probability": 2, "impact": 3 },
+          "mitigation": "Dual-source Li-ion cells; qualify vendor B by CDR.",
+          "owner": "p_omar", "actionId": null
+        },
+        {
+          "id": "r_o_rad", "identifier": "ORB-R3", "kind": "risk", "title": "OBC radiation SEU higher than spec",
+          "inherent": { "probability": 3, "impact": 5 }, "residual": { "probability": 2, "impact": 4 },
+          "mitigation": "FDIR handles single-bit; add memory scrubbing task in FSW.",
+          "owner": "p_kira", "actionId": null
+        },
+        {
+          "id": "r_o_launch", "identifier": "ORB-R4", "kind": "risk", "title": "Launch slot slips to Q2-2027",
+          "inherent": { "probability": 3, "impact": 3 }, "residual": { "probability": 2, "impact": 2 },
+          "mitigation": "Sofia to negotiate booster slot commitments Q1 vs Q2.",
+          "owner": "p_sofia", "actionId": null
+        },
+        {
+          "id": "o_o_heritage", "identifier": "ORB-O1", "kind": "opportunity", "title": "Reuse Mosaic-3 FSW heritage",
+          "inherent": { "probability": 3, "impact": 3 }, "residual": { "probability": 4, "impact": 4 },
+          "mitigation": "IP transfer with sister mission — up to 6 weeks of FSW work saved.",
+          "owner": "p_kira", "actionId": "a_o_extorig"
+        },
+        {
+          "id": "o_o_batch", "identifier": "ORB-O2", "kind": "opportunity", "title": "Volume Li-ion discount with sister mission",
+          "inherent": { "probability": 2, "impact": 2 }, "residual": { "probability": 4, "impact": 3 },
+          "mitigation": "Combine PO with Mosaic-3 for 12 % unit-price reduction.",
+          "owner": "p_omar", "actionId": null
+        },
+        {
+          "id": "o_o_tvacpull", "identifier": "ORB-O3", "kind": "opportunity", "title": "Earlier TVAC slot at partner facility",
+          "inherent": { "probability": 2, "impact": 3 }, "residual": { "probability": 3, "impact": 4 },
+          "mitigation": "Partner offered August slot — pull TVAC in 4 weeks.",
+          "owner": "p_nadia", "actionId": null
+        }
+      ],
+      "decisions": [
+        {
+          "id": "d_o_bus", "identifier": "ORB-D1", "title": "Adopt 3U bus form-factor",
+          "rationale": "Trade-off vs 6U: mass margin acceptable, launch cost 22 % lower.",
+          "status": "decided", "owner": "p_sofia", "originator": "p_marie", "decidedAt": "2026-02-14",
+          "component": "cp_pm", "tags": [], "comments": [], "triggerRef": null
+        },
+        {
+          "id": "d_o_obc", "identifier": "ORB-D2", "title": "Single-vendor rad-hard OBC",
+          "rationale": "Dual-source qualification would add ≥ 8 weeks to schedule.",
+          "status": "under_review", "owner": "p_arjun", "originator": "p_arjun", "decidedAt": null,
+          "component": "cp_avi", "tags": [], "comments": [], "triggerRef": null
+        }
+      ],
+      "changes": [
+        {
+          "id": "cr_o_1", "identifier": "ORB-CR1", "title": "Add FDIR scope to PDR data pack",
+          "rationale": "Customer request at post-SRR sync.", "description": "Expand FDIR analysis to include single-point failures in TT&C and AOCS.",
+          "analysis": "≈ 2 additional weeks of FSW + verification effort. Offset by Mosaic-3 heritage.",
+          "status": "approved", "originator": "st_cnes", "originatedDate": "2026-05-30", "decisionBy": "p_sofia", "decisionDate": "2026-06-14",
+          "priorityLevel": "high", "component": "cp_pm",
+          "impact": { "schedule": 14, "cost": 28000, "scope": "Adds 2 FSW work-packages.", "risk": "Mitigates r_o_rad." },
+          "tags": [], "comments": []
+        },
+        {
+          "id": "cr_o_2", "identifier": "ORB-CR2", "title": "Pull-in TVAC by 4 weeks",
+          "rationale": "Partner facility offered earlier slot.", "description": "Move TVAC campaign from week 24 to week 20.",
+          "analysis": "Post-CDR margin shrinks to 2 weeks. Worth it if TVAC risk materialises.",
+          "status": "under_review", "originator": "p_nadia", "originatedDate": "2026-06-24", "decisionBy": null, "decisionDate": null,
+          "priorityLevel": "med", "component": "cp_test",
+          "impact": { "schedule": -28, "cost": 12000, "scope": "No scope change.", "risk": "Reduces TVAC availability risk." },
+          "tags": [], "comments": []
+        }
+      ],
+      "actions": [
+        {
+          "id": "a_o_pdrpack", "identifier": "ORB-A1", "title": "Compile PDR data-pack v1.4",
+          "owner": "p_sofia", "originator": "p_sofia", "status": "doing", "priority": 1,
+          "priorityLevel": "high", "commitment": 60,
+          "due": "2026-07-10", "startDate": "2026-06-15", "originatorDate": "2026-06-01", "completedAt": null, "archivedAt": null,
+          "component": "cp_pm", "deliverable": "dl_pdrpack", "milestone": "ms_pdr",
+          "description": "Assemble complete PDR data pack: block diagrams, ICDs, risk register, EVM snapshot, action closure list.",
+          "notes": "Draft sent to Arjun and Marie 2026-06-28.",
+          "createdAt": "2026-06-01", "updatedAt": "2026-07-01",
+          "history": [
+            { "at": "2026-06-01", "what": "Created with status todo" },
+            { "at": "2026-06-15", "what": "Status: todo → doing" },
+            { "at": "2026-06-28", "what": "Note added: Draft sent to Arjun and Marie" }
+          ],
+          "dependsOn": [], "tags": ["tg_o_pdr", "tg_o_cust"], "comments": [],
+          "loggedHours": [{ "id": "lh1", "hours": 6, "at": "2026-06-16", "by": "p_sofia", "note": "Section 1 draft" },
+                          { "id": "lh2", "hours": 8, "at": "2026-06-24", "by": "p_sofia", "note": "Sections 2-4" }],
+          "baseline": { "due": "2026-07-08", "startDate": "2026-06-15", "commitment": 60, "at": "2026-06-01" },
+          "percentComplete": null, "recurrence": null, "snoozedUntil": null,
+          "tasks": [
+            { "id": "tk_pdr_1", "title": "Assemble ICD sections",              "status": "done" },
+            { "id": "tk_pdr_2", "title": "Risk register snapshot",              "status": "done" },
+            { "id": "tk_pdr_3", "title": "EVM figures + charts",                "status": "doing" },
+            { "id": "tk_pdr_4", "title": "Peer review with Arjun & Marie",       "status": "todo" },
+            { "id": "tk_pdr_5", "title": "Send to CNES",                         "status": "todo" }
+          ]
+        },
+        {
+          "id": "a_o_extown", "identifier": "ORB-A2", "title": "PDR data-pack ICD sign-off",
+          "owner": "st_cnes", "originator": "p_sofia", "status": "blocked", "priority": 2,
+          "priorityLevel": "high", "commitment": 100,
+          "due": "2026-07-13", "startDate": "2026-06-30", "originatorDate": "2026-06-15", "completedAt": null, "archivedAt": null,
+          "component": "cp_pm", "deliverable": "dl_pdrpack", "milestone": "ms_pdr",
+          "description": "Waiting on formal ICD sign-off from CNES programme office.",
+          "notes": "Follow-up chain in customer link folder.",
+          "createdAt": "2026-06-15", "updatedAt": "2026-07-02",
+          "history": [
+            { "at": "2026-06-15", "what": "Created with status todo" },
+            { "at": "2026-06-30", "what": "Status: todo → blocked" }
+          ],
+          "dependsOn": ["a_o_pdrpack"], "tags": ["tg_o_cust"], "comments": [],
+          "loggedHours": [], "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null,
+          "tasks": [
+            { "id": "tk_ext_1", "title": "Draft cover memo to CNES",              "status": "done" },
+            { "id": "tk_ext_2", "title": "Send package to Fournier",              "status": "done" },
+            { "id": "tk_ext_3", "title": "Follow-up after 5 working days",         "status": "blocked" },
+            { "id": "tk_ext_4", "title": "File signed ICD in project archive",    "status": "todo" }
+          ]
+        },
+        {
+          "id": "a_o_extorig", "identifier": "ORB-A3", "title": "Evaluate Mosaic-3 FSW heritage transfer",
+          "owner": "p_kira", "originator": "st_mosaic", "status": "doing", "priority": 3,
+          "priorityLevel": "med", "commitment": 40,
+          "due": "2026-07-24", "startDate": "2026-06-24", "originatorDate": "2026-06-20", "completedAt": null, "archivedAt": null,
+          "component": "cp_sw", "deliverable": "dl_pdrpack", "milestone": "ms_pdr",
+          "description": "Sister-mission SE proposed IP transfer of FSW libraries. Assess reuse fraction and integration cost.",
+          "notes": "",
+          "createdAt": "2026-06-20", "updatedAt": "2026-07-01",
+          "history": [
+            { "at": "2026-06-20", "what": "Created with status todo" },
+            { "at": "2026-06-24", "what": "Status: todo → doing" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh3", "hours": 4, "at": "2026-06-25", "by": "p_kira", "note": "Initial code walk-through" }],
+          "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null,
+          "tasks": [
+            { "id": "tk_her_1", "title": "Read Mosaic-3 FSW API",                 "status": "done" },
+            { "id": "tk_her_2", "title": "Estimate reuse %",                        "status": "doing" },
+            { "id": "tk_her_3", "title": "Draft integration plan",                  "status": "todo" },
+            { "id": "tk_her_4", "title": "IP-transfer terms with Legal",            "status": "todo" }
+          ]
+        },
+        {
+          "id": "a_o_scrub", "identifier": "ORB-A4", "title": "Memory scrubbing logic in FSW",
+          "owner": "p_kira", "originator": "p_kira", "status": "doing", "priority": 4,
+          "priorityLevel": "high", "commitment": 50,
+          "due": "2026-08-04", "startDate": "2026-06-28", "originatorDate": "2026-06-20", "completedAt": null, "archivedAt": null,
+          "component": "cp_sw", "deliverable": "dl_fdir", "milestone": "ms_pdr",
+          "description": "Mitigation for OBC SEU risk. Periodic memory scrub + ECC status polling.",
+          "notes": "",
+          "createdAt": "2026-06-20", "updatedAt": "2026-07-02",
+          "history": [
+            { "at": "2026-06-20", "what": "Created with status todo" },
+            { "at": "2026-06-28", "what": "Status: todo → doing" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh4", "hours": 8, "at": "2026-07-01", "by": "p_kira", "note": "Prototype" }],
+          "baseline": null, "percentComplete": 35, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_o_tvacbook", "identifier": "ORB-A5", "title": "Confirm TVAC chamber booking",
+          "owner": "p_nadia", "originator": "p_nadia", "status": "blocked", "priority": 5,
+          "priorityLevel": "high", "commitment": 20,
+          "due": "2026-07-17", "startDate": "2026-06-01", "originatorDate": "2026-05-15", "completedAt": null, "archivedAt": null,
+          "component": "cp_test", "deliverable": null, "milestone": null,
+          "description": "Waiting on facility calendar. Backup partner slot on hold.",
+          "notes": "See open point ORB-OP2.",
+          "createdAt": "2026-05-15", "updatedAt": "2026-06-24",
+          "history": [
+            { "at": "2026-05-15", "what": "Created with status todo" },
+            { "at": "2026-06-01", "what": "Status: todo → doing" },
+            { "at": "2026-06-24", "what": "Status: doing → blocked" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [], "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_o_thermal", "identifier": "ORB-A6", "title": "Thermal model v20 — hot-case",
+          "owner": "p_lena", "originator": "p_marie", "status": "doing", "priority": 6,
+          "priorityLevel": "med", "commitment": 40,
+          "due": "2026-07-24", "startDate": "2026-06-22", "originatorDate": "2026-06-10", "completedAt": null, "archivedAt": null,
+          "component": "cp_th", "deliverable": "dl_pdrpack", "milestone": "ms_pdr",
+          "description": "Update hot-case with revised MLI coverage.",
+          "notes": "",
+          "createdAt": "2026-06-10", "updatedAt": "2026-06-30",
+          "history": [
+            { "at": "2026-06-10", "what": "Created with status todo" },
+            { "at": "2026-06-22", "what": "Status: todo → doing" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh5", "hours": 12, "at": "2026-06-25", "by": "p_lena", "note": "Rev A model" }],
+          "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_o_femodel", "identifier": "ORB-A7", "title": "Primary structure FE model — Rev B",
+          "owner": "p_jonas", "originator": "p_marie", "status": "done", "priority": 7,
+          "priorityLevel": "high", "commitment": 60,
+          "due": "2026-06-19", "startDate": "2026-05-05", "originatorDate": "2026-04-15", "completedAt": "2026-06-18", "archivedAt": null,
+          "component": "cp_str", "deliverable": "dl_pdrpack", "milestone": "ms_pdr",
+          "description": "Landed on-time.",
+          "notes": "Marie signed off.",
+          "createdAt": "2026-04-15", "updatedAt": "2026-06-18",
+          "history": [
+            { "at": "2026-04-15", "what": "Created with status todo" },
+            { "at": "2026-05-05", "what": "Status: todo → doing" },
+            { "at": "2026-06-18", "what": "Status: doing → done" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh6", "hours": 60, "at": "2026-06-18", "by": "p_jonas", "note": "Total campaign" }],
+          "baseline": { "due": "2026-06-19", "startDate": "2026-05-05", "commitment": 60, "at": "2026-04-15" },
+          "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_o_watchdog", "identifier": "ORB-A8", "title": "Watchdog logic in FSW",
+          "owner": "p_kira", "originator": "p_kira", "status": "done", "priority": 8,
+          "priorityLevel": "med", "commitment": 40,
+          "due": "2026-06-19", "startDate": "2026-05-12", "originatorDate": "2026-04-25", "completedAt": "2026-06-20", "archivedAt": null,
+          "component": "cp_sw", "deliverable": "dl_fdir", "milestone": null,
+          "description": "One day late — see slip below.",
+          "notes": "",
+          "createdAt": "2026-04-25", "updatedAt": "2026-06-20",
+          "history": [
+            { "at": "2026-04-25", "what": "Created with status todo" },
+            { "at": "2026-05-12", "what": "Status: todo → doing" },
+            { "at": "2026-06-01", "what": "Schedule: 2026-06-19 → 2026-06-19" },
+            { "at": "2026-06-20", "what": "Status: doing → done" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh7", "hours": 32, "at": "2026-06-20", "by": "p_kira", "note": "Final push" }],
+          "baseline": { "due": "2026-06-19", "startDate": "2026-05-12", "commitment": 40, "at": "2026-04-25" },
+          "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_o_aocsctl", "identifier": "ORB-A9", "title": "AOCS controller v3 — slew law",
+          "owner": "p_diego", "originator": "p_diego", "status": "todo", "priority": 9,
+          "priorityLevel": "med", "commitment": 60,
+          "due": "2026-08-14", "startDate": null, "originatorDate": "2026-06-20", "completedAt": null, "archivedAt": null,
+          "component": "cp_aocs", "deliverable": "dl_baseline", "milestone": "ms_cdr",
+          "description": "Refine slew maneuver control law post-PDR.",
+          "notes": "",
+          "createdAt": "2026-06-20", "updatedAt": "2026-06-20",
+          "history": [{ "at": "2026-06-20", "what": "Created with status todo" }],
+          "dependsOn": ["a_o_pdrpack"], "tags": [], "comments": [],
+          "loggedHours": [], "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_o_epsblock", "identifier": "ORB-A10", "title": "EPS block diagram + dual-source cell qual plan",
+          "owner": "p_omar", "originator": "p_omar", "status": "doing", "priority": 10,
+          "priorityLevel": "high", "commitment": 60,
+          "due": "2026-07-31", "startDate": "2026-06-08", "originatorDate": "2026-05-20", "completedAt": null, "archivedAt": null,
+          "component": "cp_pow", "deliverable": "dl_pdrpack", "milestone": "ms_pdr",
+          "description": "Include dual-source path to mitigate battery vendor lock-in risk.",
+          "notes": "",
+          "createdAt": "2026-05-20", "updatedAt": "2026-06-30",
+          "history": [
+            { "at": "2026-05-20", "what": "Created with status todo" },
+            { "at": "2026-06-08", "what": "Status: todo → doing" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh8", "hours": 16, "at": "2026-06-20", "by": "p_omar", "note": "" }],
+          "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": [
+            { "id": "tk_eps_1", "title": "Block diagram v1",           "status": "done" },
+            { "id": "tk_eps_2", "title": "Solar array sizing",          "status": "doing" },
+            { "id": "tk_eps_3", "title": "Cell qualification test plan","status": "todo" }
+          ]
+        },
+        {
+          "id": "a_o_atp", "identifier": "ORB-A11", "title": "Acceptance test procedure — payload alignment",
+          "owner": "p_nadia", "originator": "p_marie", "status": "todo", "priority": 11,
+          "priorityLevel": "med", "commitment": 40,
+          "due": "2026-10-30", "startDate": null, "originatorDate": "2026-06-20", "completedAt": null, "archivedAt": null,
+          "component": "cp_test", "deliverable": "dl_atp", "milestone": "ms_trr",
+          "description": "Cover alignment gap from ORB-OP3.",
+          "notes": "",
+          "createdAt": "2026-06-20", "updatedAt": "2026-06-20",
+          "history": [{ "at": "2026-06-20", "what": "Created with status todo" }],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [], "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_o_status", "identifier": "ORB-A12", "title": "Weekly PM status report",
+          "owner": "p_sofia", "originator": "p_sofia", "status": "doing", "priority": 12,
+          "priorityLevel": "med", "commitment": 25,
+          "due": "2026-07-10", "startDate": "2026-07-03", "originatorDate": "2026-06-26", "completedAt": null, "archivedAt": null,
+          "component": "cp_pm", "deliverable": null, "milestone": null,
+          "description": "Weekly Friday customer update.",
+          "notes": "",
+          "createdAt": "2026-06-26", "updatedAt": "2026-06-26",
+          "history": [{ "at": "2026-06-26", "what": "Created with status doing" }],
+          "dependsOn": [], "tags": ["tg_o_cust"], "comments": [],
+          "loggedHours": [], "baseline": null, "percentComplete": null,
+          "recurrence": { "unit": "week", "interval": 1 }, "snoozedUntil": null,
+          "tasks": [
+            { "id": "tk_wk_1", "title": "Refresh milestone slide",      "status": "done" },
+            { "id": "tk_wk_2", "title": "Snapshot KPIs from Dashboard",  "status": "doing" },
+            { "id": "tk_wk_3", "title": "Write narrative summary",       "status": "todo" },
+            { "id": "tk_wk_4", "title": "Send draft to Marie for review", "status": "todo" }
+          ]
+        },
+        {
+          "id": "a_o_snooze", "identifier": "ORB-A13", "title": "Vendor contact spreadsheet refresh",
+          "owner": "p_sofia", "originator": "p_sofia", "status": "todo", "priority": 13,
+          "priorityLevel": "low", "commitment": 20,
+          "due": "2026-08-02", "startDate": null, "originatorDate": "2026-06-19", "completedAt": null, "archivedAt": null,
+          "component": "cp_pm", "deliverable": null, "milestone": null,
+          "description": "", "notes": "Low priority — snoozed until after PDR.",
+          "createdAt": "2026-06-19", "updatedAt": "2026-06-19",
+          "history": [{ "at": "2026-06-19", "what": "Created with status todo" }],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [], "baseline": null, "percentComplete": null,
+          "recurrence": null, "snoozedUntil": "2026-07-16", "tasks": []
+        },
+        {
+          "id": "a_o_arch1", "identifier": "ORB-A14", "title": "Detector readout chain",
+          "owner": "p_marie", "originator": "p_marie", "status": "done", "priority": 14,
+          "priorityLevel": "high", "commitment": 60,
+          "due": "2026-04-23", "startDate": "2026-03-15", "originatorDate": "2026-03-01", "completedAt": "2026-04-25", "archivedAt": "2026-05-10",
+          "component": "cp_pl", "deliverable": null, "milestone": null,
+          "description": "Landed 2 days late — see waterfall.",
+          "notes": "",
+          "createdAt": "2026-03-01", "updatedAt": "2026-04-25",
+          "history": [
+            { "at": "2026-03-01", "what": "Created with status todo" },
+            { "at": "2026-03-15", "what": "Status: todo → doing" },
+            { "at": "2026-04-25", "what": "Status: doing → done" },
+            { "at": "2026-05-10", "what": "Moved to Archive" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh9", "hours": 45, "at": "2026-04-25", "by": "p_marie", "note": "" }],
+          "baseline": { "due": "2026-04-23", "startDate": "2026-03-15", "commitment": 60, "at": "2026-03-01" },
+          "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_o_arch2", "identifier": "ORB-A15", "title": "Panel layout v2 — sun-side thermal",
+          "owner": "p_lena", "originator": "p_jonas", "status": "done", "priority": 15,
+          "priorityLevel": "med", "commitment": 40,
+          "due": "2026-05-14", "startDate": "2026-04-01", "originatorDate": "2026-03-20", "completedAt": "2026-05-12", "archivedAt": "2026-06-01",
+          "component": "cp_th", "deliverable": null, "milestone": null,
+          "description": "", "notes": "",
+          "createdAt": "2026-03-20", "updatedAt": "2026-05-12",
+          "history": [
+            { "at": "2026-03-20", "what": "Created with status todo" },
+            { "at": "2026-04-01", "what": "Status: todo → doing" },
+            { "at": "2026-05-12", "what": "Status: doing → done" },
+            { "at": "2026-06-01", "what": "Moved to Archive" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh10", "hours": 22, "at": "2026-05-12", "by": "p_lena", "note": "" }],
+          "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        }
+      ]
+    },
+
+    {
+      "id": "pr_helios",
+      "name": "Helios-2 Ground Station Retrofit",
+      "description": "Ops software + RF chain retrofit for MetSat Corp's Helios-2 ground station. Design freeze Sep 2026.",
+      "archived": false,
+      "notes": "",
+      "archive": [],
+      "tags": [
+        { "id": "tg_h_cust", "name": "customer", "color": "#3b82f6" },
+        { "id": "tg_h_ops",  "name": "ops",      "color": "#10b981" }
+      ],
+      "costCenters": ["CC-HEL-OPS"],
+      "linkFolders": [],
+      "links": [
+        { "id": "lk_h_1", "title": "MetSat portal", "url": "https://internal.example/metsat", "folderId": null, "createdAt": "2026-02-01" }
+      ],
+      "components": [
+        { "id": "cp_h_pm", "name": "Programme",       "color": "#94a3b8", "costCenter": "CC-HEL-OPS" },
+        { "id": "cp_h_sw", "name": "Ground Software", "color": "#10b981", "costCenter": "CC-HEL-OPS" },
+        { "id": "cp_h_rf", "name": "RF Chain",        "color": "#f97316", "costCenter": "CC-HEL-OPS" }
+      ],
+      "milestones": [
+        { "id": "ms_h_dfr", "identifier": "HEL-M1", "name": "Design freeze", "date": "2026-09-15", "critical": true, "notes": "" },
+        { "id": "ms_h_ft",  "identifier": "HEL-M2", "name": "Field trial",   "date": "2026-11-30", "critical": true, "notes": "" }
+      ],
+      "deliverables": [
+        { "id": "dl_h_sw",  "identifier": "HEL-D1", "name": "Telemetry pipeline v10", "due": "2026-09-15", "notes": "" },
+        { "id": "dl_h_atp", "identifier": "HEL-D2", "name": "Site acceptance procedure", "due": "2026-11-20", "notes": "" }
+      ],
+      "meetings": [
+        { "id": "mt_h_sync", "identifier": "HEL-MT1", "name": "MetSat sync", "kind": "weekly", "startDate": "2026-02-02", "dayOfWeek": 3, "time": "15:00", "notes": "" }
+      ],
+      "openPoints": [
+        { "id": "op_h_1", "identifier": "HEL-OP1", "title": "Legacy TT&C protocol compatibility", "notes": "Support decoding old CCSDS variant.", "component": "cp_h_sw", "criticality": "med", "priorityLevel": "med", "createdAt": "2026-05-01", "tags": [], "steps": [] }
+      ],
+      "risks": [
+        {
+          "id": "r_h_bandwidth", "identifier": "HEL-R1", "kind": "risk", "title": "Backhaul bandwidth insufficient",
+          "inherent": { "probability": 3, "impact": 4 }, "residual": { "probability": 2, "impact": 3 },
+          "mitigation": "Compression pre-processing on-site.",
+          "owner": "p_yuki", "actionId": null
+        },
+        {
+          "id": "o_h_openTM", "identifier": "HEL-O1", "kind": "opportunity", "title": "Open-source the telemetry decoder",
+          "inherent": { "probability": 3, "impact": 3 }, "residual": { "probability": 4, "impact": 4 },
+          "mitigation": "Community contributions + hire-pipeline benefit.",
+          "owner": "p_yuki", "actionId": null
+        }
+      ],
+      "decisions": [
+        {
+          "id": "d_h_stack", "identifier": "HEL-D1", "title": "Adopt Node.js + Timescale for telemetry pipeline",
+          "rationale": "Team fluency + ingestion throughput.",
+          "status": "decided", "owner": "p_kira", "originator": "p_yuki", "decidedAt": "2026-03-05",
+          "component": "cp_h_sw", "tags": [], "comments": [], "triggerRef": null
+        }
+      ],
+      "changes": [],
+      "actions": [
+        {
+          "id": "a_h_pipeline", "identifier": "HEL-A1", "title": "Telemetry pipeline v10 — high-rate stream",
+          "owner": "p_yuki", "originator": "p_yuki", "status": "doing", "priority": 1,
+          "priorityLevel": "high", "commitment": 100,
+          "due": "2026-08-14", "startDate": "2026-06-08", "originatorDate": "2026-05-15", "completedAt": null, "archivedAt": null,
+          "component": "cp_h_sw", "deliverable": "dl_h_sw", "milestone": "ms_h_dfr",
+          "description": "New Kafka ingestion path.",
+          "notes": "",
+          "createdAt": "2026-05-15", "updatedAt": "2026-07-01",
+          "history": [
+            { "at": "2026-05-15", "what": "Created with status todo" },
+            { "at": "2026-06-08", "what": "Status: todo → doing" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh_h1", "hours": 24, "at": "2026-06-24", "by": "p_yuki", "note": "" }],
+          "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null,
+          "tasks": [
+            { "id": "tk_h_1", "title": "Kafka topic design",          "status": "done" },
+            { "id": "tk_h_2", "title": "Decoder implementation",       "status": "doing" },
+            { "id": "tk_h_3", "title": "Timescale schema + retention", "status": "todo" },
+            { "id": "tk_h_4", "title": "Load-test harness",             "status": "todo" }
+          ]
+        },
+        {
+          "id": "a_h_atp", "identifier": "HEL-A2", "title": "Site acceptance procedure — draft",
+          "owner": "p_kira", "originator": "st_metsat", "status": "todo", "priority": 2,
+          "priorityLevel": "med", "commitment": 30,
+          "due": "2026-11-01", "startDate": null, "originatorDate": "2026-06-15", "completedAt": null, "archivedAt": null,
+          "component": "cp_h_pm", "deliverable": "dl_h_atp", "milestone": "ms_h_ft",
+          "description": "MetSat requested a written ATP for field trial. Reuse ECSS framework.",
+          "notes": "",
+          "createdAt": "2026-06-15", "updatedAt": "2026-06-15",
+          "history": [{ "at": "2026-06-15", "what": "Created with status todo" }],
+          "dependsOn": [], "tags": ["tg_h_cust"], "comments": [],
+          "loggedHours": [], "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_h_rfcal", "identifier": "HEL-A3", "title": "RF chain calibration procedure",
+          "owner": "p_kira", "originator": "p_kira", "status": "blocked", "priority": 3,
+          "priorityLevel": "med", "commitment": 40,
+          "due": "2026-08-28", "startDate": "2026-06-15", "originatorDate": "2026-06-01", "completedAt": null, "archivedAt": null,
+          "component": "cp_h_rf", "deliverable": null, "milestone": null,
+          "description": "Waiting on vendor calibration standards.",
+          "notes": "",
+          "createdAt": "2026-06-01", "updatedAt": "2026-06-24",
+          "history": [
+            { "at": "2026-06-01", "what": "Created with status todo" },
+            { "at": "2026-06-15", "what": "Status: todo → doing" },
+            { "at": "2026-06-24", "what": "Status: doing → blocked" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [], "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_h_arch1", "identifier": "HEL-A4", "title": "Pass-plan UI v10",
+          "owner": "p_yuki", "originator": "p_yuki", "status": "done", "priority": 4,
+          "priorityLevel": "med", "commitment": 60,
+          "due": "2026-04-18", "startDate": "2026-03-10", "originatorDate": "2026-02-28", "completedAt": "2026-04-20", "archivedAt": "2026-05-05",
+          "component": "cp_h_sw", "deliverable": null, "milestone": null,
+          "description": "", "notes": "",
+          "createdAt": "2026-02-28", "updatedAt": "2026-04-20",
+          "history": [
+            { "at": "2026-02-28", "what": "Created with status todo" },
+            { "at": "2026-03-10", "what": "Status: todo → doing" },
+            { "at": "2026-04-20", "what": "Status: doing → done" },
+            { "at": "2026-05-05", "what": "Moved to Archive" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh_h2", "hours": 40, "at": "2026-04-20", "by": "p_yuki", "note": "" }],
+          "baseline": { "due": "2026-04-18", "startDate": "2026-03-10", "commitment": 60, "at": "2026-02-28" },
+          "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        }
+      ]
+    },
+
+    {
+      "id": "pr_falcon",
+      "name": "Falcon-P2 Autonomous Drone Swarm",
+      "description": "Early-stage R&D for autonomous drone swarm testbed. Grant window opens in 6 weeks.",
+      "archived": false,
+      "notes": "",
+      "archive": [],
+      "tags": [
+        { "id": "tg_f_rnd", "name": "r-and-d",  "color": "#8b5cf6" },
+        { "id": "tg_f_test","name": "test",     "color": "#0ea5e9" }
+      ],
+      "costCenters": ["CC-FAL-RND"],
+      "linkFolders": [],
+      "links": [],
+      "components": [
+        { "id": "cp_f_pm",   "name": "Programme",       "color": "#94a3b8", "costCenter": "CC-FAL-RND" },
+        { "id": "cp_f_sw",   "name": "Swarm Software",  "color": "#10b981", "costCenter": "CC-FAL-RND" },
+        { "id": "cp_f_aero", "name": "Airframe",        "color": "#f97316", "costCenter": "CC-FAL-RND" },
+        { "id": "cp_f_test", "name": "Flight Test",      "color": "#0ea5e9", "costCenter": "CC-FAL-RND" }
+      ],
+      "milestones": [
+        { "id": "ms_f_grant", "identifier": "FAL-M1", "name": "R&D grant application deadline", "date": "2026-08-15", "critical": true, "notes": "" },
+        { "id": "ms_f_ft1",   "identifier": "FAL-M2", "name": "First flight test window",       "date": "2026-11-01", "critical": false, "notes": "" }
+      ],
+      "deliverables": [
+        { "id": "dl_f_grant", "identifier": "FAL-D1", "name": "Grant proposal package", "due": "2026-08-14", "notes": "" }
+      ],
+      "meetings": [],
+      "openPoints": [
+        { "id": "op_f_1", "identifier": "FAL-OP1", "title": "Test site authorisation with civil aviation", "notes": "", "component": "cp_f_test", "criticality": "high", "priorityLevel": "high", "createdAt": "2026-06-01", "tags": [], "steps": [] }
+      ],
+      "risks": [
+        {
+          "id": "r_f_ca", "identifier": "FAL-R1", "kind": "risk", "title": "Civil aviation authorisation slip",
+          "inherent": { "probability": 4, "impact": 4 }, "residual": { "probability": 3, "impact": 3 },
+          "mitigation": "Start authorisation paperwork before airframe design freeze.",
+          "owner": "p_marie", "actionId": null
+        },
+        {
+          "id": "o_f_grant", "identifier": "FAL-O1", "kind": "opportunity", "title": "R&D grant secured",
+          "inherent": { "probability": 2, "impact": 4 }, "residual": { "probability": 3, "impact": 5 },
+          "mitigation": "Submit strong proposal; sister-mission SE for letter of support.",
+          "owner": "p_marie", "actionId": "a_f_grant"
+        }
+      ],
+      "decisions": [],
+      "changes": [],
+      "actions": [
+        {
+          "id": "a_f_grant", "identifier": "FAL-A1", "title": "R&D grant proposal — narrative + budget",
+          "owner": "p_marie", "originator": "st_mosaic", "status": "doing", "priority": 1,
+          "priorityLevel": "high", "commitment": 40,
+          "due": "2026-08-14", "startDate": "2026-06-20", "originatorDate": "2026-06-05", "completedAt": null, "archivedAt": null,
+          "component": "cp_f_pm", "deliverable": "dl_f_grant", "milestone": "ms_f_grant",
+          "description": "Marie lead-authors; sister-mission SE providing letter of support.",
+          "notes": "",
+          "createdAt": "2026-06-05", "updatedAt": "2026-06-30",
+          "history": [
+            { "at": "2026-06-05", "what": "Created with status todo" },
+            { "at": "2026-06-20", "what": "Status: todo → doing" }
+          ],
+          "dependsOn": [], "tags": ["tg_f_rnd"], "comments": [],
+          "loggedHours": [{ "id": "lh_f1", "hours": 8, "at": "2026-06-25", "by": "p_marie", "note": "Draft outline" }],
+          "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null,
+          "tasks": [
+            { "id": "tk_f_1", "title": "Executive summary",           "status": "done" },
+            { "id": "tk_f_2", "title": "Technical narrative",          "status": "doing" },
+            { "id": "tk_f_3", "title": "Budget spreadsheet",           "status": "todo" },
+            { "id": "tk_f_4", "title": "Letters of support",           "status": "todo" }
+          ]
+        },
+        {
+          "id": "a_f_swarm", "identifier": "FAL-A2", "title": "Swarm coordination algorithm study",
+          "owner": "p_diego", "originator": "p_marie", "status": "doing", "priority": 2,
+          "priorityLevel": "med", "commitment": 30,
+          "due": "2026-09-25", "startDate": "2026-06-15", "originatorDate": "2026-06-01", "completedAt": null, "archivedAt": null,
+          "component": "cp_f_sw", "deliverable": null, "milestone": null,
+          "description": "Baseline algorithms + literature survey.",
+          "notes": "",
+          "createdAt": "2026-06-01", "updatedAt": "2026-06-30",
+          "history": [
+            { "at": "2026-06-01", "what": "Created with status todo" },
+            { "at": "2026-06-15", "what": "Status: todo → doing" }
+          ],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [{ "id": "lh_f2", "hours": 12, "at": "2026-06-25", "by": "p_diego", "note": "" }],
+          "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        },
+        {
+          "id": "a_f_aero", "identifier": "FAL-A3", "title": "Airframe concept — quad vs hex trade-off",
+          "owner": "p_jonas", "originator": "p_jonas", "status": "todo", "priority": 3,
+          "priorityLevel": "low", "commitment": 20,
+          "due": "2026-09-19", "startDate": null, "originatorDate": "2026-06-20", "completedAt": null, "archivedAt": null,
+          "component": "cp_f_aero", "deliverable": null, "milestone": null,
+          "description": "Not urgent — informs swarm density decisions.",
+          "notes": "",
+          "createdAt": "2026-06-20", "updatedAt": "2026-06-20",
+          "history": [{ "at": "2026-06-20", "what": "Created with status todo" }],
+          "dependsOn": [], "tags": [], "comments": [],
+          "loggedHours": [], "baseline": null, "percentComplete": null, "recurrence": null, "snoozedUntil": null, "tasks": []
+        }
+      ]
+    }
+  ],
+
+  "currentProjectId": "pr_orbit",
+  "currentView": "dashboard",
+
+  "settings": {
+    "theme": "dark",
+    "holidayCountries": ["FR"],
+    "sidebarGroups": { "workspace": true, "work": true, "insight": true },
+    "notifyEnabled": false,
+    "tourSeen": true,
+    "safetySeen": true,
+    "walkthroughsSeen": {
+      "getting-started": "completed"
+    },
+    "costCentreOrder": ["CC-ORB-PM", "CC-ORB-ENG", "CC-ORB-TEST", "CC-HEL-OPS", "CC-FAL-RND"],
+    "budgetView": "cost",
+    "budgetGroupBy": "component",
+    "budgetWeeks": 104,
+    "budgetRanges": {},
+    "showArchivedProjects": false,
+    "autoBackup": { "mode": "download", "enabled": false, "intervalMinutes": 60, "gdriveClientId": "", "gdriveSignedIn": false }
+  },
+
+  "budgets": {
+    "CC-ORB-PM":   { "2026-06-29": 4000,  "2026-07-06": 4000, "2026-07-13": 4000, "2026-07-20": 4000, "2026-07-27": 4000 },
+    "CC-ORB-ENG":  { "2026-06-29": 22000, "2026-07-06": 24000,"2026-07-13": 24000,"2026-07-20": 22000,"2026-07-27": 20000 },
+    "CC-ORB-TEST": { "2026-06-29": 6000,  "2026-07-06": 6000, "2026-07-13": 8000, "2026-07-20": 8000, "2026-07-27": 10000 },
+    "CC-HEL-OPS":  { "2026-06-29": 5000,  "2026-07-06": 5000, "2026-07-13": 5000, "2026-07-20": 5000, "2026-07-27": 5000 },
+    "CC-FAL-RND":  { "2026-06-29": 2500,  "2026-07-06": 2500, "2026-07-13": 2500, "2026-07-20": 2500, "2026-07-27": 2500 }
+  },
+
+  "notes": {
+    "pr_orbit": "# Orbit-7 running notes\n\n## PDR prep\n- Review pack draft by Wed\n- Chase @Isabelle Fournier on ICD sign-off (blocking #a_o_extown)\n- FDIR scope expansion approved via ORB-CR1\n\n## Open decisions\n- Single-source rad-hard OBC under review (see ORB-D2)\n\n## Sister-mission heritage\n- @Mateus Vieira offered FSW libs — evaluate reuse (see #a_o_extorig)\n",
+    "pr_helios": "# Helios-2 notes\n\n- MetSat customer sync: Wednesdays 15:00\n- Backhaul bandwidth risk under review\n",
+    "pr_falcon": "# Falcon-P2 notes\n\n- Grant deadline 14 Aug — do not slip\n- Airframe trade-off can wait\n"
+  },
+
+  "savedViews": [
+    { "id": "sv_1", "name": "My overdue actions", "filters": { "search": "", "owner": "p_sofia", "component": "", "status": "", "due": "late" }, "view": "register" },
+    { "id": "sv_2", "name": "Due this week — all",  "filters": { "search": "", "owner": "", "component": "", "status": "", "due": "week" }, "view": "register" },
+    { "id": "sv_3", "name": "Blocked portfolio",    "filters": { "search": "", "owner": "", "component": "", "status": "blocked", "due": "" }, "view": "register" }
+  ],
+
+  "todos": [
+    { "id": "td1", "text": "Review PDR slides before customer meeting", "done": false },
+    { "id": "td2", "text": "Send Q3 budget summary to finance",         "done": true  },
+    { "id": "td3", "text": "Prep board update on Falcon P2 progress",   "done": false },
+    { "id": "td4", "text": "Schedule Marie ↔ Diego TVAC handover chat", "done": false }
+  ],
+
+  "notesOpen": false,
+  "inbox": { "dismissed": [] },
+  "templates": []
+}
