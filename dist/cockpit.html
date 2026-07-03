@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-03T22:57:48.114Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-03T23:23:34.857Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3513,6 +3513,95 @@ body.is-card-dragging * { cursor: grabbing !important; }
   height: 9px;
   border-radius: 2px;
   display: inline-block;
+}
+
+/* ===================== Planner v2 fixes ===================== */
+
+/* Header controls — hide-done toggle, zoom cluster. */
+.pln-toggle.active { background: var(--accent-tint); color: var(--accent); border-color: var(--accent); }
+.pln-zoom {
+  display: inline-flex;
+  gap: 2px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.pln-zoom .seg-btn {
+  border-radius: 0;
+  border: none;
+  border-right: 1px solid var(--line-2);
+  padding: 2px 8px;
+  min-width: 26px;
+  font-size: 12px;
+}
+.pln-zoom .seg-btn:last-child { border-right: none; }
+
+/* Peak-week sparkline next to the picker. */
+.pln-spark {
+  display: inline-flex;
+  gap: 1px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+}
+.pln-spark-cell {
+  width: 6px;
+  height: 14px;
+  border-radius: 1px;
+  display: inline-block;
+}
+.pln-spark-idle   { background: rgba(255,255,255,.06); }
+.pln-spark-low    { background: rgba(74, 222, 128, .35); }
+.pln-spark-mid    { background: rgba(74, 222, 128, .65); }
+.pln-spark-high   { background: rgba(251, 191, 36, .70); }
+.pln-spark-over   { background: rgba(248, 113, 121, .70); }
+.pln-spark-severe { background: rgba(248, 113, 121, .95); }
+
+/* Bar overlays. */
+.pln-baseline { opacity: .8; }
+.pln-actual  { pointer-events: none; }
+.pln-dep-line { pointer-events: none; }
+.pln-dep-line.violates { opacity: .95; }
+
+/* Row label flags. */
+.pln-dep-flag,
+.pln-conflict-flag {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--bad);
+  cursor: help;
+}
+.pln-base-drift {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 10px;
+  background: var(--bg-3);
+  color: var(--text-faint);
+  border: 1px solid var(--line-2);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Extreme cap (>200%) escalation on the bar. */
+.pln-bar-group.is-extreme-cap .pln-bar {
+  stroke: var(--bad) !important;
+  stroke-width: 2.5 !important;
+  stroke-dasharray: 2 2;
+  animation: pln-extreme-pulse 1.6s ease-in-out infinite;
+}
+@keyframes pln-extreme-pulse {
+  0%, 100% { filter: drop-shadow(0 0 0 rgba(248,113,121,0)); }
+  50%      { filter: drop-shadow(0 0 4px rgba(248,113,121,.55)); }
+}
+
+/* Conflict outline — subtle warning without being loud. */
+.pln-bar-group.is-conflict .pln-bar {
+  stroke-dasharray: 4 2;
+  stroke-width: 1.5;
 }
 
 /* Owner-load strip in the action drawer */
@@ -29134,6 +29223,10 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       personId: firstOwner?.id || null,
       scope: 'all',              // 'all' | 'project'
       highlightedActionId: null,
+      hideDone: true,            // hide completed actions (in the past) by default
+      zoomStep: 0,               // 0 = auto; -2..+3 = user override tiers
+      lastPersonId: null,        // last person we auto-scrolled for
+      lastAutoScrollSig: null,   // { personId, scope, zoomStep, hideDone } snapshot
     };
   }
 
@@ -29175,10 +29268,18 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   // whether any bucket exceeds the person's capacity (warn) or blows
   // past 150 % of it (severe). Also returns the peak week's ratio so
   // the option label can show "· 145% peak" style detail.
-  function _plannerPersonOverload(person) {
-    const empty = { over: false, severe: false, peakPct: 0 };
+  function _plannerPersonOverload(person, scope, curProjId) {
+    const empty = { over: false, severe: false, peakPct: 0, weekPcts: [] };
     if (!person) return empty;
-    const cap = ((person.capacity || 100) / 100) * HOURS_PER_WEEK;
+    // scope='project' uses per-project assignment for capacity; falls
+    // back to global capacity when no assignment exists. Matches the
+    // cap line inside the chart.
+    let capPct = person.capacity || 100;
+    if (scope === 'project' && curProjId) {
+      const asg = (person.assignments || []).find((a) => a && a.projectId === curProjId);
+      if (asg && typeof asg.commitment === 'number') capPct = asg.commitment;
+    }
+    const cap = (capPct / 100) * HOURS_PER_WEEK;
     if (cap <= 0) return empty;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const monday = new Date(today);
@@ -29188,6 +29289,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const weekHours = weekStarts.map(() => 0);
     for (const proj of (state.projects || [])) {
       if (!proj || proj.archived) continue;
+      if (scope === 'project' && proj.id !== curProjId) continue;
       for (const a of (proj.actions || [])) {
         if (!a || a.owner !== person.id) continue;
         if (a.archivedAt) continue;
@@ -29214,7 +29316,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     }
     const peak = weekHours.length ? Math.max(...weekHours) : 0;
     const peakPct = Math.round((peak / cap) * 100);
-    return { over: peak > cap, severe: peak > cap * 1.5, peakPct };
+    const weekPcts = weekHours.map((h) => Math.round((h / cap) * 100));
+    return { over: peak > cap, severe: peak > cap * 1.5, peakPct, weekPcts };
   }
   function renderPlanner(root) {
     _plannerInit();
@@ -29240,17 +29343,21 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     }
     const weeklyCapHours = (capacityPct / 100) * HOURS_PER_WEEK;
 
-    // Collect actions to show. Rules from the spec:
-    //   - Open actions always shown.
-    //   - Done actions in the PAST shown (they represent completed work).
-    //   - Done actions in the FUTURE hidden (weird edge case, but we
-    //     don't want them cluttering plans).
-    //   - Cancelled actions hidden.
-    //   - Snoozed actions hidden until their re-emerge date.
+    // Collect actions to show.
+    //   - Person picker owns the owner filter.
+    //   - Topbar filters (component, status, due, search) still apply.
+    //   - hideDone toggle removes done-in-past clutter when set.
+    //   - Done in future / cancelled / snoozed / archived always hidden.
     const todayISO_ = todayISO();
     const scopeProjects = s.scope === 'project'
       ? [curProj].filter(Boolean)
       : (state.projects || []).filter((p) => p && !p.archived);
+    // Read topbar filter values once; owner is deliberately ignored
+    // because the Planner has its own person picker.
+    const fComp   = $('#filterComponent')?.value || '';
+    const fStatus = $('#filterStatus')?.value   || '';
+    const fDue    = $('#filterDue')?.value      || '';
+    const fSearch = ($('#search')?.value || '').trim().toLowerCase();
     const actions = scopeProjects.flatMap((pr) =>
       (pr.actions || []).map((a) => ({ a, project: pr }))
     ).filter(({ a }) => {
@@ -29260,11 +29367,25 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       if (isSnoozed(a)) return false;
       if (a.status === 'cancelled') return false;
       if (a.status === 'done') {
-        // Show done actions only if the completion is in the past AND
-        // recent enough to fall in the visible window (otherwise old
-        // completions dominate the list on established projects).
+        if (s.hideDone) return false;
         const completedAt = actionCompletedAt(a);
         return completedAt && completedAt <= todayISO_;
+      }
+      // Topbar filters — component
+      if (fComp) {
+        if (fComp === '__none__' && a.component) return false;
+        if (fComp !== '__none__' && a.component !== fComp) return false;
+      }
+      if (fStatus && a.status !== fStatus) return false;
+      if (fDue) {
+        const diff = a.due ? dayDiff(a.due, todayISO_) : null;
+        if (fDue === 'late'  && !(a.due && a.status !== 'done' && diff < 0)) return false;
+        if (fDue === 'week'  && !(a.due && diff !== null && diff >= 0 && diff <= 7)) return false;
+        if (fDue === 'month' && !(a.due && diff !== null && diff >= 0 && diff <= 30)) return false;
+      }
+      if (fSearch) {
+        const hay = (a.title + ' ' + personName(a.owner) + ' ' + (a.notes || '')).toLowerCase();
+        if (!hay.includes(fSearch)) return false;
       }
       return true;
     });
@@ -29298,6 +29419,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const visibleActions = actions;
     const span = _plannerFullSpan(visibleActions);
 
+    // Selected-person overload details for the sparkline heatmap.
+    const selectedOverload = person ? _plannerPersonOverload(person, s.scope, curProjId) : { weekPcts: [], peakPct: 0, over: false, severe: false };
+    const sparkCells = (selectedOverload.weekPcts || []).map((pct, i) => {
+      const cls = pct > 150 ? 'severe' : pct > 100 ? 'over' : pct > 75 ? 'high' : pct > 40 ? 'mid' : pct > 0 ? 'low' : 'idle';
+      return `<span class="pln-spark-cell pln-spark-${cls}" title="week ${i + 1} · ${pct}%"></span>`;
+    }).join('');
     view.innerHTML = `
       <div class="page-head">
         <div>
@@ -29309,35 +29436,45 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <span class="muted">Person</span>
             <select id="plnPerson">
               ${people.map((p) => {
-                const ol = _plannerPersonOverload(p);
+                const ol = _plannerPersonOverload(p, s.scope, curProjId);
                 const mark = ol.severe ? '\u{1F534} ' : ol.over ? '⚠️ ' : '';
                 const suffix = ol.over ? ` — ${ol.peakPct}% peak` : '';
                 return `<option value="${escapeHTML(p.id)}" ${p.id === s.personId ? 'selected' : ''}>${mark}${escapeHTML(p.name)}${p.role ? ' · ' + escapeHTML(p.role) : ''}${suffix}</option>`;
               }).join('')}
             </select>
           </label>
+          ${sparkCells ? `<span class="pln-spark" title="12-week load — each cell is one week, next 12 weeks from Monday">${sparkCells}</span>` : ''}
           <div class="seg" role="tablist" aria-label="Scope">
             <button class="seg-btn ${s.scope === 'all' ? 'active' : ''}" data-pln-scope="all">All projects</button>
             <button class="seg-btn ${s.scope === 'project' ? 'active' : ''}" data-pln-scope="project">This project</button>
           </div>
+          <button class="seg-btn pln-toggle ${s.hideDone ? 'active' : ''}" id="plnHideDone" title="Hide completed actions">Hide done</button>
+          <div class="pln-zoom">
+            <button class="seg-btn" id="plnZoomOut" title="Zoom out"aria-label="Zoom out">−</button>
+            <button class="seg-btn" id="plnZoomReset" title="Reset zoom">${s.zoomStep === 0 ? 'Auto' : (s.zoomStep > 0 ? '+' + s.zoomStep : s.zoomStep)}</button>
+            <button class="seg-btn" id="plnZoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+          </div>
         </div>
       </div>
-      ${person ? renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s, _plannerChartSizing(span)) : `<div class="empty">No team members yet — add one from the People page.</div>`}
+      ${person ? renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s, _plannerChartSizing(span, s.zoomStep)) : `<div class="empty">No team members yet — add one from the People page.</div>`}
     `;
     root.appendChild(view);
 
-    // Auto-scroll so today lands in the middle of the visible chart on
-    // first mount — otherwise the user opens on an arbitrary point in
-    // the timeline, which is disorienting when the span is long.
+    // Auto-scroll centers today whenever the selection signature
+    // (person / scope / zoom / hide-done) changes — so switching person
+    // doesn't leave you looking at an unrelated slice of another
+    // person's timeline.
     if (person) {
       const scroll = view.querySelector('#plnScroll');
-      if (scroll) {
+      const sig = JSON.stringify({ p: s.personId, sc: s.scope, z: s.zoomStep, hd: s.hideDone });
+      if (scroll && s.lastAutoScrollSig !== sig) {
         const dayW = parseFloat(scroll.dataset.dayW) || 8;
         const winStartMs = parseDate(scroll.dataset.winStart).getTime();
         const todayMs = new Date().setHours(0, 0, 0, 0);
         const todayX = ((todayMs - winStartMs) / dayMs) * dayW;
         const target = Math.max(0, todayX - scroll.clientWidth / 2 + 120);
         scroll.scrollLeft = target;
+        s.lastAutoScrollSig = sig;
       }
     }
 
@@ -29352,6 +29489,22 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         render();
       });
     });
+    view.querySelector('#plnHideDone')?.addEventListener('click', () => {
+      s.hideDone = !s.hideDone;
+      render();
+    });
+    view.querySelector('#plnZoomIn')?.addEventListener('click', () => {
+      s.zoomStep = Math.min(3, (s.zoomStep || 0) + 1);
+      render();
+    });
+    view.querySelector('#plnZoomOut')?.addEventListener('click', () => {
+      s.zoomStep = Math.max(-2, (s.zoomStep || 0) - 1);
+      render();
+    });
+    view.querySelector('#plnZoomReset')?.addEventListener('click', () => {
+      s.zoomStep = 0;
+      render();
+    });
 
     // Drag wire-up (Phase 2 — workload-preserving drag).
     _wirePlannerDrag(view);
@@ -29363,7 +29516,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // Use the exact span the Gantt used so both stay in sync.
     const winStartClosure = span.winStart;
     const winEndClosure = span.winEnd;
-    const dayWClosure = _plannerChartSizing(span).dayW;
+    const dayWClosure = _plannerChartSizing(span, s.zoomStep).dayW;
     const capacityHoursClosure = (capacityPct / 100) * HOURS_PER_WEEK;
     _plannerLiveUpdateWorkload = () => {
       const wl = view.querySelector('#plnWorkload');
@@ -29575,18 +29728,10 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const spanDays = Math.max(1, Math.round((parseDate(newEnd) - parseDate(newStart)) / dayMs) + 1);
       const weeks = spanDays / 7;
       newCommitment = Math.round((drag.anchorHours / (HOURS_PER_WEEK * weeks)) * 100);
-      if (newCommitment > 200) {
-        const minWeeks = drag.anchorHours / (HOURS_PER_WEEK * 2.0);
-        const minDays = Math.max(1, Math.ceil(minWeeks * 7));
-        if (drag.zone === 'left') {
-          const clampedStart = new Date(parseDate(newEnd).getTime() - (minDays - 1) * dayMs);
-          newStart = fmtISO(clampedStart);
-        } else {
-          const clampedEnd = new Date(parseDate(newStart).getTime() + (minDays - 1) * dayMs);
-          newEnd = fmtISO(clampedEnd);
-        }
-        newCommitment = 200;
-      }
+      // Soft ceiling — commitment can go past 200 %, just visualizes
+      // as "extreme". Only hard clamp at 500 % to prevent unrenderable
+      // states / infinite tiny bars.
+      if (newCommitment > 500) newCommitment = 500;
     }
 
     drag.newStartISO = newStart;
@@ -29623,6 +29768,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     if (drag.group) {
       drag.group.classList.toggle('is-over-cap', newCommitment > 100);
       drag.group.classList.toggle('is-way-over-cap', newCommitment > 150);
+      drag.group.classList.toggle('is-extreme-cap', newCommitment > 200);
     }
     if (drag.badgeEl && drag.dueISO) {
       // Margin = fixed due minus the live work-end.
@@ -29643,29 +29789,44 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     if (d.bar) d.bar.style.cursor = 'grab';
     if (!d.dragged) return;
     const a = d.a;
-    // Never touch a.due — the due date is fixed by the customer, not
-    // by dragging. Body drag shifts start (workEnd follows via the
-    // hours-and-commitment computation); edge drags reshape the
-    // window and commitment.
-    if (d.zone === 'body' || d.zone === 'left') a.startDate = d.newStartISO;
+    // Snap to Monday so weekly workload buckets stay clean. Left edge
+    // is snapped by moving the start date; the workEnd is computed
+    // from start + hours ÷ commitment anyway, so no separate snap.
+    const snapToMonday = (iso) => {
+      const dt = parseDate(iso);
+      const dow = dt.getDay();
+      // Snap to the nearest Monday (dow=1). If dow is 4 or later, go
+      // forward; otherwise go back.
+      const delta = dow === 0 ? 1 : dow === 1 ? 0 : dow <= 4 ? 1 - dow : 8 - dow;
+      dt.setDate(dt.getDate() + delta);
+      return fmtISO(dt);
+    };
+    // Never touch a.due — the due date is fixed by the customer.
+    if (d.zone === 'body' || d.zone === 'left') a.startDate = snapToMonday(d.newStartISO);
     if (d.zone !== 'body') {
       a.commitment = d.newCommitment;
       a.plannedHours = Math.round(d.anchorHours);
     }
     commit('planner-drag');
+    // Undo pill — nudges the user that the change is undoable, with
+    // the standard tool convention (top toolbar undo button).
+    if (typeof toast === 'function') toast('Plan updated — press ⌘Z or the Undo button to revert', 2400);
     render();
   });
 
   // Sizing for full-timeline mode: pick a dayW that makes the span
   // scrollable at a comfortable density. Short spans get bigger bars;
   // long spans get denser bars. Chart width follows from the span.
-  function _plannerChartSizing(span) {
+  function _plannerChartSizing(span, zoomStep) {
     const totalDays = Math.max(1, Math.round((span.winEnd - span.winStart) / dayMs));
-    let dayW;
-    if (totalDays <= 90)       dayW = 12;   // < 3 months
-    else if (totalDays <= 240) dayW = 8;    // 3–8 months
-    else if (totalDays <= 540) dayW = 6;    // up to 18 months
-    else                       dayW = 4;    // multi-year
+    let auto;
+    if (totalDays <= 90)       auto = 12;
+    else if (totalDays <= 240) auto = 8;
+    else if (totalDays <= 540) auto = 6;
+    else                       auto = 4;
+    // Zoom tiers (multipliers): -2=0.5x, -1=0.75x, 0=auto, 1=1.5x, 2=2x, 3=3x.
+    const mul = { '-2': 0.5, '-1': 0.75, 0: 1, 1: 1.5, 2: 2, 3: 3 }[zoomStep || 0] || 1;
+    const dayW = Math.max(2, Math.min(30, Math.round(auto * mul)));
     return { dayW, chartW: totalDays * dayW, winStart: span.winStart, winEnd: span.winEnd };
   }
 
@@ -29706,13 +29867,10 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         return { a, project, skip: true, i };
       }
       if (!workStart) {
-        // No explicit start — anchor 2 days before due as a sensible
-        // default.
         workStart = fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs));
       }
       const commitment = typeof a.commitment === 'number' ? a.commitment : 100;
       const hoursRaw = _plannerEffectiveHours(a);
-      // How many days does the work take at this commitment?
       const weeksNeeded = hoursRaw / ((commitment / 100) * HOURS_PER_WEEK);
       const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
       const workEnd = fmtISO(new Date(parseDate(workStart).getTime() + (daysNeeded - 1) * dayMs));
@@ -29722,8 +29880,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const hours = Math.round(hoursRaw);
       const isOver = commitment > 100;
       const isOverHard = commitment > 150;
-      // Margin — days between work-end and due. Positive = slack;
-      // negative = late. Only meaningful when a due date is set.
+      const isOverExtreme = commitment > 200;
       const workEndX = barX + barW;
       const marginDays = a.due ? Math.round((parseDate(a.due) - parseDate(workEnd)) / dayMs) : null;
       const marginBadge = marginDays == null
@@ -29733,9 +29890,102 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           : marginDays < 0
             ? `<span class="pln-margin bad">${marginDays}d</span>`
             : `<span class="pln-margin warn">±0d</span>`;
+
+      // Actuals fill — solid strip inside the bar showing how much of
+      // the planned hours have been logged. Clamped to 0..1.
+      const logged = totalLoggedHours(a);
+      const progressFrac = hoursRaw > 0 ? Math.min(1, Math.max(0, logged / hoursRaw)) : 0;
+
+      // Baseline overlay — thin outline of the plan as it was frozen at
+      // baseline capture. Only visible when a baseline exists AND drift
+      // is non-zero.
+      let baseline = null;
+      if (a.baseline && (a.baseline.startDate || a.baseline.due)) {
+        const bStart = a.baseline.startDate || (a.baseline.due ? fmtISO(new Date(parseDate(a.baseline.due).getTime() - 2 * dayMs)) : null);
+        const bDue = a.baseline.due || null;
+        const bCommit = typeof a.baseline.commitment === 'number' ? a.baseline.commitment : commitment;
+        const bHours = hoursRaw;
+        const bWeeks = bHours / ((bCommit / 100) * HOURS_PER_WEEK);
+        const bDays = Math.max(1, Math.ceil(bWeeks * 7));
+        const bWorkEnd = bStart ? fmtISO(new Date(parseDate(bStart).getTime() + (bDays - 1) * dayMs)) : null;
+        if (bStart && bWorkEnd) {
+          const bX = clampX(xFor(bStart));
+          const bX2 = clampX(xFor(bWorkEnd));
+          const bW = Math.max(2, bX2 - bX);
+          const startDrift = a.startDate && a.baseline.startDate
+            ? Math.round((parseDate(a.startDate) - parseDate(a.baseline.startDate)) / dayMs) : 0;
+          const dueDrift = a.due && bDue ? Math.round((parseDate(a.due) - parseDate(bDue)) / dayMs) : 0;
+          baseline = { bX, bW, bDueX: bDue ? xFor(bDue) : null, startDrift, dueDrift };
+        }
+      }
+
+      // Dependency awareness — link to any predecessor that also has a
+      // bar. Store the predecessor's work-end X for line drawing, and
+      // flag when this action's start is before it (violation).
+      const depSlackByPred = {};
+      const depIds = Array.isArray(a.dependsOn) ? a.dependsOn : [];
+      let depViolation = false;
+      depIds.forEach((pid) => {
+        const pred = items.find((it) => it.a && it.a.id === pid);
+        if (!pred) return;
+        // We need the pred's work-end — recompute quickly.
+        const pA = pred.a;
+        const pStart = pA.startDate || (pA.due ? fmtISO(new Date(parseDate(pA.due).getTime() - 2 * dayMs)) : null);
+        if (!pStart) return;
+        const pCommit = typeof pA.commitment === 'number' ? pA.commitment : 100;
+        const pHours = _plannerEffectiveHours(pA);
+        const pWeeks = pHours / ((pCommit / 100) * HOURS_PER_WEEK);
+        const pDays = Math.max(1, Math.ceil(pWeeks * 7));
+        const pEnd = fmtISO(new Date(parseDate(pStart).getTime() + (pDays - 1) * dayMs));
+        depSlackByPred[pid] = { predEndISO: pEnd, predEndX: xFor(pEnd) };
+        if (workStart < pEnd) depViolation = true;
+      });
+
       const c = colorFor(a.id);
-      return { a, project, hours, commitment, isOver, isOverHard, barX, barW, workStart, workEnd, workEndX, dueX, marginBadge, color: c, i };
+      return { a, project, hours, commitment, isOver, isOverHard, isOverExtreme, barX, barW, workStart, workEnd, workEndX, dueX, marginBadge, progressFrac, logged, baseline, depSlackByPred, depViolation, conflict: false, color: c, i };
     });
+
+    // Conflict flag: an action contributes to a week where the total
+    // stacked workload exceeds capacity AND at least one other action
+    // ALSO contributes to that same over-cap week. Mark both. This is
+    // the signal "you have two things fighting for the same week".
+    (() => {
+      const openBars = bars.filter((r) => !r.skip && r.a.status !== 'done' && r.a.status !== 'cancelled');
+      if (openBars.length < 2 || !(weeklyCapHours > 0)) return;
+      // Week buckets from winStart, Monday-anchored.
+      const monday = new Date(winStart.getTime());
+      while (monday.getDay() !== 1) monday.setDate(monday.getDate() + 1);
+      const weeks = [];
+      const cursor = new Date(monday.getTime());
+      while (cursor < winEnd) {
+        weeks.push(new Date(cursor.getTime()));
+        cursor.setDate(cursor.getDate() + 7);
+      }
+      const perWeek = weeks.map(() => ({ total: 0, actors: [] }));
+      openBars.forEach((r) => {
+        const startD = parseDate(r.workStart);
+        const endD = parseDate(r.workEnd);
+        const spanDays = Math.max(1, Math.round((endD - startD) / dayMs) + 1);
+        const perDayH = r.hours / spanDays;
+        weeks.forEach((w, i) => {
+          const wEnd = new Date(w.getTime() + 7 * dayMs);
+          const oS = Math.max(startD.getTime(), w.getTime());
+          const oE = Math.min(endD.getTime() + dayMs, wEnd.getTime());
+          if (oE <= oS) return;
+          const oD = (oE - oS) / dayMs;
+          const h = oD * perDayH;
+          if (h > 0) {
+            perWeek[i].total += h;
+            perWeek[i].actors.push(r);
+          }
+        });
+      });
+      perWeek.forEach((w) => {
+        if (w.total > weeklyCapHours && w.actors.length >= 2) {
+          w.actors.forEach((r) => { r.conflict = true; });
+        }
+      });
+    })();
 
     // Weekly grid columns
     const gridLines = [];
@@ -29764,16 +30014,23 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       return `<div class="pln-row ${doneCls}" style="height:${rowH}px" data-action-id="${escapeHTML(row.a.id)}">
         <div class="pln-row-label">
           <span class="col-dot ${statusDot?.dot || ''}"></span>
-          <span class="pln-row-title" title="${escapeHTML(row.a.title)}">${escapeHTML(row.a.title)}</span>
-          <span class="pln-row-meta">${row.hours}h · ${escapeHTML(row.project.name)} <span class="pln-row-badge">${row.marginBadge}</span></span>
+          <span class="pln-row-title" title="${escapeHTML(row.a.title)}">${escapeHTML(row.a.title)}${row.depViolation ? '<span class="pln-dep-flag" title="Starts before a predecessor finishes">⇤</span>' : ''}${row.conflict ? '<span class="pln-conflict-flag" title="Overlaps another action of this owner in an over-cap week">⚠</span>' : ''}</span>
+          <span class="pln-row-meta">${row.hours}h${row.logged > 0 ? ` <span class="muted">· ${Math.round(row.logged)}h logged</span>` : ''} · ${escapeHTML(row.project.name)} <span class="pln-row-badge">${row.marginBadge}</span>${row.baseline && (row.baseline.startDrift || row.baseline.dueDrift) ? ` <span class="pln-base-drift" title="drift from baseline — start ${row.baseline.startDrift >= 0 ? '+' : ''}${row.baseline.startDrift}d, due ${row.baseline.dueDrift >= 0 ? '+' : ''}${row.baseline.dueDrift}d">base ${row.baseline.dueDrift >= 0 ? '+' : ''}${row.baseline.dueDrift}d</span>` : ''}</span>
         </div>
         <div class="pln-row-chart">
           <svg class="pln-row-svg" viewBox="0 0 ${chartW} ${rowH}" preserveAspectRatio="none" width="${chartW}" height="${rowH}">
             <rect class="pln-row-bg" x="0" y="0" width="${chartW}" height="${rowH}" />
-            <g class="pln-bar-group ${row.isOver ? 'is-over-cap' : ''} ${row.isOverHard ? 'is-way-over-cap' : ''}" data-action-id="${escapeHTML(row.a.id)}" data-start="${row.workStart}" data-end="${row.workEnd}" data-hours="${row.hours}">
+            ${row.baseline ? `<rect class="pln-baseline" x="${row.baseline.bX}" y="6" width="${row.baseline.bW}" height="${rowH - 12}" rx="3" fill="none" stroke="rgba(${row.color.rgb},.55)" stroke-width="1" stroke-dasharray="3 3" pointer-events="none"><title>Baseline · ${row.baseline.startDrift >= 0 ? '+' : ''}${row.baseline.startDrift}d start · ${row.baseline.dueDrift >= 0 ? '+' : ''}${row.baseline.dueDrift}d due</title></rect>` : ''}
+            ${Object.entries(row.depSlackByPred || {}).map(([pid, info]) => {
+              const violates = row.workStart < info.predEndISO;
+              const y = rowH / 2;
+              return `<line class="pln-dep-line ${violates ? 'violates' : ''}" x1="${info.predEndX}" x2="${row.barX}" y1="${y}" y2="${y}" stroke="${violates ? 'var(--bad)' : 'rgba(255,255,255,.35)'}" stroke-width="1" stroke-dasharray="${violates ? '3 2' : '1 3'}" pointer-events="none" />`;
+            }).join('')}
+            <g class="pln-bar-group ${row.isOver ? 'is-over-cap' : ''} ${row.isOverHard ? 'is-way-over-cap' : ''} ${row.isOverExtreme ? 'is-extreme-cap' : ''} ${row.conflict ? 'is-conflict' : ''}" data-action-id="${escapeHTML(row.a.id)}" data-start="${row.workStart}" data-end="${row.workEnd}" data-hours="${row.hours}">
               <rect class="pln-bar" x="${row.barX}" y="8" width="${row.barW}" height="${rowH - 16}" rx="3" fill="rgba(${row.color.rgb},.35)" stroke="rgba(${row.color.rgb},.9)" stroke-width="1" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="body" style="cursor:grab">
-                <title>${escapeHTML(row.a.title)} — ${row.hours}h · commitment ${row.commitment}%</title>
+                <title>${escapeHTML(row.a.title)} — ${row.hours}h · commitment ${row.commitment}%${row.logged > 0 ? ' · ' + Math.round(row.logged) + 'h logged' : ''}</title>
               </rect>
+              ${row.progressFrac > 0 ? `<rect class="pln-actual" x="${row.barX}" y="${rowH/2 - 3}" width="${Math.max(1, row.barW * row.progressFrac)}" height="6" rx="2" fill="rgba(${row.color.rgb},.95)" pointer-events="none"><title>${Math.round(row.logged)}h logged · ${Math.round(row.progressFrac * 100)}% of plan</title></rect>` : ''}
               ${row.barW > 26 ? `<text class="pln-bar-label" x="${row.barX + row.barW/2}" y="${rowH/2 + 4}" text-anchor="middle" pointer-events="none">${row.commitment}%</text>` : ''}
               <rect class="pln-handle pln-handle-left" x="${row.barX - 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="left" fill="transparent" style="cursor:ew-resize"><title>Drag to shift start date</title></rect>
               <rect class="pln-handle pln-handle-right" x="${row.barX + row.barW - Math.min(8, row.barW/3) + 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="right" fill="transparent" style="cursor:ew-resize"><title>Drag to shift due date</title></rect>
