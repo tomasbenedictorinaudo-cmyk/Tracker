@@ -3297,6 +3297,13 @@ body.is-card-dragging * { cursor: grabbing !important; }
   min-width: 0;
   font-size: 12px;
   align-content: center;
+  /* Stick to the left edge so labels stay visible while the chart
+     scrolls horizontally through the full project timeline. */
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg-1);
+  border-right: 1px solid var(--line-2);
 }
 .pln-row-label > .col-dot { grid-row: 1 / span 2; align-self: center; }
 .pln-row-title {
@@ -3336,11 +3343,12 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .pln-due-line {
   pointer-events: none;
 }
+/* Margin badge lives in the label column so it stays visible while
+   the chart scrolls horizontally. */
 .pln-row-badge {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: middle;
   pointer-events: none;
 }
 .pln-margin {

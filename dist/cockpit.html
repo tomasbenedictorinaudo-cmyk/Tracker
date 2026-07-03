@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-03T22:37:11.979Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-03T22:43:58.136Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3306,6 +3306,13 @@ body.is-card-dragging * { cursor: grabbing !important; }
   min-width: 0;
   font-size: 12px;
   align-content: center;
+  /* Stick to the left edge so labels stay visible while the chart
+     scrolls horizontally through the full project timeline. */
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg-1);
+  border-right: 1px solid var(--line-2);
 }
 .pln-row-label > .col-dot { grid-row: 1 / span 2; align-self: center; }
 .pln-row-title {
@@ -3345,11 +3352,12 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .pln-due-line {
   pointer-events: none;
 }
+/* Margin badge lives in the label column so it stays visible while
+   the chart scrolls horizontally. */
 .pln-row-badge {
-  position: absolute;
-  right: 8px;
-  top: 50%;
-  transform: translateY(-50%);
+  display: inline-flex;
+  margin-left: 6px;
+  vertical-align: middle;
   pointer-events: none;
 }
 .pln-margin {
@@ -29125,9 +29133,32 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     _plannerState = {
       personId: firstOwner?.id || null,
       scope: 'all',              // 'all' | 'project'
-      windowWeeks: 12,           // visible span from today back-anchor
-      highlightedActionId: null, // planner phase 4
+      highlightedActionId: null,
     };
+  }
+
+  // Span from earliest action start to latest due (padded), Monday-anchored.
+  // Falls back to a 12-week window around today when no dated actions.
+  function _plannerFullSpan(actions) {
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    let minTs = today.getTime();
+    let maxTs = today.getTime();
+    let hasData = false;
+    for (const { a } of actions) {
+      const start = a.startDate ? parseDate(a.startDate) : (a.due ? new Date(parseDate(a.due).getTime() - 2 * dayMs) : null);
+      const end = a.due ? parseDate(a.due) : (a.startDate ? parseDate(a.startDate) : null);
+      if (start) { hasData = true; if (start.getTime() < minTs) minTs = start.getTime(); }
+      if (end)   { hasData = true; if (end.getTime()   > maxTs) maxTs = end.getTime(); }
+    }
+    if (!hasData) {
+      minTs = today.getTime() - 42 * dayMs;
+      maxTs = today.getTime() + 42 * dayMs;
+    }
+    const winStart = new Date(minTs - 14 * dayMs);
+    while (winStart.getDay() !== 1) winStart.setDate(winStart.getDate() - 1);
+    const winEnd = new Date(maxTs + 21 * dayMs);
+    while (winEnd.getDay() !== 1) winEnd.setDate(winEnd.getDate() + 1);
+    return { winStart, winEnd };
   }
   // Read the "effective" workload window for an action. If the user has
   // pinned plannedHours it wins; otherwise we derive from
@@ -29191,29 +29222,33 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     });
 
     // Sort: overdue first, then by due ascending, then done items at the bottom.
+    // Sort for full-timeline mode — open actions first (nearest due at
+    // the top), then done actions (most-recent completions first). Keeps
+    // the vertically-visible rows aligned with the horizontally-visible
+    // timeline center (today), so bars are actually in view.
+    const _todayISO = todayISO();
     actions.sort((x, y) => {
+      const xOpen = x.a.status !== 'done';
+      const yOpen = y.a.status !== 'done';
+      if (xOpen !== yOpen) return xOpen ? -1 : 1;
       const xd = x.a.due || '9999-99-99';
       const yd = y.a.due || '9999-99-99';
-      if (xd !== yd) return xd.localeCompare(yd);
+      if (xOpen) {
+        // Open: nearest to today first (past-due upfront, then upcoming).
+        if (xd !== yd) return xd.localeCompare(yd);
+      } else {
+        // Done: most recent completion first.
+        const xc = actionCompletedAt(x.a) || x.a.due || '0000-00-00';
+        const yc = actionCompletedAt(y.a) || y.a.due || '0000-00-00';
+        if (xc !== yc) return yc.localeCompare(xc);
+      }
       return (x.a.title || '').localeCompare(y.a.title || '');
     });
 
-    // Second-stage filter: drop done + open actions that fall entirely
-    // outside the visible time window. Prevents ancient completed work
-    // from dominating the list on established projects.
-    const halfWeeks = Math.floor(s.windowWeeks / 2);
-    const _today = new Date(); _today.setHours(0, 0, 0, 0);
-    const _anchor = new Date(_today);
-    while (_anchor.getDay() !== 1) _anchor.setDate(_anchor.getDate() - 1);
-    const winStartISO = fmtISO(new Date(_anchor.getTime() - halfWeeks * 7 * dayMs));
-    const winEndISO   = fmtISO(new Date(_anchor.getTime() + halfWeeks * 7 * dayMs));
-    const visibleActions = actions.filter(({ a }) => {
-      const start = a.startDate || (a.due ? fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs)) : null);
-      const end = a.due || a.startDate || null;
-      if (!start || !end) return true;
-      // Overlaps window if start <= winEnd AND end >= winStart.
-      return start <= winEndISO && end >= winStartISO;
-    });
+    // Full-timeline mode — no window clipping. Show every filtered
+    // action so the user can scroll horizontally across the whole span.
+    const visibleActions = actions;
+    const span = _plannerFullSpan(visibleActions);
 
     view.innerHTML = `
       <div class="page-head">
@@ -29232,38 +29267,24 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             <button class="seg-btn ${s.scope === 'all' ? 'active' : ''}" data-pln-scope="all">All projects</button>
             <button class="seg-btn ${s.scope === 'project' ? 'active' : ''}" data-pln-scope="project">This project</button>
           </div>
-          <label class="planner-picker">
-            <span class="muted">Window</span>
-            <select id="plnWindow">
-              <option value="8"  ${s.windowWeeks === 8  ? 'selected' : ''}>8 weeks</option>
-              <option value="12" ${s.windowWeeks === 12 ? 'selected' : ''}>12 weeks</option>
-              <option value="16" ${s.windowWeeks === 16 ? 'selected' : ''}>16 weeks</option>
-              <option value="26" ${s.windowWeeks === 26 ? 'selected' : ''}>26 weeks</option>
-            </select>
-          </label>
         </div>
       </div>
-      ${person ? renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s, _plannerChartWidth(root, s)) : `<div class="empty">No team members yet — add one from the People page.</div>`}
+      ${person ? renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s, _plannerChartSizing(span)) : `<div class="empty">No team members yet — add one from the People page.</div>`}
     `;
     root.appendChild(view);
 
-    // Post-mount refit — the pre-render estimate was based on #main width,
-    // but the actual scroll container may be a bit narrower due to
-    // padding/border. If the fit differs by more than a couple pixels
-    // per day, re-render with the true measurement.
+    // Auto-scroll so today lands in the middle of the visible chart on
+    // first mount — otherwise the user opens on an arbitrary point in
+    // the timeline, which is disorienting when the span is long.
     if (person) {
       const scroll = view.querySelector('#plnScroll');
       if (scroll) {
-        const target = _plannerChartWidth(root, s, scroll);
-        const current = { dayW: parseFloat(scroll.dataset.dayW), chartW: parseFloat(scroll.dataset.chartW) };
-        if (target.dayW !== current.dayW) {
-          // Swap the panel HTML for the fitted version.
-          const oldPanel = view.querySelector('.planner-panel');
-          const wrap = document.createElement('div');
-          wrap.innerHTML = renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s, target);
-          const newPanel = wrap.firstElementChild;
-          oldPanel.replaceWith(newPanel);
-        }
+        const dayW = parseFloat(scroll.dataset.dayW) || 8;
+        const winStartMs = parseDate(scroll.dataset.winStart).getTime();
+        const todayMs = new Date().setHours(0, 0, 0, 0);
+        const todayX = ((todayMs - winStartMs) / dayMs) * dayW;
+        const target = Math.max(0, todayX - scroll.clientWidth / 2 + 120);
+        scroll.scrollLeft = target;
       }
     }
 
@@ -29278,10 +29299,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         render();
       });
     });
-    view.querySelector('#plnWindow')?.addEventListener('change', (e) => {
-      s.windowWeeks = parseInt(e.target.value, 10) || 12;
-      render();
-    });
 
     // Drag wire-up (Phase 2 — workload-preserving drag).
     _wirePlannerDrag(view);
@@ -29290,14 +29307,10 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     _wirePlannerHighlight(view, person, s);
 
     // Live workload chart redraw during drag (Phase 3).
-    // Derive the same time window the Gantt uses so both stay in sync.
-    const _wlHalfWeeks = Math.floor(s.windowWeeks / 2);
-    const _wlToday = new Date(); _wlToday.setHours(0, 0, 0, 0);
-    const _wlAnchor = new Date(_wlToday);
-    while (_wlAnchor.getDay() !== 1) _wlAnchor.setDate(_wlAnchor.getDate() - 1);
-    const winStartClosure = new Date(_wlAnchor.getTime() - _wlHalfWeeks * 7 * dayMs);
-    const winEndClosure = new Date(_wlAnchor.getTime() + _wlHalfWeeks * 7 * dayMs);
-    const dayWClosure = _plannerChartWidth(root, s).dayW;
+    // Use the exact span the Gantt used so both stay in sync.
+    const winStartClosure = span.winStart;
+    const winEndClosure = span.winEnd;
+    const dayWClosure = _plannerChartSizing(span).dayW;
     const capacityHoursClosure = (capacityPct / 100) * HOURS_PER_WEEK;
     _plannerLiveUpdateWorkload = () => {
       const wl = view.querySelector('#plnWorkload');
@@ -29571,28 +29584,17 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     render();
   });
 
-  // Available chart width — the Gantt/workload area to the right of the
-  // row-label column. Reads the layout at render time so the chart fills
-  // whatever viewport we get, no wasted horizontal real estate.
-  // Takes an optional live `.planner-scroll` element to measure directly,
-  // otherwise estimates from #main width.
-  function _plannerChartWidth(root, s, liveScrollEl) {
-    const halfWeeks = Math.floor(s.windowWeeks / 2);
-    const totalDays = halfWeeks * 14;
-    const labelSide = 240 + 8; // label col + gap
-    let available;
-    if (liveScrollEl && liveScrollEl.clientWidth) {
-      // Exact — scroll width minus label col + grid gap.
-      available = liveScrollEl.clientWidth - labelSide;
-    } else {
-      const containerW = (root?.clientWidth || document.querySelector('#main')?.clientWidth || 1000);
-      // Estimate: view padding + panel padding + border + label + gap + scrollbar
-      available = containerW - 34 - 26 - labelSide - 8;
-    }
-    available = Math.max(300, available);
-    // dayW fills the available width; clamp only at the upper end.
-    const dayW = Math.max(4, Math.min(24, Math.floor(available / totalDays)));
-    return { dayW, chartW: totalDays * dayW };
+  // Sizing for full-timeline mode: pick a dayW that makes the span
+  // scrollable at a comfortable density. Short spans get bigger bars;
+  // long spans get denser bars. Chart width follows from the span.
+  function _plannerChartSizing(span) {
+    const totalDays = Math.max(1, Math.round((span.winEnd - span.winStart) / dayMs));
+    let dayW;
+    if (totalDays <= 90)       dayW = 12;   // < 3 months
+    else if (totalDays <= 240) dayW = 8;    // 3–8 months
+    else if (totalDays <= 540) dayW = 6;    // up to 18 months
+    else                       dayW = 4;    // multi-year
+    return { dayW, chartW: totalDays * dayW, winStart: span.winStart, winEnd: span.winEnd };
   }
 
   // Layout constants — the row-label column width and the gap between
@@ -29605,18 +29607,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     if (!items.length) {
       return `<div class="empty">${escapeHTML(person.name)} has no open actions${s.scope === 'project' ? ' on this project' : ''}. Assign one to see it here.</div>`;
     }
-    // Time window — anchor today in the middle. windowWeeks total,
-    // half in the past (for recent-done context), half in the future.
-    const halfWeeks = Math.floor(s.windowWeeks / 2);
     const today = new Date(); today.setHours(0, 0, 0, 0);
-    // Anchor start on a Monday so week columns line up cleanly.
-    const anchor = new Date(today);
-    while (anchor.getDay() !== 1) anchor.setDate(anchor.getDate() - 1);
-    const winStart = new Date(anchor.getTime() - halfWeeks * 7 * dayMs);
-    const winEnd   = new Date(anchor.getTime() + halfWeeks * 7 * dayMs);
+    const winStart = sizing.winStart;
+    const winEnd = sizing.winEnd;
     const totalDays = Math.round((winEnd - winStart) / dayMs);
-    const dayW = sizing?.dayW || 8;
-    const chartW = sizing?.chartW || totalDays * dayW;
+    const dayW = sizing.dayW;
+    const chartW = sizing.chartW;
     const rowH = 44;
 
     const xFor = (iso) => {
@@ -29693,7 +29689,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         <div class="pln-row-label">
           <span class="col-dot ${statusDot?.dot || ''}"></span>
           <span class="pln-row-title" title="${escapeHTML(row.a.title)}">${escapeHTML(row.a.title)}</span>
-          <span class="pln-row-meta">${row.hours}h · ${escapeHTML(row.project.name)}</span>
+          <span class="pln-row-meta">${row.hours}h · ${escapeHTML(row.project.name)} <span class="pln-row-badge">${row.marginBadge}</span></span>
         </div>
         <div class="pln-row-chart">
           <svg class="pln-row-svg" viewBox="0 0 ${chartW} ${rowH}" preserveAspectRatio="none" width="${chartW}" height="${rowH}">
@@ -29710,7 +29706,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
               <line class="pln-due-line" x1="${row.dueX}" x2="${row.dueX}" y1="4" y2="${rowH - 4}" stroke="rgb(${row.color.rgb})" stroke-width="1" stroke-dasharray="2 3" opacity=".55" />
               <polygon class="pln-due" points="${row.dueX - 6},${rowH/2} ${row.dueX},${rowH/2 - 7} ${row.dueX + 6},${rowH/2} ${row.dueX},${rowH/2 + 7}" fill="var(--bg-1)" stroke="rgb(${row.color.rgb})" stroke-width="2"><title>Due ${row.a.due}</title></polygon>` : ''}
           </svg>
-          <span class="pln-row-badge">${row.marginBadge}</span>
         </div>
       </div>`;
     }).join('');
