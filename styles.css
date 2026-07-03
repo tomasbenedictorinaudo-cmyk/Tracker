@@ -3321,8 +3321,14 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .chart-today { stroke: var(--accent); stroke-width: 1; opacity: .7; }
 .bar-done { fill: var(--ok); }
 .bar-slip { fill: var(--bad); opacity: .9; }
+.bar-done.is-clickable,
+.bar-slip.is-clickable { cursor: pointer; transition: opacity .12s ease; }
+.bar-done.is-clickable:hover { opacity: 1; }
+.bar-slip.is-clickable:hover { opacity: 1; }
 .line-created { fill: none; stroke: var(--accent); stroke-width: 1.5; opacity: .9; }
 .dot-created { fill: var(--accent); }
+.dot-created.is-clickable { cursor: pointer; transition: r .12s ease; }
+.dot-created.is-clickable:hover { r: 6; }
 .chart-foot b.ok { color: var(--ok); }
 .chart-foot b.bad { color: var(--bad); }
 .chart-foot b.warn { color: var(--warn); }

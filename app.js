@@ -1859,6 +1859,27 @@
         return closedLate || openLapsed;
       }
     }
+    if (_dashDrill.kind === 'flow-week') {
+      const { startISO, endISO, side } = _dashDrill;
+      const inWindow = (iso) => iso && iso >= startISO && iso <= endISO;
+      if (side === 'created') return inWindow(a.createdAt);
+      if (side === 'done') {
+        // Mirror flowMetrics: prefer the "Status: → done" history entry,
+        // else fall back to updatedAt for actions still marked done.
+        const doneEntry = (a.history || []).filter((h) => /Status:.*→\s*done/.test(h.what)).pop();
+        const doneAt = doneEntry ? doneEntry.at : (a.status === 'done' ? a.updatedAt : null);
+        return inWindow(doneAt);
+      }
+      if (side === 'slipped') {
+        // Any "Schedule: X → Y" entry within the window where Y > X.
+        const slipRe = /Schedule:\s*(\d{4}-\d{2}-\d{2})\s*→\s*(?:\d{4}-\d{2}-\d{2}…)?(\d{4}-\d{2}-\d{2})/;
+        return (a.history || []).some((h) => {
+          if (!inWindow(h.at)) return false;
+          const m = h.what.match(slipRe);
+          return m && m[2] > m[1];
+        });
+      }
+    }
     return true;
   }
   function actionMatchesFilters(a) {
@@ -8288,6 +8309,25 @@
       saveState();
       render();
     });
+    // Activity/week (flow) bars + created-line dots → same drill mechanic
+    // as adherence. done bar / slipped bar / created dot each surface a
+    // different week-scoped filter.
+    view.querySelector('[data-chart="flow"]')?.addEventListener('click', (e) => {
+      const hit = e.target.closest('.is-clickable[data-flow-side]');
+      if (!hit) return;
+      const side = hit.dataset.flowSide;
+      const sideLabel = side === 'done' ? 'Done' : side === 'slipped' ? 'Slipped' : 'Created';
+      _dashDrill = {
+        kind: 'flow-week',
+        side,
+        startISO: hit.dataset.flowStart,
+        endISO: hit.dataset.flowEnd,
+        label: `${sideLabel} · week of ${hit.dataset.flowLabel}`,
+      };
+      state.currentView = 'register';
+      saveState();
+      render();
+    });
 
     // Stale-action rows in the decision-KPI panel → open the drawer for that action
     $$('.dkpi-list-row[data-action-id]', view).forEach((el) => {
@@ -8940,24 +8980,38 @@
     const xFor = (i) => padL + i * groupW;
     const yFor = (v) => padT + innerH - (v / maxY) * innerH;
 
+    // Bars + created-line dots carry data-flow-* attributes so the panel
+    // click listener can drill into the Register scoped to that week and
+    // side. Zero-count bars stay unclickable (nothing to reveal).
     const bars = buckets.map((b, i) => {
       const xBase = xFor(i) + 2;
       const yDone = yFor(b.done);
       const ySlip = yFor(b.slipped);
       const baseLine = padT + innerH;
+      const wkLabel = b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const wkEnd = fmtISO(new Date(b.start.getTime() + 6 * dayMs));
+      const attrs = `data-flow-start="${b.startISO || fmtISO(b.start)}" data-flow-end="${wkEnd}" data-flow-label="${escapeHTML(wkLabel)}"`;
       return `
-        <rect class="bar-done" x="${xBase}" y="${yDone}" width="${barW}" height="${Math.max(0, baseLine - yDone)}" rx="2">
-          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.done} done</title>
+        <rect class="bar-done ${b.done > 0 ? 'is-clickable' : ''}" x="${xBase}" y="${yDone}" width="${barW}" height="${Math.max(0, baseLine - yDone)}" rx="2"
+              data-flow-side="done" ${attrs}>
+          <title>Week of ${wkLabel} — ${b.done} done${b.done > 0 ? ' · click to open in Register' : ''}</title>
         </rect>
-        <rect class="bar-slip" x="${xBase + barW}" y="${ySlip}" width="${barW}" height="${Math.max(0, baseLine - ySlip)}" rx="2">
-          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.slipped} slipped${b.pullIn ? `, ${b.pullIn} pulled-in` : ''}</title>
+        <rect class="bar-slip ${b.slipped > 0 ? 'is-clickable' : ''}" x="${xBase + barW}" y="${ySlip}" width="${barW}" height="${Math.max(0, baseLine - ySlip)}" rx="2"
+              data-flow-side="slipped" ${attrs}>
+          <title>Week of ${wkLabel} — ${b.slipped} slipped${b.pullIn ? `, ${b.pullIn} pulled-in` : ''}${b.slipped > 0 ? ' · click to open in Register' : ''}</title>
         </rect>`;
     }).join('');
 
-    // Created line + dots
+    // Created line + dots — clickable when the count is non-zero.
     const linePts = buckets.map((b, i) => `${(xFor(i) + groupW/2).toFixed(1)},${yFor(b.created).toFixed(1)}`);
     const linePath = `M ${linePts.join(' L ')}`;
-    const lineDots = buckets.map((b, i) => `<circle cx="${(xFor(i) + groupW/2).toFixed(1)}" cy="${yFor(b.created).toFixed(1)}" r="2.5" class="dot-created"><title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.created} created</title></circle>`).join('');
+    const lineDots = buckets.map((b, i) => {
+      const wkLabel = b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const wkEnd = fmtISO(new Date(b.start.getTime() + 6 * dayMs));
+      const clickable = b.created > 0 ? 'is-clickable' : '';
+      return `<circle cx="${(xFor(i) + groupW/2).toFixed(1)}" cy="${yFor(b.created).toFixed(1)}" r="${b.created > 0 ? 4 : 2.5}" class="dot-created ${clickable}"
+              data-flow-side="created" data-flow-start="${b.startISO || fmtISO(b.start)}" data-flow-end="${wkEnd}" data-flow-label="${escapeHTML(wkLabel)}"><title>Week of ${wkLabel} — ${b.created} created${b.created > 0 ? ' · click to open in Register' : ''}</title></circle>`;
+    }).join('');
 
     const months = buckets.map((b, i) => {
       if (b.start.getDate() > 7) return '';
