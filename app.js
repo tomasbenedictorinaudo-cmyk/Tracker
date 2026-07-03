@@ -22323,15 +22323,66 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const W = card.getBoundingClientRect().width || 340;
       const H = card.getBoundingClientRect().height || 200;
       const margin = 16;
-      let x = r.right + margin, y = r.top;
-      if (step.side === 'bottom') { x = Math.max(margin, r.left); y = r.bottom + margin; }
-      if (step.side === 'top')    { x = Math.max(margin, r.left); y = Math.max(margin, r.top - H - margin); }
-      if (step.side === 'left')   { x = Math.max(margin, r.left - W - margin); y = r.top; }
-      if (step.side === 'right')  { x = r.right + margin; y = Math.max(margin, r.top); }
+      // Smart placement — pick the side that actually fits.
+      // Preference: the side the step requested, then its opposite, then
+      // the perpendicular sides. Whichever fits WITHOUT overlapping the
+      // target rect wins. If none fits, we take the side with the most
+      // room and shift the card OFF the target's overlap edge so the
+      // spotlight stays visible.
+      const spaceTop    = r.top;
+      const spaceBottom = innerHeight - r.bottom;
+      const spaceLeft   = r.left;
+      const spaceRight  = innerWidth - r.right;
+      const fits = {
+        top:    spaceTop    >= H + margin * 2,
+        bottom: spaceBottom >= H + margin * 2,
+        left:   spaceLeft   >= W + margin * 2,
+        right:  spaceRight  >= W + margin * 2,
+      };
+      const requested = step.side || 'right';
+      const opposite = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' };
+      const perpendicular = { top: ['right', 'left'], bottom: ['right', 'left'], left: ['bottom', 'top'], right: ['bottom', 'top'] };
+      let side = requested;
+      if (!fits[side]) {
+        const opp = opposite[side];
+        if (opp && fits[opp]) side = opp;
+        else {
+          const perps = perpendicular[side] || [];
+          side = perps.find((p) => fits[p]) || side;
+        }
+      }
+      // If STILL nothing fits, fall back to the side with the most room.
+      if (!fits[side]) {
+        const scores = [
+          ['top', spaceTop], ['bottom', spaceBottom], ['left', spaceLeft], ['right', spaceRight],
+        ].sort((a, b) => b[1] - a[1]);
+        side = scores[0][0];
+      }
+      let x, y;
+      if (side === 'top')    { x = r.left;                     y = r.top - H - margin; }
+      if (side === 'bottom') { x = r.left;                     y = r.bottom + margin; }
+      if (side === 'left')   { x = r.left - W - margin;        y = r.top; }
+      if (side === 'right')  { x = r.right + margin;           y = r.top; }
+      // Clamp inside the viewport; then check overlap and push the card
+      // clear of the target if the clamp forced it back into the target.
       x = clamp(x, margin, innerWidth - W - margin);
       y = clamp(y, margin, innerHeight - H - margin);
-      card.style.left = x + 'px';
-      card.style.top = y + 'px';
+      const overlapsTarget = (cx, cy) => !(cx + W <= r.left || cx >= r.right || cy + H <= r.top || cy >= r.bottom);
+      if (overlapsTarget(x, y)) {
+        // Slide the card to whichever side has room, in this priority
+        // order: below → above → right → left.
+        if (spaceBottom >= H + margin) { y = Math.min(innerHeight - H - margin, r.bottom + margin); x = clamp(r.left, margin, innerWidth - W - margin); }
+        else if (spaceTop >= H + margin) { y = Math.max(margin, r.top - H - margin); x = clamp(r.left, margin, innerWidth - W - margin); }
+        else if (spaceRight >= W + margin) { x = Math.min(innerWidth - W - margin, r.right + margin); y = clamp(r.top, margin, innerHeight - H - margin); }
+        else if (spaceLeft >= W + margin) { x = Math.max(margin, r.left - W - margin); y = clamp(r.top, margin, innerHeight - H - margin); }
+        // Last-resort: center the card and darken the whole mask — the
+        // target is genuinely too big or too crammed to caption on the side.
+        else { mask.classList.add('full'); card.style.transform = 'translate(-50%, -50%)'; card.style.left = '50%'; card.style.top = '50%'; }
+      }
+      if (!card.style.transform) {
+        card.style.left = x + 'px';
+        card.style.top = y + 'px';
+      }
     } else {
       mask.classList.add('full');
       card.style.left = '50%';

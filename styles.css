@@ -779,7 +779,11 @@ input, select, textarea { font: inherit; color: inherit; }
 /* Phase L — first-run tour overlay */
 .tour-overlay {
   position: fixed; inset: 0;
-  z-index: 800;
+  /* 9500 sits above every panel/drawer/tooltip but below the top-level
+     modals (Quick Add, help, storage — those are 9999+). The tour-card
+     and tour-mask stack inside this context; the ring effect on the
+     .tour-highlight target uses its own root-level z-index (below). */
+  z-index: 9500;
   pointer-events: none;
 }
 .tour-mask {
@@ -828,8 +832,13 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .tour-foot .primary { margin-left: auto; padding: 6px 12px; }
 .tour-highlight {
-  position: relative;
-  z-index: 801;
+  /* Outline-only — no z-index bump. If we raise the target into a new
+     stacking context (as the old rule did with z-index: 801), it can
+     land ABOVE the overlay's card in some layouts because the target
+     stacks at the ROOT while the card stacks INSIDE the overlay's own
+     context. The overlay's z-index (9500) already sits above every
+     normal-flow element, so the outline is enough to signal the anchor
+     without any stacking change. */
   outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 4px;
