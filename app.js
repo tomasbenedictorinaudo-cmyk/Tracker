@@ -20946,8 +20946,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   function _plannerWorkloadHTML(items, _unusedBars, winStart, winEnd, dayW, capHours) {
     const totalDays = Math.round((winEnd - winStart) / dayMs);
     const chartW = totalDays * dayW;
-    const chartH = 130;
-    const padTop = 12, padBottom = 20;
+    // Natural-pixel geometry — no CSS stretching so text stays undistorted.
+    const chartH = 148;
+    const padTop = 14, padBottom = 22, padLeft = 4, padRight = 4;
     const plotH = chartH - padTop - padBottom;
 
     // Bucket weeks — Monday-anchored.
@@ -20986,16 +20987,27 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       });
     });
 
-    // Find max weekly total for Y-scale — extend past cap so overflow
-    // visualizes clearly.
+    // Y-scale — round the max up to a nice number and always leave
+    // headroom above capacity so overflow reads clearly.
     const weekTotals = weekHours.map((wh) => wh.reduce((s, h) => s + h, 0));
-    const maxTotal = Math.max(capHours * 1.2, ...weekTotals, 1);
-    const yFor = (h) => padTop + plotH * (1 - h / maxTotal);
-    const barW = Math.max(4, dayW * 7 - 4);
+    const rawMax = Math.max(capHours * 1.25, ...weekTotals, 1);
+    const niceMax = Math.ceil(rawMax / 20) * 20;
+    const yFor = (h) => padTop + plotH * (1 - h / niceMax);
+    const barW = Math.max(6, dayW * 7 - 6);
 
-    // Draw stacks
+    // Grid — one gridline per 20h step (or per cap-fraction when cap is
+    // small). Keeps the plot readable without a Y-axis.
+    const gridStep = niceMax >= 60 ? 20 : Math.round(capHours / 2);
+    const gridMarks = [];
+    for (let h = gridStep; h <= niceMax; h += gridStep) {
+      const y = yFor(h);
+      gridMarks.push(`<line class="pln-wl-grid" x1="${padLeft}" x2="${chartW - padRight}" y1="${y}" y2="${y}" />`);
+    }
+
+    // Stacked bars. Insetting each segment by 0.5px vertically gives a
+    // hairline gap without needing a stroke.
     const stacks = weeks.map((w, wIdx) => {
-      const x0 = Math.round(((w.start.getTime() - winStart.getTime()) / dayMs) * dayW) + 2;
+      const x0 = Math.round(((w.start.getTime() - winStart.getTime()) / dayMs) * dayW) + 3;
       let cum = 0;
       const segs = actions.map((row, aIdx) => {
         const h = weekHours[wIdx][aIdx];
@@ -21003,44 +21015,40 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         const yBottom = yFor(cum);
         cum += h;
         const yTop = yFor(cum);
-        const hPx = yBottom - yTop;
+        const hPx = Math.max(1, yBottom - yTop - 0.5);
         const isOver = cum > capHours;
-        return `<rect class="pln-wl-seg ${isOver ? 'is-over-cap' : ''}" x="${x0}" y="${yTop}" width="${barW}" height="${hPx}" fill="rgba(${row.color.rgb},.75)" stroke="rgba(${row.color.rgb},1)" stroke-width=".5" data-action-id="${escapeHTML(row.a.id)}" data-week-idx="${wIdx}"><title>${escapeHTML(row.a.title)} · week of ${fmtISO(w.start)} · ${Math.round(h)}h</title></rect>`;
+        return `<rect class="pln-wl-seg ${isOver ? 'is-over-cap' : ''}" x="${x0}" y="${yTop}" width="${barW}" height="${hPx}" rx="1.5" fill="rgba(${row.color.rgb},.85)" data-action-id="${escapeHTML(row.a.id)}" data-week-idx="${wIdx}"><title>${escapeHTML(row.a.title)} · week of ${fmtISO(w.start)} · ${Math.round(h)}h</title></rect>`;
       }).join('');
       const totalH = weekTotals[wIdx];
+      // Only label totals when the stack is tall enough to warrant it
+      // AND wide enough to fit the number without overlap.
+      const showTotal = totalH >= 3 && barW >= 20;
       const totalLabelCls = totalH > capHours ? 'over' : '';
-      const totalLabel = totalH >= 1
-        ? `<text class="pln-wl-total-label ${totalLabelCls}" x="${x0 + barW/2}" y="${Math.max(padTop + 8, yFor(totalH) - 3)}" text-anchor="middle">${Math.round(totalH)}h</text>`
+      const totalLabel = showTotal
+        ? `<text class="pln-wl-total-label ${totalLabelCls}" x="${x0 + barW/2}" y="${Math.max(padTop + 8, yFor(totalH) - 4)}" text-anchor="middle">${Math.round(totalH)}h</text>`
         : '';
       const weekLabel = `<text class="pln-wl-week-label" x="${x0 + barW/2}" y="${chartH - 6}" text-anchor="middle">${(w.start.getMonth() + 1)}/${w.start.getDate()}</text>`;
       return segs + totalLabel + weekLabel;
     }).join('');
 
-    // Capacity line — labelled at the right so the label doesn't overlap
-    // the first week's total.
+    // Capacity line — no in-chart label; the header badge already shows
+    // the value, and any pill collides with a first-week total that
+    // matches capacity.
     const capY = yFor(capHours);
-    const capLine = `<line class="pln-wl-cap-line" x1="0" x2="${chartW}" y1="${capY}" y2="${capY}"><title>Capacity: ${Math.round(capHours)}h/week</title></line>
-                     <text class="pln-wl-cap-label" x="${chartW - 6}" y="${capY - 3}" text-anchor="end">cap ${Math.round(capHours)}h</text>`;
+    const capLine = `<line class="pln-wl-cap-line" x1="${padLeft}" x2="${chartW - padRight}" y1="${capY}" y2="${capY}"><title>Capacity: ${Math.round(capHours)}h/week</title></line>`;
 
-    // Y-axis gridlines at 25/50/75/100/125% of cap
-    const gridMarks = [0.5, 1.0, 1.5]
-      .map((frac) => {
-        const y = yFor(capHours * frac);
-        return `<line class="pln-wl-grid" x1="0" x2="${chartW}" y1="${y}" y2="${y}" />`;
-      }).join('');
-
-    // Legend from actions (top 8 by total hours, then "others")
+    // Legend from actions (top 6 by total hours). Keep it compact.
     const withTotals = actions.map((row, aIdx) => ({
       row,
       total: weekHours.reduce((s, wh) => s + wh[aIdx], 0),
-    })).sort((a, b) => b.total - a.total);
-    const legendTop = withTotals.slice(0, 8);
+    })).filter((x) => x.total > 0).sort((a, b) => b.total - a.total);
+    const legendTop = withTotals.slice(0, 6);
     const legend = legendTop.map(({ row }) => `
       <span class="pln-wl-lg-item" data-action-id="${escapeHTML(row.a.id)}">
-        <span class="pln-wl-lg-swatch" style="background: rgba(${row.color.rgb},.75); border-color: rgba(${row.color.rgb},1)"></span>
-        ${escapeHTML(row.a.title.length > 22 ? row.a.title.slice(0, 22) + '…' : row.a.title)}
+        <span class="pln-wl-lg-swatch" style="background: rgba(${row.color.rgb},.85)"></span>
+        ${escapeHTML(row.a.title.length > 20 ? row.a.title.slice(0, 20) + '…' : row.a.title)}
       </span>`).join('');
-    const legendMore = withTotals.length > 8 ? `<span class="pln-wl-sub">+${withTotals.length - 8} more</span>` : '';
+    const legendMore = withTotals.length > 6 ? `<span class="pln-wl-sub">+${withTotals.length - 6} more</span>` : '';
 
     const capBadgeCls = weekTotals.some((t) => t > capHours * 1.5) ? 'bad'
       : weekTotals.some((t) => t > capHours) ? 'warn' : '';
@@ -21050,13 +21058,13 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         <div class="pln-wl-head">
           <div>
             <span class="pln-wl-title">Weekly workload</span>
-            <span class="pln-wl-sub">— hours stacked per week; dashed line = capacity</span>
+            <span class="pln-wl-sub">stacked hours per week · dashed line = capacity</span>
           </div>
           <span class="pln-wl-cap-badge ${capBadgeCls}">${Math.round(capHours)} h/week</span>
         </div>
-        <div class="pln-wl-chart" style="min-width:${chartW}px">
-          <svg viewBox="0 0 ${chartW} ${chartH}" width="${chartW}" height="${chartH}" class="pln-wl-svg" preserveAspectRatio="none">
-            ${gridMarks}
+        <div class="pln-wl-chart" style="width:${chartW}px; height:${chartH}px">
+          <svg width="${chartW}" height="${chartH}" viewBox="0 0 ${chartW} ${chartH}" class="pln-wl-svg">
+            ${gridMarks.join('')}
             ${stacks}
             ${capLine}
           </svg>

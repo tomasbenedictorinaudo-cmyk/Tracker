@@ -3386,7 +3386,7 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .planner-workload {
   border-top: 1px solid var(--line);
   background: var(--bg-1);
-  padding: 12px 14px 8px;
+  padding: 10px 14px 10px;
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -3397,61 +3397,67 @@ body.is-card-dragging * { cursor: grabbing !important; }
   justify-content: space-between;
   gap: 12px;
 }
+.pln-wl-head > div { display: flex; align-items: baseline; gap: 8px; }
 .pln-wl-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--text);
   text-transform: uppercase;
-  letter-spacing: .04em;
+  letter-spacing: .06em;
 }
 .pln-wl-sub { font-size: 11px; color: var(--text-faint); }
 .pln-wl-cap-badge {
-  font-size: 11px;
-  padding: 2px 6px;
+  font-size: 10.5px;
+  padding: 2px 8px;
   border-radius: 6px;
   background: var(--bg-2);
   border: 1px solid var(--line-2);
   color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
 }
 .pln-wl-cap-badge.warn { color: var(--warn); border-color: rgba(251, 191, 36, .4); }
 .pln-wl-cap-badge.bad  { color: var(--bad); border-color: rgba(248, 113, 121, .4); }
 .pln-wl-chart {
   position: relative;
-  height: 160px;
-  width: 100%;
+  /* Width + height set inline from JS; no stretch. */
 }
-.pln-wl-svg { display: block; width: 100%; height: 100%; }
-.pln-wl-axis {
-  fill: var(--text-faint);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-}
+.pln-wl-svg { display: block; }
 .pln-wl-grid {
   stroke: var(--line);
   stroke-width: 1;
   stroke-dasharray: 2 3;
-  opacity: .6;
+  opacity: .55;
 }
 .pln-wl-cap-line {
   stroke: var(--warn);
-  stroke-width: 2;
-  stroke-dasharray: 4 3;
+  stroke-width: 1.5;
+  stroke-dasharray: 5 3;
+  opacity: .85;
+}
+.pln-wl-cap-pill {
+  fill: var(--bg-2);
+  stroke: rgba(251, 191, 36, .5);
+  stroke-width: 1;
 }
 .pln-wl-cap-label {
   fill: var(--warn);
-  font-size: 10px;
+  font-size: 9.5px;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: .02em;
 }
 .pln-wl-seg { cursor: pointer; transition: filter .12s ease; }
-.pln-wl-seg:hover { filter: brightness(1.3); }
-.pln-wl-seg.is-highlight { filter: brightness(1.4) drop-shadow(0 0 3px var(--accent)); }
-.pln-wl-seg.is-over-cap { stroke: var(--bad); stroke-width: 1; }
+.pln-wl-seg:hover { filter: brightness(1.25); }
+.pln-wl-seg.is-highlight { filter: brightness(1.35) drop-shadow(0 0 3px var(--accent)); }
+.pln-wl-seg.is-over-cap { stroke: rgba(248, 113, 121, .7); stroke-width: 1; }
 .pln-wl-total-label {
   fill: var(--text);
   font-size: 10px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   pointer-events: none;
+  letter-spacing: -.01em;
 }
 .pln-wl-total-label.over { fill: var(--bad); }
 .pln-wl-week-label {
@@ -3462,19 +3468,28 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .pln-wl-legend {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
-  padding: 2px 0 2px;
-  font-size: 11px;
+  gap: 4px 12px;
+  padding: 2px 0 0;
+  font-size: 10.5px;
   color: var(--text-faint);
+  align-items: center;
 }
-.pln-wl-lg-item { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
-.pln-wl-lg-item.is-highlight { color: var(--text); }
+.pln-wl-lg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  padding: 1px 2px;
+  border-radius: 3px;
+  transition: color .12s ease, background .12s ease;
+}
+.pln-wl-lg-item:hover { color: var(--text); background: var(--bg-2); }
+.pln-wl-lg-item.is-highlight { color: var(--text); background: var(--bg-2); }
 .pln-wl-lg-swatch {
-  width: 10px;
-  height: 10px;
+  width: 9px;
+  height: 9px;
   border-radius: 2px;
   display: inline-block;
-  border: 1px solid var(--line-2);
 }
 
 /* Owner-load strip in the action drawer */
