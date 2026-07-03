@@ -13269,6 +13269,7 @@
     const body = $('#drawerBody');
     body.innerHTML = `
       <div class="field"><label>Title</label><input id="dTitle" value="${escapeHTML(a.title)}" /></div>
+      <div class="owner-load-strip" id="dOwnerLoad"></div>
       <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
         <div class="field"><label>Owner</label>
           <select id="dOwner">${actorOptionsHTML(a.owner)}</select>
@@ -13596,6 +13597,210 @@
     const TASK_CYCLE = ['todo', 'doing', 'done'];
     const TASK_STATUS_LABEL = { todo: 'Not started', doing: 'In progress', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled' };
     const TASK_STATUS_ICON  = { todo: '○',           doing: '◐',           blocked: '◼',       done: '✓',    cancelled: '✕' };
+    // Owner-load strip — inline mini-chart in the drawer showing the
+    // owner's weekly load across the action's [start − 2w, due + 2w]
+    // window. Base fill = other open actions committing % against
+    // this owner in that week; overlay = this action's contribution.
+    // Dashed line at owner.capacity. Live-updates on every relevant
+    // form field. Segment toggle between all-projects and this-project.
+    // Click a bar → inline popover listing the actions filling that
+    // week. Drag the handles at either end of the shaded window to
+    // shift the action's Start or Due.
+    let _olwScope = 'all';           // 'all' | 'this'
+    let _olwOpenPopoverIdx = null;
+    function renderOwnerLoad() {
+      const wrap = $('#dOwnerLoad');
+      if (!wrap) return;
+      // Read from inputs if they exist (even if empty — the user may
+      // have just cleared them). Fall back to the stored action value
+      // only when the input hasn't been rendered yet.
+      const readField = (sel, fallback) => {
+        const el = document.querySelector(sel);
+        return el ? el.value : fallback;
+      };
+      const ownerId = readField('#dOwner', a.owner);
+      const startISO = readField('#dStartDate', a.startDate);
+      const dueISO = readField('#dDue', a.due);
+      const commitment = clamp(parseInt(readField('#dCmt', a.commitment), 10) || (typeof a.commitment === 'number' ? a.commitment : 100), 0, 200);
+      const status = readField('#dStatus', a.status);
+      const empty = (msg, sub) => `<div class="olw-empty"><div class="olw-empty-msg">${escapeHTML(msg)}</div>${sub ? `<div class="olw-empty-sub">${escapeHTML(sub)}</div>` : ''}</div>`;
+      if (!ownerId) { wrap.innerHTML = empty('No owner assigned yet.', 'Assign an owner to see load.'); return; }
+      if (isExternalActor(ownerId)) { wrap.innerHTML = empty('External stakeholder — no team capacity to check.', 'Externals are tracked but don\'t consume team FTE.'); return; }
+      const owner = (state.people || []).find((p) => p.id === ownerId);
+      if (!owner) { wrap.innerHTML = ''; return; }
+      const capacity = owner.capacity || 100;
+      if (!dueISO) { wrap.innerHTML = empty('Add a Due date to see how this action lands on the owner\'s week.'); return; }
+      // Window: pad ±2 weeks around [start, due], snapped to Mondays.
+      const due = parseDate(dueISO);
+      const start = startISO ? parseDate(startISO) : new Date(due.getTime() - 14 * dayMs);
+      const snapMon = (d) => { const o = new Date(d); o.setHours(0,0,0,0); const diff = (o.getDay() + 6) % 7; return new Date(o.getTime() - diff * dayMs); };
+      const winStart = snapMon(new Date(start.getTime() - 14 * dayMs));
+      const winEnd   = new Date(snapMon(new Date(due.getTime() + 14 * dayMs)).getTime() + 6 * dayMs);
+      const weeks = Math.max(4, Math.round((winEnd.getTime() - winStart.getTime()) / (7 * dayMs)) + 1);
+      const buckets = Array.from({ length: weeks }, (_, i) => {
+        const s = new Date(winStart.getTime() + i * 7 * dayMs);
+        return { start: s, end: new Date(s.getTime() + 6 * dayMs + (24 * 3600 * 1000 - 1)), base: 0, thisAction: 0, items: [] };
+      });
+      // Base — other open actions owned by this person, optionally scoped to current project.
+      const curProjId = curProject().id;
+      state.projects.forEach((pr) => {
+        if (_olwScope === 'this' && pr.id !== curProjId) return;
+        (pr.actions || []).forEach((other) => {
+          if (other.id === a.id) return;
+          if (other.owner !== ownerId) return;
+          if (isClosedStatus(other.status)) return;
+          if (!other.due) return;
+          const oDue = parseDate(other.due);
+          const oStart = other.startDate ? parseDate(other.startDate) : new Date(oDue.getTime() - 2 * dayMs);
+          const cmt = typeof other.commitment === 'number' ? other.commitment : 100;
+          buckets.forEach((b) => {
+            if (oStart <= b.end && oDue >= b.start) {
+              b.base += cmt;
+              b.items.push({ action: other, project: pr, contribution: cmt });
+            }
+          });
+        });
+      });
+      // This action's contribution — only if not done / cancelled.
+      const isThisOpen = !isClosedStatus(status);
+      if (isThisOpen) {
+        buckets.forEach((b) => {
+          if (start <= b.end && due >= b.start) b.thisAction = commitment;
+        });
+      }
+      // Metrics.
+      const existingAvg = Math.round(buckets.reduce((s, b) => s + b.base, 0) / buckets.length);
+      const peak = Math.max(...buckets.map((b) => b.base + b.thisAction));
+      const peakCls = peak > capacity ? 'bad' : peak > capacity * 0.8 ? 'warn' : 'ok';
+      const thisContribChip = isThisOpen ? `+${commitment}%` : `0% (${status})`;
+      // Chart geometry.
+      const W = 520, H = 68;
+      const padL = 8, padR = 8, padT = 6, padB = 14;
+      const innerW = W - padL - padR;
+      const innerH = H - padT - padB;
+      const maxY = Math.max(capacity * 1.4, ...buckets.map((b) => b.base + b.thisAction), capacity);
+      const groupW = innerW / weeks;
+      const barW = Math.max(4, groupW - 3);
+      const xFor = (i) => padL + i * groupW;
+      const yFor = (v) => padT + innerH - (v / maxY) * innerH;
+      const bars = buckets.map((b, i) => {
+        const yBase = yFor(b.base);
+        const yTop = yFor(b.base + b.thisAction);
+        const baseHeight = padT + innerH - yBase;
+        const overHeight = Math.max(0, yBase - yTop);
+        const total = b.base + b.thisAction;
+        const overCap = total > capacity;
+        return `<g class="olw-bar-g" data-w="${i}">
+          <rect class="olw-bar-hit" x="${xFor(i)}" y="${padT}" width="${groupW}" height="${innerH}" />
+          <rect class="olw-bar-base ${overCap ? 'over' : ''}" x="${xFor(i) + 1.5}" y="${yBase}" width="${barW - 3}" height="${Math.max(0, baseHeight)}" rx="1"></rect>
+          <rect class="olw-bar-this" x="${xFor(i) + 1.5}" y="${yTop}" width="${barW - 3}" height="${overHeight}" rx="1"></rect>
+          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.base}% + this ${b.thisAction}% = ${total}%</title>
+        </g>`;
+      }).join('');
+      const capY = yFor(capacity);
+      const capLine = `<line class="olw-cap" x1="${padL}" x2="${W - padR}" y1="${capY}" y2="${capY}" />`;
+      // Action-window bracket + drag handles.
+      const startBucketIdx = buckets.findIndex((b) => start <= b.end && start >= b.start);
+      const dueBucketIdx = buckets.findIndex((b) => due <= b.end && due >= b.start);
+      const winX1 = xFor(Math.max(0, startBucketIdx));
+      const winX2 = xFor(dueBucketIdx >= 0 ? dueBucketIdx + 1 : weeks);
+      const bracket = isThisOpen
+        ? `<rect class="olw-window" x="${winX1}" y="${padT}" width="${Math.max(0, winX2 - winX1)}" height="${innerH}" />
+           <rect class="olw-handle" data-handle="start" x="${winX1 - 4}" y="${padT - 2}" width="8" height="${innerH + 4}" rx="1" title="Drag to change Start"></rect>
+           <rect class="olw-handle" data-handle="due"   x="${winX2 - 4}" y="${padT - 2}" width="8" height="${innerH + 4}" rx="1" title="Drag to change Due"></rect>`
+        : '';
+      // X-axis month ticks.
+      const monthTicks = buckets.map((b, i) => {
+        if (b.start.getDate() > 7) return '';
+        return `<text class="olw-tick" x="${xFor(i) + groupW / 2}" y="${H - 3}" text-anchor="middle">${b.start.toLocaleDateString(undefined, { month: 'short' })}</text>`;
+      }).join('');
+      wrap.innerHTML = `
+        <div class="olw-head">
+          <div class="olw-title">
+            <span class="olw-lbl">Owner load</span>
+            <b>${escapeHTML(owner.name)}</b>
+            <span class="olw-sub">${capacity}% FTE</span>
+          </div>
+          <div class="olw-seg" role="tablist">
+            <button type="button" class="seg-btn ${_olwScope === 'all' ? 'active' : ''}" data-olw-scope="all">All projects</button>
+            <button type="button" class="seg-btn ${_olwScope === 'this' ? 'active' : ''}" data-olw-scope="this">This project</button>
+          </div>
+        </div>
+        <div class="olw-summary">
+          Existing <b>${existingAvg}%</b> avg · this action <b>${thisContribChip}</b> · peak <b class="${peakCls}">${peak}%</b>
+        </div>
+        <svg viewBox="0 0 ${W} ${H}" class="olw-chart" preserveAspectRatio="none">
+          ${bracket}
+          ${bars}
+          ${capLine}
+          ${monthTicks}
+        </svg>
+        <div class="olw-popover" id="olwPopover" hidden></div>
+      `;
+      // Wire scope toggle.
+      wrap.querySelectorAll('[data-olw-scope]').forEach((btn) => {
+        btn.addEventListener('click', () => { _olwScope = btn.dataset.olwScope; renderOwnerLoad(); });
+      });
+      // Click a bar → popover with weekly contents.
+      wrap.querySelectorAll('.olw-bar-g').forEach((g) => {
+        g.addEventListener('click', (e) => {
+          const i = Number(g.dataset.w);
+          const b = buckets[i];
+          const pop = wrap.querySelector('#olwPopover');
+          if (!pop) return;
+          const rows = b.items.length
+            ? b.items.slice(0, 8).map(({ action, project, contribution }) => `
+                <div class="olw-pop-row clickable" data-open-action="${escapeHTML(action.id)}" data-open-proj="${escapeHTML(project.id)}">
+                  <span class="olw-pop-title">${escapeHTML(action.title)}</span>
+                  <span class="olw-pop-sub">${escapeHTML(project.name)} · ${contribution}%</span>
+                </div>`).join('')
+            : '<div class="olw-pop-empty">No other actions in this week.</div>';
+          const overflow = b.items.length > 8 ? `<div class="olw-pop-more">+${b.items.length - 8} more…</div>` : '';
+          const thisRow = b.thisAction > 0 ? `<div class="olw-pop-row olw-pop-this"><span class="olw-pop-title">This action</span><span class="olw-pop-sub">+${b.thisAction}%</span></div>` : '';
+          pop.innerHTML = `
+            <div class="olw-pop-head">Week of ${b.start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+              <button type="button" class="olw-pop-x" data-olw-close aria-label="Close">×</button>
+            </div>
+            ${thisRow}${rows}${overflow}
+          `;
+          pop.hidden = false;
+          pop.querySelector('[data-olw-close]')?.addEventListener('click', () => { pop.hidden = true; });
+          pop.querySelectorAll('[data-open-action]').forEach((r) => {
+            r.addEventListener('click', () => {
+              state.currentProjectId = r.dataset.openProj;
+              closeDrawer();
+              setTimeout(() => openDrawer(r.dataset.openAction), 30);
+            });
+          });
+        });
+      });
+      // Drag handles — map pixel position to day within the visible window.
+      wrap.querySelectorAll('.olw-handle').forEach((h) => {
+        h.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const kind = h.dataset.handle;
+          const svg = wrap.querySelector('.olw-chart');
+          const svgRect = svg.getBoundingClientRect();
+          const scale = W / svgRect.width;
+          const winRangeMs = winEnd.getTime() - winStart.getTime();
+          const input = kind === 'start' ? $('#dStartDate') : $('#dDue');
+          if (!input) return;
+          const onMove = (em) => {
+            const xInSvg = (em.clientX - svgRect.left) * scale;
+            const t = winStart.getTime() + clamp((xInSvg - padL) / innerW, 0, 1) * winRangeMs;
+            const iso = fmtISO(new Date(t));
+            if (input.value !== iso) { input.value = iso; renderOwnerLoad(); }
+          };
+          const onUp = () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+          };
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        });
+      });
+    }
+
     function taskProgressStats(list) {
       const items = (list || []).filter((t) => t.status !== 'cancelled');
       const total = items.length;
@@ -13742,6 +13947,17 @@
       });
     }
     renderTasksUI();
+    renderOwnerLoad();
+
+    // Live-update the owner-load strip on every input that shifts the
+    // load: owner, dates, commitment, status. Change events fire on
+    // blur or select for keyboards; 'input' also handles typing.
+    ['#dOwner', '#dStartDate', '#dDue', '#dStatus', '#dCmt'].forEach((sel) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      el.addEventListener('change', renderOwnerLoad);
+      el.addEventListener('input',  renderOwnerLoad);
+    });
 
     // Phase G — comments thread. Local working list; mutations are persisted
     // immediately on Post (independent of Save) so a user typing a long

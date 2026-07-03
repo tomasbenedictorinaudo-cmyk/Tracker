@@ -3184,6 +3184,119 @@ body.is-card-dragging * { cursor: grabbing !important; }
   color: var(--bad);
 }
 
+/* Owner-load strip in the action drawer */
+.owner-load-strip {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin: 4px 0 12px;
+}
+.olw-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+.olw-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.olw-lbl { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .08em; }
+.olw-title b { color: var(--text); font-size: 13px; }
+.olw-sub { color: var(--text-dim); font-size: 11px; }
+.olw-seg { display: inline-flex; gap: 2px; }
+.olw-seg .seg-btn { padding: 3px 8px; font-size: 11px; }
+.olw-summary {
+  font-size: 11.5px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.olw-summary b { color: var(--text); font-variant-numeric: tabular-nums; }
+.olw-summary b.ok   { color: var(--ok); }
+.olw-summary b.warn { color: var(--warn); }
+.olw-summary b.bad  { color: var(--bad); }
+.olw-chart {
+  display: block;
+  width: 100%;
+  height: 68px;
+  user-select: none;
+}
+.olw-tick { fill: var(--text-faint); font-size: 9px; }
+.olw-cap {
+  stroke: var(--text-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: .6;
+}
+.olw-bar-base { fill: var(--accent-2, #8b5cf6); opacity: .55; }
+.olw-bar-base.over { fill: var(--bad); opacity: .55; }
+.olw-bar-this { fill: var(--accent); opacity: .95; }
+.olw-bar-hit  { fill: transparent; cursor: pointer; }
+.olw-bar-g:hover .olw-bar-base { opacity: .75; }
+.olw-bar-g:hover .olw-bar-this { opacity: 1; }
+.olw-window {
+  fill: var(--accent);
+  opacity: .05;
+  stroke: var(--accent);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+  pointer-events: none;
+}
+.olw-handle {
+  fill: var(--accent);
+  opacity: .35;
+  cursor: ew-resize;
+}
+.olw-handle:hover { opacity: .7; }
+.olw-empty {
+  padding: 6px 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.olw-empty-sub { color: var(--text-faint); font-size: 11px; margin-top: 2px; }
+.olw-popover {
+  margin-top: 6px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.olw-pop-head {
+  display: flex; align-items: center;
+  color: var(--text); font-weight: 600; font-size: 12px;
+  margin-bottom: 4px;
+}
+.olw-pop-x {
+  margin-left: auto;
+  background: transparent; border: 0; color: var(--text-dim);
+  cursor: pointer; padding: 0 4px;
+}
+.olw-pop-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 6px; border-radius: 4px;
+  color: var(--text-dim);
+}
+.olw-pop-row.clickable { cursor: pointer; }
+.olw-pop-row.clickable:hover { background: var(--bg-3); color: var(--text); }
+.olw-pop-row.olw-pop-this { color: var(--accent); }
+.olw-pop-title {
+  flex: 1;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.olw-pop-sub { color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.olw-pop-empty { color: var(--text-faint); padding: 4px 6px; }
+.olw-pop-more { color: var(--text-faint); padding: 4px 6px; font-size: 11px; text-align: center; }
+
 /* Action subtasks — Kanban card dot strip.
    One dot per task, colored by the task's Kanban status. Deliberately
    minimal: no labels, no borders, just a signal strip at the bottom
