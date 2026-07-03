@@ -3169,6 +3169,136 @@ body.is-card-dragging * { cursor: grabbing !important; }
   color: var(--bad);
 }
 
+/* Action subtasks — Kanban card dot strip.
+   One dot per task, colored by the task's Kanban status. Deliberately
+   minimal: no labels, no borders, just a signal strip at the bottom
+   edge of the card. Empty when the action has no tasks. */
+.task-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed var(--line);
+}
+.task-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--status-todo);
+  transition: transform .12s ease;
+}
+.task-dot:hover { transform: scale(1.4); }
+.task-dot.status-todo      { background: var(--status-todo); }
+.task-dot.status-doing     { background: var(--status-doing); }
+.task-dot.status-blocked   { background: var(--status-blocked); }
+.task-dot.status-done      { background: var(--status-done); }
+.task-dot.status-cancelled {
+  background: transparent;
+  border: 1px solid var(--text-faint);
+  opacity: .5;
+}
+.task-dot-more {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-dim);
+  padding: 0 4px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  line-height: 8px;
+  height: 8px;
+  align-self: center;
+}
+
+/* Tasks editor — drawer */
+.tasks-editor .tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+.task-row {
+  display: grid;
+  grid-template-columns: 14px auto 1fr 20px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  transition: opacity .12s ease;
+}
+.task-row.dragging { opacity: .55; }
+.task-row.status-done .task-title { color: var(--text-faint); text-decoration: line-through; }
+.task-row.status-cancelled .task-title { color: var(--text-faint); text-decoration: line-through; font-style: italic; }
+.task-grip {
+  cursor: grab;
+  color: var(--text-faint);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  user-select: none;
+}
+.task-grip:active { cursor: grabbing; }
+.task-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  transition: border-color .12s ease;
+  min-width: 92px;
+}
+.task-status-pill:hover { border-color: var(--accent); }
+.task-status-pill .task-status-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--status-todo);
+}
+.task-status-pill.status-todo      .task-status-dot { background: var(--status-todo); }
+.task-status-pill.status-doing     .task-status-dot { background: var(--status-doing); }
+.task-status-pill.status-blocked   .task-status-dot { background: var(--status-blocked); }
+.task-status-pill.status-done      .task-status-dot { background: var(--status-done); }
+.task-status-pill.status-cancelled .task-status-dot {
+  background: transparent;
+  border: 1px solid var(--text-faint);
+}
+.task-title {
+  outline: none;
+  padding: 2px 4px;
+  border-radius: 3px;
+  color: var(--text);
+}
+.task-title:empty:before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+}
+.task-title:focus { background: var(--bg-1); }
+.task-del {
+  background: transparent;
+  border: 0;
+  color: var(--text-faint);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 3px;
+}
+.task-del:hover { color: var(--bad); background: var(--bg-3); }
+.task-add {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+.task-add:hover { border-color: var(--accent); color: var(--text); }
+
 /* Dashboard → Register drill chip */
 .drill-chip {
   display: inline-flex; align-items: center; gap: 6px;

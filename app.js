@@ -131,6 +131,33 @@
   // Phase G — render tag chips for a record. Tags live on the project; a
   // record stores only ids. Unknown ids (e.g. tag was deleted) are silently
   // skipped to avoid empty chips.
+  // Minimal dot strip for the Kanban card: one dot per subtask, colored
+  // by task status (reuses the Kanban column palette so the same green
+  // that means "Done" on a column means "Done" on a dot). Beyond 10
+  // tasks we clip and show a "+K" overflow chip; the drawer has the
+  // full list. Returns empty string when the action has no tasks so
+  // cards without subtasks look exactly like today.
+  function renderTaskStripHTML(a) {
+    const list = (a?.tasks || []);
+    if (!list.length) return '';
+    const MAX = 10;
+    const shown = list.slice(0, MAX);
+    const overflow = list.length - shown.length;
+    const doneCount = list.filter((t) => t.status === 'done').length;
+    const totalCount = list.filter((t) => t.status !== 'cancelled').length;
+    const statusLabel = { todo: 'Not started', doing: 'In progress', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled' };
+    const dots = shown.map((t) =>
+      `<span class="task-dot status-${t.status}" title="${escapeHTML(t.title || '(untitled)')} — ${statusLabel[t.status] || t.status}"></span>`
+    ).join('');
+    const overflowChip = overflow > 0
+      ? `<span class="task-dot-more" title="${overflow} more task${overflow === 1 ? '' : 's'}">+${overflow}</span>`
+      : '';
+    return `
+      <div class="task-strip" title="${doneCount}/${totalCount} tasks done">
+        ${dots}${overflowChip}
+      </div>`;
+  }
+
   function renderTagChipsHTML(tagIds, proj) {
     if (!Array.isArray(tagIds) || !tagIds.length) return '';
     const known = (proj?.tags || []).filter((t) => t && t.id);
@@ -1370,6 +1397,12 @@
         history: [], dependsOn: [], tags: ['tg_o_cust'], comments: [],
         loggedHours: [], baseline: null, percentComplete: null,
         recurrence: { unit: 'week', interval: 1 }, snoozedUntil: null,
+        tasks: [
+          { id: 'tk_pm_1', title: 'Refresh milestone slide',       status: 'done' },
+          { id: 'tk_pm_2', title: 'Snapshot KPIs from Dashboard',  status: 'doing' },
+          { id: 'tk_pm_3', title: 'Write narrative summary',       status: 'todo' },
+          { id: 'tk_pm_4', title: 'Send draft to Marie for review', status: 'todo' },
+        ],
       });
       // External-stakeholder ownership: the customer is on the hook to
       // deliver a formal PDR ICD sign-off. Tracked here so we can chase.
@@ -1384,6 +1417,13 @@
         history: [], dependsOn: [], tags: ['tg_o_cust'], comments: [],
         loggedHours: [], baseline: null, percentComplete: null,
         recurrence: null, snoozedUntil: null,
+        tasks: [
+          { id: 'tk_ext_1', title: 'Draft cover memo to CNES',                     status: 'done' },
+          { id: 'tk_ext_2', title: 'Compile PDR data-pack v1.4',                    status: 'done' },
+          { id: 'tk_ext_3', title: 'Send package to Fournier',                      status: 'done' },
+          { id: 'tk_ext_4', title: 'Follow-up after 5 working days',                 status: 'blocked' },
+          { id: 'tk_ext_5', title: 'File signed ICD in project archive',            status: 'todo' },
+        ],
       });
       // External-stakeholder origination: sister-mission SE flagged a
       // heritage-reuse opportunity we should chase internally.
@@ -1688,6 +1728,15 @@
     if (a.status === 'cancelled') return 0;
     if (typeof a.percentComplete === 'number') {
       return Math.max(0, Math.min(100, Math.round(a.percentComplete)));
+    }
+    // Tasks-derived — takes precedence over time-based auto because the
+    // owner is explicitly telling us where the work stands. Weights:
+    // done=1, doing=0.5, blocked=0.25. Cancelled tasks are excluded from
+    // both numerator and denominator (they don't exist for planning).
+    const tasks = Array.isArray(a.tasks) ? a.tasks.filter((t) => t.status !== 'cancelled') : [];
+    if (tasks.length > 0) {
+      const weight = tasks.reduce((s, t) => s + (t.status === 'done' ? 1 : t.status === 'doing' ? 0.5 : t.status === 'blocked' ? 0.25 : 0), 0);
+      return Math.max(0, Math.min(100, Math.round((weight / tasks.length) * 100)));
     }
     // Auto from time elapsed — only when we have an origin AND a due.
     const origin = a.originatorDate || a.startDate || a.createdAt;
@@ -2416,7 +2465,8 @@
         ${a.notes ? '<span class="tag">note</span>' : ''}
         ${a.description ? '<span class="tag has-desc" title="Has a description — hover to read">≡</span>' : ''}
         ${(a.comments && a.comments.length) ? `<span class="tag has-comments" title="${a.comments.length} comment${a.comments.length === 1 ? '' : 's'}">💬 ${a.comments.length}</span>` : ''}
-      </div>`;
+      </div>
+      ${renderTaskStripHTML(a)}`;
     card.addEventListener('click', (e) => {
       if (e.target.closest('[data-action="overflow"]')) {
         e.stopPropagation();
@@ -13296,6 +13346,10 @@
           <input id="dSnoozeUntil" type="date" value="${escapeHTML(a.snoozedUntil || '')}" />
         </div>
       </div>
+      <div class="field">
+        <label>Tasks <span class="muted" id="dTasksProg"></span></label>
+        <div class="tasks-editor" id="dTasksEditor"></div>
+      </div>
       <div class="field"><label>Tags</label>
         <div class="tags-input" id="dTagsWrap"></div>
       </div>
@@ -13533,6 +13587,161 @@
       inp.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 120));
     }
     renderTagsUI();
+
+    // Tasks (sub-actions) — simple decomposition of an action into
+    // 5-status items. Mutations commit immediately (like op-steps) so
+    // ticking a task doesn't get lost if the user cancels the drawer.
+    // Cycle order on click: todo → doing → done → todo. Blocked and
+    // Cancelled are one click each via the right-click menu.
+    const TASK_CYCLE = ['todo', 'doing', 'done'];
+    const TASK_STATUS_LABEL = { todo: 'Not started', doing: 'In progress', blocked: 'Blocked', done: 'Done', cancelled: 'Cancelled' };
+    const TASK_STATUS_ICON  = { todo: '○',           doing: '◐',           blocked: '◼',       done: '✓',    cancelled: '✕' };
+    function taskProgressStats(list) {
+      const items = (list || []).filter((t) => t.status !== 'cancelled');
+      const total = items.length;
+      const done = items.filter((t) => t.status === 'done').length;
+      const doing = items.filter((t) => t.status === 'doing').length;
+      const blocked = items.filter((t) => t.status === 'blocked').length;
+      return { total, done, doing, blocked };
+    }
+    function renderTasksUI() {
+      const wrap = $('#dTasksEditor');
+      if (!wrap) return;
+      const list = a.tasks || [];
+      const stats = taskProgressStats(list);
+      const prog = $('#dTasksProg');
+      if (prog) {
+        prog.textContent = stats.total
+          ? `${stats.done}/${stats.total} done${stats.blocked ? ` · ${stats.blocked} blocked` : ''}`
+          : '';
+      }
+      wrap.innerHTML = `
+        <div class="tasks-list">
+          ${list.map((t) => `
+            <div class="task-row status-${t.status}" data-task-id="${escapeHTML(t.id)}">
+              <span class="task-grip" title="Drag to reorder" aria-hidden="true">⋮⋮</span>
+              <button type="button" class="task-status-pill status-${t.status}" title="Click to cycle · right-click for Blocked / Cancelled">
+                <span class="task-status-dot"></span>
+                <span class="task-status-lbl">${escapeHTML(TASK_STATUS_LABEL[t.status])}</span>
+              </button>
+              <span class="task-title" contenteditable="true" data-placeholder="Task title…">${escapeHTML(t.title)}</span>
+              <button type="button" class="task-del" title="Delete task" aria-label="Delete task">×</button>
+            </div>`).join('')}
+        </div>
+        <button type="button" class="task-add">+ Add task</button>`;
+      // Cycle on left-click.
+      wrap.querySelectorAll('.task-status-pill').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = btn.closest('.task-row').dataset.taskId;
+          const t = (a.tasks || []).find((x) => x.id === id);
+          if (!t) return;
+          // Off-cycle statuses (blocked, cancelled) fall back to todo when clicked.
+          const idx = TASK_CYCLE.indexOf(t.status);
+          t.status = idx === -1 ? 'doing' : TASK_CYCLE[(idx + 1) % TASK_CYCLE.length];
+          commit('task-cycle');
+          renderTasksUI();
+        });
+      });
+      // Right-click menu for off-cycle statuses.
+      wrap.querySelectorAll('.task-status-pill').forEach((btn) => {
+        btn.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          const id = btn.closest('.task-row').dataset.taskId;
+          const t = (a.tasks || []).find((x) => x.id === id);
+          if (!t) return;
+          const items = ['todo', 'doing', 'blocked', 'done', 'cancelled'].map((s) => ({
+            icon: TASK_STATUS_ICON[s],
+            label: TASK_STATUS_LABEL[s],
+            onClick: () => { t.status = s; commit('task-set-status'); renderTasksUI(); },
+          }));
+          showContextMenu(e.clientX, e.clientY, items);
+        });
+      });
+      // Inline title edit.
+      wrap.querySelectorAll('.task-title').forEach((txt) => {
+        txt.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); txt.blur(); }
+          else if (e.key === 'Backspace' && txt.textContent === '') {
+            e.preventDefault();
+            const id = txt.closest('.task-row').dataset.taskId;
+            a.tasks = (a.tasks || []).filter((x) => x.id !== id);
+            commit('task-delete');
+            renderTasksUI();
+          }
+        });
+        txt.addEventListener('blur', () => {
+          const id = txt.closest('.task-row').dataset.taskId;
+          const t = (a.tasks || []).find((x) => x.id === id);
+          if (!t) return;
+          const v = txt.textContent.trim();
+          if (t.title !== v) { t.title = v; commit('task-edit'); }
+        });
+      });
+      // Delete
+      wrap.querySelectorAll('.task-del').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const id = btn.closest('.task-row').dataset.taskId;
+          a.tasks = (a.tasks || []).filter((x) => x.id !== id);
+          commit('task-delete');
+          renderTasksUI();
+        });
+      });
+      // Add
+      wrap.querySelector('.task-add')?.addEventListener('click', () => {
+        a.tasks = a.tasks || [];
+        const newTask = { id: uid('tk'), title: '', status: 'todo' };
+        a.tasks.push(newTask);
+        commit('task-add');
+        renderTasksUI();
+        setTimeout(() => {
+          const el = wrap.querySelector(`.task-row[data-task-id="${newTask.id}"] .task-title`);
+          if (el) {
+            el.focus();
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            range.collapse(false);
+            const sel = window.getSelection();
+            sel.removeAllRanges(); sel.addRange(range);
+          }
+        }, 0);
+      });
+      // Drag reorder — reuse the mouse-drag pattern from op-steps.
+      const listEl = wrap.querySelector('.tasks-list');
+      wrap.querySelectorAll('.task-grip').forEach((grip) => {
+        grip.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const row = grip.closest('.task-row');
+          if (!row || !listEl) return;
+          row.classList.add('dragging');
+          document.body.classList.add('is-step-dragging');
+          const onMove = (em) => {
+            const siblings = [...listEl.querySelectorAll('.task-row:not(.dragging)')];
+            const after = siblings.find((sib) => {
+              const r = sib.getBoundingClientRect();
+              return em.clientY < r.top + r.height / 2;
+            });
+            if (after) listEl.insertBefore(row, after);
+            else listEl.appendChild(row);
+          };
+          const onUp = () => {
+            row.classList.remove('dragging');
+            document.body.classList.remove('is-step-dragging');
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            const before = (a.tasks || []).map((t) => t.id).join(',');
+            const byId = Object.fromEntries((a.tasks || []).map((t) => [t.id, t]));
+            const newOrderIds = [...listEl.querySelectorAll('.task-row')].map((r) => r.dataset.taskId);
+            a.tasks = newOrderIds.map((id) => byId[id]).filter(Boolean);
+            if (a.tasks.map((t) => t.id).join(',') !== before) commit('task-reorder');
+          };
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        });
+      });
+    }
+    renderTasksUI();
 
     // Phase G — comments thread. Local working list; mutations are persisted
     // immediately on Post (independent of Save) so a user typing a long
@@ -15872,6 +16081,18 @@
         a.dependsOn = Array.isArray(a.dependsOn) ? a.dependsOn : [];
         a.tags      = Array.isArray(a.tags) ? a.tags : [];
         a.comments  = Array.isArray(a.comments) ? a.comments : [];
+        // Subtasks — small checklist items with the same 5 statuses as the
+        // parent action. Kept flat + simple by design: no owner, no due
+        // date, no history. If a task grows real complexity, promote it
+        // to its own action. Rendered as a dot strip on the Kanban card
+        // and as a full editor in the drawer.
+        a.tasks = Array.isArray(a.tasks) ? a.tasks : [];
+        a.tasks.forEach((t) => {
+          t.id = t.id || uid('tk');
+          t.title = typeof t.title === 'string' ? t.title : '';
+          const validStatuses = ['todo', 'doing', 'blocked', 'done', 'cancelled'];
+          if (!validStatuses.includes(t.status)) t.status = 'todo';
+        });
         // Actuals — list of time entries against this action. Each entry
         // is { id, hours, at (ISO date), by (personId|null), note? }.
         // Sum of hours feeds CPI and the variance display in the Register.
