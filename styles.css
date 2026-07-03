@@ -3384,13 +3384,28 @@ body.is-card-dragging * { cursor: grabbing !important; }
 
 .bar-row {
   display: grid;
-  grid-template-columns: 110px 1fr 40px;
+  /* Value column wide enough for "NNN/NNN%" at 12px + tabular-nums;
+     name column allowed to shrink via minmax(0,…) so long names
+     ellipsis instead of overflowing the tile. */
+  grid-template-columns: minmax(0, 110px) minmax(0, 1fr) minmax(68px, auto);
   align-items: center;
   gap: 10px;
   padding: 6px 0;
   font-size: 12px;
+  min-width: 0;
 }
-.bar-row.wide-name { grid-template-columns: 240px 1fr 50px; }
+.bar-row > div:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bar-row .bar-val {
+  justify-self: end;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.bar-row.wide-name { grid-template-columns: minmax(0, 240px) minmax(0, 1fr) minmax(68px, auto); }
 .bar-row .name-cell, .person-row .name-cell { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .bar-row .name-cell .who, .person-row .name-cell .who { display: flex; flex-direction: column; min-width: 0; }
 .bar-row .name-cell .who b, .person-row .name-cell .who b { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
