@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-04T11:32:06.533Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-04T11:38:22.507Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -4088,7 +4088,9 @@ body.is-card-dragging * { cursor: grabbing !important; }
   grid-template-columns: 250px 200px 1fr;
   align-items: center;
   gap: 16px;
-  padding: 10px 0;
+  /* Left padding is uniform across all rows so the on-leave accent
+     bar has breathing room while every histogram still aligns. */
+  padding: 10px 0 10px 12px;
   border-top: 1px solid var(--line);
   font-size: 12px;
 }
@@ -4102,8 +4104,6 @@ body.is-card-dragging * { cursor: grabbing !important; }
   background: linear-gradient(90deg, rgba(251, 191, 36, .14) 0%, rgba(251, 191, 36, .06) 40%, rgba(251, 191, 36, .02) 100%);
   box-shadow: inset 3px 0 0 var(--warn);
   border-radius: 4px;
-  /* Keep the row's histogram + name from touching the amber accent bar. */
-  padding-left: 12px;
 }
 .person-row.is-on-leave.clickable:hover {
   background: linear-gradient(90deg, rgba(251, 191, 36, .20) 0%, rgba(251, 191, 36, .10) 40%, rgba(251, 191, 36, .04) 100%);
@@ -4145,7 +4145,15 @@ body.is-card-dragging * { cursor: grabbing !important; }
   letter-spacing: .01em;
 }
 .now-load { display: grid; grid-template-columns: 1fr 50px; gap: 8px; align-items: center; }
-.spark-wrap { display: flex; align-items: center; gap: 12px; }
+.spark-wrap {
+  /* Grid instead of flex so the meta column is a fixed width, which
+     makes every row's sparkline SVG the same size — bars align across
+     rows and don't distort when peak-% text length varies. */
+  display: grid;
+  grid-template-columns: 1fr 130px;
+  align-items: center;
+  gap: 12px;
+}
 .spark { width: 100%; max-width: 540px; height: 70px; flex: 1; }
 .spark-bar { fill: var(--ok); transition: opacity var(--transition); }
 .spark-bar.warn { fill: var(--warn); }
