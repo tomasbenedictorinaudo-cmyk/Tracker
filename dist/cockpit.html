@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-04T11:26:17.139Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-04T11:32:06.533Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -4102,6 +4102,8 @@ body.is-card-dragging * { cursor: grabbing !important; }
   background: linear-gradient(90deg, rgba(251, 191, 36, .14) 0%, rgba(251, 191, 36, .06) 40%, rgba(251, 191, 36, .02) 100%);
   box-shadow: inset 3px 0 0 var(--warn);
   border-radius: 4px;
+  /* Keep the row's histogram + name from touching the amber accent bar. */
+  padding-left: 12px;
 }
 .person-row.is-on-leave.clickable:hover {
   background: linear-gradient(90deg, rgba(251, 191, 36, .20) 0%, rgba(251, 191, 36, .10) 40%, rgba(251, 191, 36, .04) 100%);
