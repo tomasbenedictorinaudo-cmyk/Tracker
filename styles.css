@@ -3980,7 +3980,7 @@ body.is-card-dragging * { cursor: grabbing !important; }
 /* People — workload row with sparkline */
 .person-row {
   display: grid;
-  grid-template-columns: 220px 200px 1fr;
+  grid-template-columns: 250px 200px 1fr;
   align-items: center;
   gap: 16px;
   padding: 10px 0;
@@ -3988,6 +3988,41 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-size: 12px;
 }
 .person-row:first-child { border-top: 0; }
+/* On-leave visual cue — subtle avatar overlay + inline pill. Does not
+   change the row height and keeps the row still readable at a glance. */
+.person-row.is-on-leave .avatar {
+  filter: grayscale(.55);
+  opacity: .85;
+  position: relative;
+}
+.person-row .avatar-hol {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-1);
+  color: var(--warn);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  border: 1px solid var(--line);
+  pointer-events: none;
+}
+.p-onleave {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--warn);
+  background: rgba(251, 191, 36, .10);
+  border: 1px solid rgba(251, 191, 36, .35);
+  vertical-align: baseline;
+  letter-spacing: .01em;
+}
 .now-load { display: grid; grid-template-columns: 1fr 50px; gap: 8px; align-items: center; }
 .spark-wrap { display: flex; align-items: center; gap: 12px; }
 .spark { width: 100%; max-width: 540px; height: 70px; flex: 1; }

@@ -11991,6 +11991,20 @@
     const workingDays = personWorkingDaysInWeek(person, weekStartDate);
     return base * (workingDays / 7);
   }
+  // If the person is currently within a holiday range, return the
+  // range and its "back on" date (day after end). Null otherwise.
+  function personCurrentHoliday(person, refISO) {
+    if (!person) return null;
+    const iso = refISO || todayISO();
+    const hols = person.holidays || [];
+    for (const h of hols) {
+      if (h && h.start && h.end && iso >= h.start && iso <= h.end) {
+        const back = new Date(parseDate(h.end).getTime() + dayMs);
+        return { range: h, backISO: fmtISO(back) };
+      }
+    }
+    return null;
+  }
   // Ranges (from person.holidays) that overlap a viewport [winStart, winEnd]
   // as Date objects. Returned as ISO strings clipped to the window.
   function personHolidayRangesOverlappingWindow(person, winStart, winEnd) {
@@ -13328,14 +13342,18 @@
             const pct = clamp(Math.round((openCmt / cap) * 100), 0, 200);
             const cls = pct > 100 ? 'over' : pct > 80 ? 'warn' : 'ok';
             const peakCls = peakWeek.count > cap ? 'over' : peakWeek.count > cap * 0.8 ? 'warn' : 'ok';
+            // Subtle "on leave" cue when today falls inside a holiday range.
+            const curHol = personCurrentHoliday(p);
+            const backLabel = curHol ? parseDate(curHol.backISO).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+            const holTip = curHol ? `On leave · ${curHol.range.label || 'holiday'} · returns ${backLabel}` : '';
             return `
-              <div class="person-row clickable" data-owner-id="${p.id}" title="Click to filter Register to ${escapeHTML(p.name)}">
+              <div class="person-row clickable ${curHol ? 'is-on-leave' : ''}" data-owner-id="${p.id}" title="${curHol ? escapeHTML(holTip) : 'Click to filter Register to ' + escapeHTML(p.name)}">
                 ${ROW_GRIP_HTML}
                 <div class="name-cell">
-                  <span class="avatar">${initials(p.name)}</span>
+                  <span class="avatar">${initials(p.name)}${curHol ? '<span class="avatar-hol" aria-hidden="true">⛱</span>' : ''}</span>
                   <span class="who">
                     <b>${escapeHTML(p.name)}</b>
-                    <span>${escapeHTML(p.role || '')}</span>
+                    <span>${escapeHTML(p.role || '')}${curHol ? ` <span class="p-onleave" title="${escapeHTML(holTip)}">⛱ back ${escapeHTML(backLabel)}</span>` : ''}</span>
                   </span>
                 </div>
                 <div class="now-load">

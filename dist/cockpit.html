@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-04T10:49:21.329Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-04T10:56:57.094Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3989,7 +3989,7 @@ body.is-card-dragging * { cursor: grabbing !important; }
 /* People — workload row with sparkline */
 .person-row {
   display: grid;
-  grid-template-columns: 220px 200px 1fr;
+  grid-template-columns: 250px 200px 1fr;
   align-items: center;
   gap: 16px;
   padding: 10px 0;
@@ -3997,6 +3997,41 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-size: 12px;
 }
 .person-row:first-child { border-top: 0; }
+/* On-leave visual cue — subtle avatar overlay + inline pill. Does not
+   change the row height and keeps the row still readable at a glance. */
+.person-row.is-on-leave .avatar {
+  filter: grayscale(.55);
+  opacity: .85;
+  position: relative;
+}
+.person-row .avatar-hol {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-1);
+  color: var(--warn);
+  font-size: 10px;
+  line-height: 16px;
+  text-align: center;
+  border: 1px solid var(--line);
+  pointer-events: none;
+}
+.p-onleave {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--warn);
+  background: rgba(251, 191, 36, .10);
+  border: 1px solid rgba(251, 191, 36, .35);
+  vertical-align: baseline;
+  letter-spacing: .01em;
+}
 .now-load { display: grid; grid-template-columns: 1fr 50px; gap: 8px; align-items: center; }
 .spark-wrap { display: flex; align-items: center; gap: 12px; }
 .spark { width: 100%; max-width: 540px; height: 70px; flex: 1; }
@@ -20891,6 +20926,20 @@ body.is-row-dragging *        { user-select: none !important; }
     const workingDays = personWorkingDaysInWeek(person, weekStartDate);
     return base * (workingDays / 7);
   }
+  // If the person is currently within a holiday range, return the
+  // range and its "back on" date (day after end). Null otherwise.
+  function personCurrentHoliday(person, refISO) {
+    if (!person) return null;
+    const iso = refISO || todayISO();
+    const hols = person.holidays || [];
+    for (const h of hols) {
+      if (h && h.start && h.end && iso >= h.start && iso <= h.end) {
+        const back = new Date(parseDate(h.end).getTime() + dayMs);
+        return { range: h, backISO: fmtISO(back) };
+      }
+    }
+    return null;
+  }
   // Ranges (from person.holidays) that overlap a viewport [winStart, winEnd]
   // as Date objects. Returned as ISO strings clipped to the window.
   function personHolidayRangesOverlappingWindow(person, winStart, winEnd) {
@@ -22228,14 +22277,18 @@ body.is-row-dragging *        { user-select: none !important; }
             const pct = clamp(Math.round((openCmt / cap) * 100), 0, 200);
             const cls = pct > 100 ? 'over' : pct > 80 ? 'warn' : 'ok';
             const peakCls = peakWeek.count > cap ? 'over' : peakWeek.count > cap * 0.8 ? 'warn' : 'ok';
+            // Subtle "on leave" cue when today falls inside a holiday range.
+            const curHol = personCurrentHoliday(p);
+            const backLabel = curHol ? parseDate(curHol.backISO).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+            const holTip = curHol ? `On leave · ${curHol.range.label || 'holiday'} · returns ${backLabel}` : '';
             return `
-              <div class="person-row clickable" data-owner-id="${p.id}" title="Click to filter Register to ${escapeHTML(p.name)}">
+              <div class="person-row clickable ${curHol ? 'is-on-leave' : ''}" data-owner-id="${p.id}" title="${curHol ? escapeHTML(holTip) : 'Click to filter Register to ' + escapeHTML(p.name)}">
                 ${ROW_GRIP_HTML}
                 <div class="name-cell">
-                  <span class="avatar">${initials(p.name)}</span>
+                  <span class="avatar">${initials(p.name)}${curHol ? '<span class="avatar-hol" aria-hidden="true">⛱</span>' : ''}</span>
                   <span class="who">
                     <b>${escapeHTML(p.name)}</b>
-                    <span>${escapeHTML(p.role || '')}</span>
+                    <span>${escapeHTML(p.role || '')}${curHol ? ` <span class="p-onleave" title="${escapeHTML(holTip)}">⛱ back ${escapeHTML(backLabel)}</span>` : ''}</span>
                   </span>
                 </div>
                 <div class="now-load">
