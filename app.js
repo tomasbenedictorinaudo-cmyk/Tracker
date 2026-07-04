@@ -15556,6 +15556,139 @@
     showContextMenu(e.clientX, e.clientY, items);
   });
 
+  /* Holiday range picker — a lightweight two-month calendar popover
+   * anchored to an element. Click a day to set the range start; the
+   * next click sets the end (auto-swapped if before start). Prev/next
+   * navigate months. Apply commits back via onChange; Cancel or
+   * clicking outside dismisses without changes. */
+  function _openHolidayPicker(anchor, startISO, endISO, onChange) {
+    document.querySelectorAll('.hol-picker').forEach((el) => el.remove());
+    const ui = {
+      draft: [startISO, endISO],
+      anchorMonth: parseDate(startISO),
+      pendingStart: null,
+    };
+    const fmtHolPill = (s, e) => {
+      if (!s || !e) return 'Pick dates…';
+      const fmt = (iso) => parseDate(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const y1 = s.slice(0, 4), y2 = e.slice(0, 4);
+      const yEnd = y1 !== y2 ? `, ${y2}` : '';
+      const days = Math.round((parseDate(e) - parseDate(s)) / dayMs) + 1;
+      return `${fmt(s)} → ${fmt(e)}${yEnd} · ${days}d`;
+    };
+    const pop = document.createElement('div');
+    pop.className = 'hol-picker';
+    pop.setAttribute('role', 'dialog');
+    const monthISO = (d) => d.toISOString().slice(0, 7);
+    const monthAdd = (d, n) => { const c = new Date(d); c.setMonth(c.getMonth() + n); c.setDate(1); return c; };
+    const monthGrid = (year, month) => {
+      // Monday-anchored 6-row grid.
+      const first = new Date(year, month, 1);
+      const dow = (first.getDay() + 6) % 7;
+      const start = new Date(year, month, 1 - dow);
+      const cells = [];
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(start.getTime() + i * dayMs);
+        cells.push(d);
+      }
+      return cells;
+    };
+    const inRange = (iso, a, b) => {
+      if (!a || !b) return false;
+      const lo = a < b ? a : b;
+      const hi = a < b ? b : a;
+      return iso >= lo && iso <= hi;
+    };
+    const render = () => {
+      const [s, e] = ui.draft;
+      const hoverEnd = ui.pendingStart || e;
+      const renderMonth = (base) => {
+        const yr = base.getFullYear(), mo = base.getMonth();
+        const label = base.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+        const cells = monthGrid(yr, mo).map((d) => {
+          const iso = fmtISO(d);
+          const isThisMonth = d.getMonth() === mo;
+          const isStart = iso === s;
+          const isEnd = iso === e;
+          const isPending = iso === ui.pendingStart;
+          const inSel = inRange(iso, ui.pendingStart || s, hoverEnd);
+          const cls = [
+            'hp-cell',
+            !isThisMonth ? 'other' : '',
+            isStart || isEnd || isPending ? 'anchor' : '',
+            inSel ? 'in-range' : '',
+          ].filter(Boolean).join(' ');
+          return `<button type="button" class="${cls}" data-iso="${iso}">${d.getDate()}</button>`;
+        }).join('');
+        return `
+          <div class="hp-month">
+            <div class="hp-month-hd">${escapeHTML(label)}</div>
+            <div class="hp-dows">${['M','T','W','T','F','S','S'].map((d) => `<span>${d}</span>`).join('')}</div>
+            <div class="hp-grid">${cells}</div>
+          </div>`;
+      };
+      pop.innerHTML = `
+        <div class="hp-nav">
+          <button type="button" class="hp-prev" aria-label="Previous month">‹</button>
+          <div class="hp-summary"><b>${escapeHTML(fmtHolPill(s, e))}</b></div>
+          <button type="button" class="hp-next" aria-label="Next month">›</button>
+        </div>
+        <div class="hp-months">
+          ${renderMonth(ui.anchorMonth)}
+          ${renderMonth(monthAdd(ui.anchorMonth, 1))}
+        </div>
+        <div class="hp-actions">
+          <button type="button" class="hp-cancel ghost">Cancel</button>
+          <button type="button" class="hp-apply primary">Apply</button>
+        </div>`;
+    };
+    render();
+    // Position anchored below the trigger, right-aligned if it would
+    // overflow the viewport.
+    document.body.appendChild(pop);
+    const r = anchor.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    let left = r.left + window.scrollX;
+    if (left + popRect.width + 12 > window.innerWidth) {
+      left = window.innerWidth - popRect.width - 12;
+    }
+    pop.style.left = Math.max(8, left) + 'px';
+    pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+    // Wiring
+    const close = () => {
+      pop.remove();
+      document.removeEventListener('mousedown', outside, true);
+    };
+    const outside = (ev) => {
+      if (!pop.contains(ev.target) && ev.target !== anchor) close();
+    };
+    document.addEventListener('mousedown', outside, true);
+    pop.addEventListener('click', (ev) => {
+      const cell = ev.target.closest('.hp-cell');
+      if (cell) {
+        const iso = cell.dataset.iso;
+        if (ui.pendingStart) {
+          const [a, b] = ui.pendingStart < iso ? [ui.pendingStart, iso] : [iso, ui.pendingStart];
+          ui.draft = [a, b];
+          ui.pendingStart = null;
+        } else {
+          ui.pendingStart = iso;
+          ui.draft = [iso, iso];
+        }
+        render();
+        return;
+      }
+      if (ev.target.closest('.hp-prev')) { ui.anchorMonth = monthAdd(ui.anchorMonth, -1); render(); return; }
+      if (ev.target.closest('.hp-next')) { ui.anchorMonth = monthAdd(ui.anchorMonth,  1); render(); return; }
+      if (ev.target.closest('.hp-cancel')) { close(); return; }
+      if (ev.target.closest('.hp-apply')) {
+        onChange(ui.draft[0], ui.draft[1]);
+        close();
+        return;
+      }
+    });
+  }
+
   function openPersonEditor(personId) {
     const p = state.people.find((x) => x.id === personId);
     if (!p) return;
@@ -15572,11 +15705,21 @@
         </div>`;
     };
     const visibleProjects = state.projects.filter((pr) => !pr.archived);
+    const fmtHolPill = (start, end) => {
+      if (!start || !end) return 'Pick dates…';
+      const fmt = (iso) => parseDate(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const y1 = start.slice(0, 4);
+      const y2 = end.slice(0, 4);
+      const yEnd = y1 !== y2 ? `, ${y2}` : '';
+      const daysBetween = Math.round((parseDate(end) - parseDate(start)) / dayMs) + 1;
+      return `${fmt(start)} → ${fmt(end)}${yEnd} · ${daysBetween}d`;
+    };
     const holidayRow = (h) => `
-      <div class="holiday-row" data-holiday-id="${escapeHTML(h.id)}">
-        <input type="date" class="holiday-start" value="${escapeHTML(h.start || '')}" title="Start (inclusive)" />
-        <span class="muted" aria-hidden="true">→</span>
-        <input type="date" class="holiday-end" value="${escapeHTML(h.end || '')}" title="End (inclusive)" />
+      <div class="holiday-row" data-holiday-id="${escapeHTML(h.id)}" data-start="${escapeHTML(h.start || '')}" data-end="${escapeHTML(h.end || '')}">
+        <button type="button" class="holiday-range" title="Click to pick dates on a calendar">
+          <span class="hol-glyph" aria-hidden="true">📅</span>
+          <span class="hol-range-text">${escapeHTML(fmtHolPill(h.start, h.end))}</span>
+        </button>
         <input type="text" class="holiday-label" placeholder="Label (optional)" value="${escapeHTML(h.label || '')}" />
         <button type="button" class="ghost holiday-del" title="Remove holiday" aria-label="Remove">×</button>
       </div>`;
@@ -15648,6 +15791,17 @@
         if (!holList.querySelector('.holiday-row')) {
           holList.innerHTML = '<div class="empty pln-empty-holidays">No holidays set.</div>';
         }
+        return;
+      }
+      const rangeBtn = e.target.closest('.holiday-range');
+      if (rangeBtn) {
+        const row = rangeBtn.closest('.holiday-row');
+        _openHolidayPicker(rangeBtn, row.dataset.start || fmtISO(new Date()), row.dataset.end || fmtISO(new Date()), (nextStart, nextEnd) => {
+          if (nextStart > nextEnd) [nextStart, nextEnd] = [nextEnd, nextStart];
+          row.dataset.start = nextStart;
+          row.dataset.end = nextEnd;
+          rangeBtn.querySelector('.hol-range-text').textContent = fmtHolPill(nextStart, nextEnd);
+        });
       }
     });
     $('#pEdSave').addEventListener('click', () => {
@@ -15668,8 +15822,8 @@
       // start or end; normalizer will swap swapped endpoints.
       const newHolidays = [];
       document.querySelectorAll('#drawerBody .holiday-row').forEach((row) => {
-        const start = row.querySelector('.holiday-start')?.value || '';
-        const end = row.querySelector('.holiday-end')?.value || '';
+        const start = row.dataset.start || '';
+        const end = row.dataset.end || '';
         if (!start || !end) return;
         const label = (row.querySelector('.holiday-label')?.value || '').trim();
         const id = row.dataset.holidayId || uid('hol');
@@ -21399,7 +21553,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const x2 = Math.min(chartW, Math.round(((parseDate(h.end).getTime() + dayMs - winStart.getTime()) / dayMs) * dayW));
       const w = Math.max(1, x2 - x1);
       const label = h.label ? escapeHTML(h.label) : 'On holiday';
-      return `<rect class="pln-hol-band" x="${x1}" y="0" width="${w}" height="${bars.length * rowH}"><title>${label} · ${h.start} → ${h.end}</title></rect>`;
+      // Add a label ribbon inside the band when it's wide enough.
+      const midX = x1 + w / 2;
+      const showLabel = w > 60;
+      return `
+        <rect class="pln-hol-band" x="${x1}" y="0" width="${w}" height="${bars.length * rowH}"><title>${label} · ${h.start} → ${h.end}</title></rect>
+        ${showLabel ? `<text class="pln-hol-band-label" x="${midX}" y="16" text-anchor="middle">⛱ ${label}</text>` : ''}`;
     }).join('');
     // Small axis marker
     const axisHolidayBands = personHolidayRangesOverlappingWindow(person, winStart, winEnd).map((h) => {
@@ -21558,8 +21717,15 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       gridMarks.push(`<line class="pln-wl-grid" x1="${padLeft}" x2="${chartW - padRight}" y1="${y}" y2="${y}" />`);
     }
 
-    // Holiday shading — grey band across weeks that are fully vacation,
+    // Holiday shading — patterned band across weeks that are fully
+    // vacation (with a bold "⛱ 0h" label so zero capacity is obvious),
     // and a lighter tint for weeks with any holiday days at all.
+    const hatchDefs = `<defs>
+      <pattern id="plnWlHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect width="6" height="6" fill="rgba(248,113,121,.12)" />
+        <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(248,113,121,.35)" stroke-width="1"/>
+      </pattern>
+    </defs>`;
     const holidayBands = person
       ? weeks.map((w, wIdx) => {
           const c = weekCaps[wIdx];
@@ -21568,10 +21734,31 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           const x0 = Math.round(((w.start.getTime() - winStart.getTime()) / dayMs) * dayW);
           const xW = Math.round(dayW * 7);
           if (c <= 0) {
-            return `<rect class="pln-wl-hol full" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}"><title>On holiday · week of ${fmtISO(w.start)}</title></rect>`;
+            // Zero-cap: patterned fill + bold "0h" chip + a solid red
+            // baseline at the top of the plot so the cap line reads as
+            // "hard floor at 0".
+            const labelX = x0 + xW / 2;
+            const label = xW > 30
+              ? `<text class="pln-wl-hol-label" x="${labelX}" y="${padTop + plotH / 2}" text-anchor="middle">⛱ 0h</text>`
+              : '';
+            return `<g>
+                <rect class="pln-wl-hol full" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}" fill="url(#plnWlHatch)"><title>On holiday · week of ${fmtISO(w.start)} · cap 0h</title></rect>
+                <line class="pln-wl-hol-floor" x1="${x0}" x2="${x0 + xW}" y1="${padTop + plotH}" y2="${padTop + plotH}" />
+                ${label}
+              </g>`;
           }
           if (c < base - 0.01) {
-            return `<rect class="pln-wl-hol partial" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}"><title>Partial holiday · week of ${fmtISO(w.start)} · cap ${Math.round(c)}h</title></rect>`;
+            // Partial-vacation week — hatched fill + "⛱ cap Xh" label
+            // so the reduced capacity is unmissable.
+            const labelX = x0 + xW / 2;
+            const holDaysInWeek = Math.round(7 - (c / base) * 7);
+            const label = xW > 30
+              ? `<text class="pln-wl-hol-label partial" x="${labelX}" y="${padTop + 12}" text-anchor="middle">⛱ ${holDaysInWeek}d off · ${Math.round(c)}h</text>`
+              : '';
+            return `<g>
+                <rect class="pln-wl-hol partial" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}" fill="url(#plnWlHatch)"><title>Partial holiday · week of ${fmtISO(w.start)} · cap ${Math.round(c)}h (${holDaysInWeek}d off)</title></rect>
+                ${label}
+              </g>`;
           }
           return '';
         }).join('')
@@ -21637,6 +21824,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         </div>
         <div class="pln-wl-chart" style="width:${chartW}px; height:${chartH}px; margin-left:${LABEL_COL_W + LABEL_GAP}px">
           <svg width="${chartW}" height="${chartH}" viewBox="0 0 ${chartW} ${chartH}" class="pln-wl-svg">
+            ${hatchDefs}
             ${holidayBands}
             ${gridMarks.join('')}
             ${stacks}

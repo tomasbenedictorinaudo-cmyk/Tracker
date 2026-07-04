@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-04T10:56:57.094Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-04T11:14:09.835Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3193,28 +3193,102 @@ body.is-card-dragging * { cursor: grabbing !important; }
   color: var(--bad);
 }
 
-/* Holiday editor rows — same visual weight as assignment rows. */
+/* Holiday editor rows — a range-pill + label + delete. Same visual
+   weight as an assignment row. */
 .holiday-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
 .holiday-row {
   display: grid;
-  grid-template-columns: minmax(120px, auto) 12px minmax(120px, auto) 1fr 26px;
+  grid-template-columns: minmax(210px, auto) 1fr 26px;
   gap: 6px;
   align-items: center;
 }
-.holiday-row input {
+.holiday-row input.holiday-label {
   padding: 4px 8px;
   border: 1px solid var(--line-2);
   border-radius: 4px;
   background: var(--bg-2);
   color: var(--text);
   font-size: 12px;
-  color-scheme: dark;
 }
+.holiday-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.holiday-range:hover { background: var(--bg-3); border-color: var(--accent); }
+.holiday-range .hol-glyph { opacity: .7; font-size: 12px; }
 .holiday-row .holiday-del {
   padding: 0 8px;
   color: var(--text-faint);
 }
 .holiday-row .holiday-del:hover { color: var(--bad); }
+
+/* Holiday range picker — two-month calendar popover. */
+.hol-picker {
+  position: absolute;
+  z-index: 1200;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(0,0,0,.55), 0 0 0 1px var(--line-2);
+  padding: 10px;
+  min-width: 460px;
+  color: var(--text);
+  font-size: 12px;
+}
+.hp-nav { display: grid; grid-template-columns: 28px 1fr 28px; align-items: center; margin-bottom: 8px; }
+.hp-nav button {
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--text);
+  border-radius: 4px;
+  height: 24px;
+  cursor: pointer;
+}
+.hp-nav button:hover { border-color: var(--accent); }
+.hp-summary { text-align: center; color: var(--text); font-size: 12px; }
+.hp-months { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hp-month-hd { text-align: center; font-weight: 600; padding: 4px 0 6px; font-size: 11px; color: var(--text); text-transform: uppercase; letter-spacing: .04em; }
+.hp-dows {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  padding: 0 2px 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-align: center;
+}
+.hp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  padding: 0 2px;
+}
+.hp-cell {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  height: 26px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.hp-cell.other { color: var(--text-faint); opacity: .4; }
+.hp-cell:hover { background: var(--bg-2); }
+.hp-cell.in-range { background: rgba(120, 149, 233, .18); }
+.hp-cell.anchor { background: var(--accent); color: #fff; }
+.hp-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
+.hp-actions .primary { background: var(--accent); border-color: var(--accent); }
 
 /* Planner view */
 .planner-picker {
@@ -3630,18 +3704,40 @@ body.is-card-dragging * { cursor: grabbing !important; }
 /* Holiday bands — grey shade the vacation ranges across Gantt +
    workload chart + axis. Kept behind bars so bars stay legible. */
 .pln-hol-band {
-  fill: rgba(255,255,255,.06);
-  stroke: none;
+  fill: rgba(251, 191, 36, .07);
+  stroke: rgba(251, 191, 36, .35);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
 }
 .pln-hol-band-axis {
-  fill: rgba(255,255,255,.28);
+  fill: rgba(251, 191, 36, .55);
   stroke: none;
 }
-.pln-wl-hol.full {
-  fill: rgba(255,255,255,.10);
+.pln-hol-band-label {
+  fill: var(--warn);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  pointer-events: none;
 }
-.pln-wl-hol.partial {
-  fill: rgba(255,255,255,.05);
+.pln-wl-hol.full { }
+.pln-wl-hol.partial { fill: rgba(255,255,255,.05); }
+.pln-wl-hol-floor {
+  stroke: var(--bad);
+  stroke-width: 2;
+  opacity: .85;
+}
+.pln-wl-hol-label {
+  fill: var(--bad);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  pointer-events: none;
+}
+.pln-wl-hol-label.partial {
+  fill: var(--warn);
+  font-weight: 600;
+  font-size: 9.5px;
 }
 
 /* Owner-load strip in the action drawer */
@@ -3997,27 +4093,31 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-size: 12px;
 }
 .person-row:first-child { border-top: 0; }
-/* On-leave visual cue — subtle avatar overlay + inline pill. Does not
-   change the row height and keeps the row still readable at a glance. */
+/* On-leave visual cue — badge floats OUTSIDE the avatar so it never
+   overlaps the initials. Kept small and warmly tinted; the row also
+   desaturates the avatar so the whole row reads as "away". */
 .person-row.is-on-leave .avatar {
   filter: grayscale(.55);
   opacity: .85;
   position: relative;
+  overflow: visible;
 }
 .person-row .avatar-hol {
   position: absolute;
-  right: -4px;
-  bottom: -4px;
-  width: 16px;
-  height: 16px;
+  right: -9px;
+  top: -7px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--bg-1);
+  background: rgba(251, 191, 36, .18);
   color: var(--warn);
-  font-size: 10px;
-  line-height: 16px;
+  font-size: 11px;
+  line-height: 17px;
   text-align: center;
-  border: 1px solid var(--line);
+  border: 1.5px solid var(--bg-1);
+  outline: 1px solid rgba(251, 191, 36, .55);
   pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,.35);
 }
 .p-onleave {
   display: inline-block;
@@ -24491,6 +24591,139 @@ body.is-row-dragging *        { user-select: none !important; }
     showContextMenu(e.clientX, e.clientY, items);
   });
 
+  /* Holiday range picker — a lightweight two-month calendar popover
+   * anchored to an element. Click a day to set the range start; the
+   * next click sets the end (auto-swapped if before start). Prev/next
+   * navigate months. Apply commits back via onChange; Cancel or
+   * clicking outside dismisses without changes. */
+  function _openHolidayPicker(anchor, startISO, endISO, onChange) {
+    document.querySelectorAll('.hol-picker').forEach((el) => el.remove());
+    const ui = {
+      draft: [startISO, endISO],
+      anchorMonth: parseDate(startISO),
+      pendingStart: null,
+    };
+    const fmtHolPill = (s, e) => {
+      if (!s || !e) return 'Pick dates…';
+      const fmt = (iso) => parseDate(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const y1 = s.slice(0, 4), y2 = e.slice(0, 4);
+      const yEnd = y1 !== y2 ? `, ${y2}` : '';
+      const days = Math.round((parseDate(e) - parseDate(s)) / dayMs) + 1;
+      return `${fmt(s)} → ${fmt(e)}${yEnd} · ${days}d`;
+    };
+    const pop = document.createElement('div');
+    pop.className = 'hol-picker';
+    pop.setAttribute('role', 'dialog');
+    const monthISO = (d) => d.toISOString().slice(0, 7);
+    const monthAdd = (d, n) => { const c = new Date(d); c.setMonth(c.getMonth() + n); c.setDate(1); return c; };
+    const monthGrid = (year, month) => {
+      // Monday-anchored 6-row grid.
+      const first = new Date(year, month, 1);
+      const dow = (first.getDay() + 6) % 7;
+      const start = new Date(year, month, 1 - dow);
+      const cells = [];
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(start.getTime() + i * dayMs);
+        cells.push(d);
+      }
+      return cells;
+    };
+    const inRange = (iso, a, b) => {
+      if (!a || !b) return false;
+      const lo = a < b ? a : b;
+      const hi = a < b ? b : a;
+      return iso >= lo && iso <= hi;
+    };
+    const render = () => {
+      const [s, e] = ui.draft;
+      const hoverEnd = ui.pendingStart || e;
+      const renderMonth = (base) => {
+        const yr = base.getFullYear(), mo = base.getMonth();
+        const label = base.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+        const cells = monthGrid(yr, mo).map((d) => {
+          const iso = fmtISO(d);
+          const isThisMonth = d.getMonth() === mo;
+          const isStart = iso === s;
+          const isEnd = iso === e;
+          const isPending = iso === ui.pendingStart;
+          const inSel = inRange(iso, ui.pendingStart || s, hoverEnd);
+          const cls = [
+            'hp-cell',
+            !isThisMonth ? 'other' : '',
+            isStart || isEnd || isPending ? 'anchor' : '',
+            inSel ? 'in-range' : '',
+          ].filter(Boolean).join(' ');
+          return `<button type="button" class="${cls}" data-iso="${iso}">${d.getDate()}</button>`;
+        }).join('');
+        return `
+          <div class="hp-month">
+            <div class="hp-month-hd">${escapeHTML(label)}</div>
+            <div class="hp-dows">${['M','T','W','T','F','S','S'].map((d) => `<span>${d}</span>`).join('')}</div>
+            <div class="hp-grid">${cells}</div>
+          </div>`;
+      };
+      pop.innerHTML = `
+        <div class="hp-nav">
+          <button type="button" class="hp-prev" aria-label="Previous month">‹</button>
+          <div class="hp-summary"><b>${escapeHTML(fmtHolPill(s, e))}</b></div>
+          <button type="button" class="hp-next" aria-label="Next month">›</button>
+        </div>
+        <div class="hp-months">
+          ${renderMonth(ui.anchorMonth)}
+          ${renderMonth(monthAdd(ui.anchorMonth, 1))}
+        </div>
+        <div class="hp-actions">
+          <button type="button" class="hp-cancel ghost">Cancel</button>
+          <button type="button" class="hp-apply primary">Apply</button>
+        </div>`;
+    };
+    render();
+    // Position anchored below the trigger, right-aligned if it would
+    // overflow the viewport.
+    document.body.appendChild(pop);
+    const r = anchor.getBoundingClientRect();
+    const popRect = pop.getBoundingClientRect();
+    let left = r.left + window.scrollX;
+    if (left + popRect.width + 12 > window.innerWidth) {
+      left = window.innerWidth - popRect.width - 12;
+    }
+    pop.style.left = Math.max(8, left) + 'px';
+    pop.style.top = (r.bottom + window.scrollY + 6) + 'px';
+    // Wiring
+    const close = () => {
+      pop.remove();
+      document.removeEventListener('mousedown', outside, true);
+    };
+    const outside = (ev) => {
+      if (!pop.contains(ev.target) && ev.target !== anchor) close();
+    };
+    document.addEventListener('mousedown', outside, true);
+    pop.addEventListener('click', (ev) => {
+      const cell = ev.target.closest('.hp-cell');
+      if (cell) {
+        const iso = cell.dataset.iso;
+        if (ui.pendingStart) {
+          const [a, b] = ui.pendingStart < iso ? [ui.pendingStart, iso] : [iso, ui.pendingStart];
+          ui.draft = [a, b];
+          ui.pendingStart = null;
+        } else {
+          ui.pendingStart = iso;
+          ui.draft = [iso, iso];
+        }
+        render();
+        return;
+      }
+      if (ev.target.closest('.hp-prev')) { ui.anchorMonth = monthAdd(ui.anchorMonth, -1); render(); return; }
+      if (ev.target.closest('.hp-next')) { ui.anchorMonth = monthAdd(ui.anchorMonth,  1); render(); return; }
+      if (ev.target.closest('.hp-cancel')) { close(); return; }
+      if (ev.target.closest('.hp-apply')) {
+        onChange(ui.draft[0], ui.draft[1]);
+        close();
+        return;
+      }
+    });
+  }
+
   function openPersonEditor(personId) {
     const p = state.people.find((x) => x.id === personId);
     if (!p) return;
@@ -24507,11 +24740,21 @@ body.is-row-dragging *        { user-select: none !important; }
         </div>`;
     };
     const visibleProjects = state.projects.filter((pr) => !pr.archived);
+    const fmtHolPill = (start, end) => {
+      if (!start || !end) return 'Pick dates…';
+      const fmt = (iso) => parseDate(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      const y1 = start.slice(0, 4);
+      const y2 = end.slice(0, 4);
+      const yEnd = y1 !== y2 ? `, ${y2}` : '';
+      const daysBetween = Math.round((parseDate(end) - parseDate(start)) / dayMs) + 1;
+      return `${fmt(start)} → ${fmt(end)}${yEnd} · ${daysBetween}d`;
+    };
     const holidayRow = (h) => `
-      <div class="holiday-row" data-holiday-id="${escapeHTML(h.id)}">
-        <input type="date" class="holiday-start" value="${escapeHTML(h.start || '')}" title="Start (inclusive)" />
-        <span class="muted" aria-hidden="true">→</span>
-        <input type="date" class="holiday-end" value="${escapeHTML(h.end || '')}" title="End (inclusive)" />
+      <div class="holiday-row" data-holiday-id="${escapeHTML(h.id)}" data-start="${escapeHTML(h.start || '')}" data-end="${escapeHTML(h.end || '')}">
+        <button type="button" class="holiday-range" title="Click to pick dates on a calendar">
+          <span class="hol-glyph" aria-hidden="true">📅</span>
+          <span class="hol-range-text">${escapeHTML(fmtHolPill(h.start, h.end))}</span>
+        </button>
         <input type="text" class="holiday-label" placeholder="Label (optional)" value="${escapeHTML(h.label || '')}" />
         <button type="button" class="ghost holiday-del" title="Remove holiday" aria-label="Remove">×</button>
       </div>`;
@@ -24583,6 +24826,17 @@ body.is-row-dragging *        { user-select: none !important; }
         if (!holList.querySelector('.holiday-row')) {
           holList.innerHTML = '<div class="empty pln-empty-holidays">No holidays set.</div>';
         }
+        return;
+      }
+      const rangeBtn = e.target.closest('.holiday-range');
+      if (rangeBtn) {
+        const row = rangeBtn.closest('.holiday-row');
+        _openHolidayPicker(rangeBtn, row.dataset.start || fmtISO(new Date()), row.dataset.end || fmtISO(new Date()), (nextStart, nextEnd) => {
+          if (nextStart > nextEnd) [nextStart, nextEnd] = [nextEnd, nextStart];
+          row.dataset.start = nextStart;
+          row.dataset.end = nextEnd;
+          rangeBtn.querySelector('.hol-range-text').textContent = fmtHolPill(nextStart, nextEnd);
+        });
       }
     });
     $('#pEdSave').addEventListener('click', () => {
@@ -24603,8 +24857,8 @@ body.is-row-dragging *        { user-select: none !important; }
       // start or end; normalizer will swap swapped endpoints.
       const newHolidays = [];
       document.querySelectorAll('#drawerBody .holiday-row').forEach((row) => {
-        const start = row.querySelector('.holiday-start')?.value || '';
-        const end = row.querySelector('.holiday-end')?.value || '';
+        const start = row.dataset.start || '';
+        const end = row.dataset.end || '';
         if (!start || !end) return;
         const label = (row.querySelector('.holiday-label')?.value || '').trim();
         const id = row.dataset.holidayId || uid('hol');
@@ -30334,7 +30588,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const x2 = Math.min(chartW, Math.round(((parseDate(h.end).getTime() + dayMs - winStart.getTime()) / dayMs) * dayW));
       const w = Math.max(1, x2 - x1);
       const label = h.label ? escapeHTML(h.label) : 'On holiday';
-      return `<rect class="pln-hol-band" x="${x1}" y="0" width="${w}" height="${bars.length * rowH}"><title>${label} · ${h.start} → ${h.end}</title></rect>`;
+      // Add a label ribbon inside the band when it's wide enough.
+      const midX = x1 + w / 2;
+      const showLabel = w > 60;
+      return `
+        <rect class="pln-hol-band" x="${x1}" y="0" width="${w}" height="${bars.length * rowH}"><title>${label} · ${h.start} → ${h.end}</title></rect>
+        ${showLabel ? `<text class="pln-hol-band-label" x="${midX}" y="16" text-anchor="middle">⛱ ${label}</text>` : ''}`;
     }).join('');
     // Small axis marker
     const axisHolidayBands = personHolidayRangesOverlappingWindow(person, winStart, winEnd).map((h) => {
@@ -30493,8 +30752,15 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       gridMarks.push(`<line class="pln-wl-grid" x1="${padLeft}" x2="${chartW - padRight}" y1="${y}" y2="${y}" />`);
     }
 
-    // Holiday shading — grey band across weeks that are fully vacation,
+    // Holiday shading — patterned band across weeks that are fully
+    // vacation (with a bold "⛱ 0h" label so zero capacity is obvious),
     // and a lighter tint for weeks with any holiday days at all.
+    const hatchDefs = `<defs>
+      <pattern id="plnWlHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+        <rect width="6" height="6" fill="rgba(248,113,121,.12)" />
+        <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(248,113,121,.35)" stroke-width="1"/>
+      </pattern>
+    </defs>`;
     const holidayBands = person
       ? weeks.map((w, wIdx) => {
           const c = weekCaps[wIdx];
@@ -30503,10 +30769,31 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           const x0 = Math.round(((w.start.getTime() - winStart.getTime()) / dayMs) * dayW);
           const xW = Math.round(dayW * 7);
           if (c <= 0) {
-            return `<rect class="pln-wl-hol full" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}"><title>On holiday · week of ${fmtISO(w.start)}</title></rect>`;
+            // Zero-cap: patterned fill + bold "0h" chip + a solid red
+            // baseline at the top of the plot so the cap line reads as
+            // "hard floor at 0".
+            const labelX = x0 + xW / 2;
+            const label = xW > 30
+              ? `<text class="pln-wl-hol-label" x="${labelX}" y="${padTop + plotH / 2}" text-anchor="middle">⛱ 0h</text>`
+              : '';
+            return `<g>
+                <rect class="pln-wl-hol full" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}" fill="url(#plnWlHatch)"><title>On holiday · week of ${fmtISO(w.start)} · cap 0h</title></rect>
+                <line class="pln-wl-hol-floor" x1="${x0}" x2="${x0 + xW}" y1="${padTop + plotH}" y2="${padTop + plotH}" />
+                ${label}
+              </g>`;
           }
           if (c < base - 0.01) {
-            return `<rect class="pln-wl-hol partial" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}"><title>Partial holiday · week of ${fmtISO(w.start)} · cap ${Math.round(c)}h</title></rect>`;
+            // Partial-vacation week — hatched fill + "⛱ cap Xh" label
+            // so the reduced capacity is unmissable.
+            const labelX = x0 + xW / 2;
+            const holDaysInWeek = Math.round(7 - (c / base) * 7);
+            const label = xW > 30
+              ? `<text class="pln-wl-hol-label partial" x="${labelX}" y="${padTop + 12}" text-anchor="middle">⛱ ${holDaysInWeek}d off · ${Math.round(c)}h</text>`
+              : '';
+            return `<g>
+                <rect class="pln-wl-hol partial" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}" fill="url(#plnWlHatch)"><title>Partial holiday · week of ${fmtISO(w.start)} · cap ${Math.round(c)}h (${holDaysInWeek}d off)</title></rect>
+                ${label}
+              </g>`;
           }
           return '';
         }).join('')
@@ -30572,6 +30859,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         </div>
         <div class="pln-wl-chart" style="width:${chartW}px; height:${chartH}px; margin-left:${LABEL_COL_W + LABEL_GAP}px">
           <svg width="${chartW}" height="${chartH}" viewBox="0 0 ${chartW} ${chartH}" class="pln-wl-svg">
+            ${hatchDefs}
             ${holidayBands}
             ${gridMarks.join('')}
             ${stacks}

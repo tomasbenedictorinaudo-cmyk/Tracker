@@ -3184,28 +3184,102 @@ body.is-card-dragging * { cursor: grabbing !important; }
   color: var(--bad);
 }
 
-/* Holiday editor rows — same visual weight as assignment rows. */
+/* Holiday editor rows — a range-pill + label + delete. Same visual
+   weight as an assignment row. */
 .holiday-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
 .holiday-row {
   display: grid;
-  grid-template-columns: minmax(120px, auto) 12px minmax(120px, auto) 1fr 26px;
+  grid-template-columns: minmax(210px, auto) 1fr 26px;
   gap: 6px;
   align-items: center;
 }
-.holiday-row input {
+.holiday-row input.holiday-label {
   padding: 4px 8px;
   border: 1px solid var(--line-2);
   border-radius: 4px;
   background: var(--bg-2);
   color: var(--text);
   font-size: 12px;
-  color-scheme: dark;
 }
+.holiday-range {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.holiday-range:hover { background: var(--bg-3); border-color: var(--accent); }
+.holiday-range .hol-glyph { opacity: .7; font-size: 12px; }
 .holiday-row .holiday-del {
   padding: 0 8px;
   color: var(--text-faint);
 }
 .holiday-row .holiday-del:hover { color: var(--bad); }
+
+/* Holiday range picker — two-month calendar popover. */
+.hol-picker {
+  position: absolute;
+  z-index: 1200;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(0,0,0,.55), 0 0 0 1px var(--line-2);
+  padding: 10px;
+  min-width: 460px;
+  color: var(--text);
+  font-size: 12px;
+}
+.hp-nav { display: grid; grid-template-columns: 28px 1fr 28px; align-items: center; margin-bottom: 8px; }
+.hp-nav button {
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--text);
+  border-radius: 4px;
+  height: 24px;
+  cursor: pointer;
+}
+.hp-nav button:hover { border-color: var(--accent); }
+.hp-summary { text-align: center; color: var(--text); font-size: 12px; }
+.hp-months { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hp-month-hd { text-align: center; font-weight: 600; padding: 4px 0 6px; font-size: 11px; color: var(--text); text-transform: uppercase; letter-spacing: .04em; }
+.hp-dows {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  padding: 0 2px 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-align: center;
+}
+.hp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px;
+  padding: 0 2px;
+}
+.hp-cell {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text);
+  height: 26px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.hp-cell.other { color: var(--text-faint); opacity: .4; }
+.hp-cell:hover { background: var(--bg-2); }
+.hp-cell.in-range { background: rgba(120, 149, 233, .18); }
+.hp-cell.anchor { background: var(--accent); color: #fff; }
+.hp-actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 10px; }
+.hp-actions .primary { background: var(--accent); border-color: var(--accent); }
 
 /* Planner view */
 .planner-picker {
@@ -3621,18 +3695,40 @@ body.is-card-dragging * { cursor: grabbing !important; }
 /* Holiday bands — grey shade the vacation ranges across Gantt +
    workload chart + axis. Kept behind bars so bars stay legible. */
 .pln-hol-band {
-  fill: rgba(255,255,255,.06);
-  stroke: none;
+  fill: rgba(251, 191, 36, .07);
+  stroke: rgba(251, 191, 36, .35);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
 }
 .pln-hol-band-axis {
-  fill: rgba(255,255,255,.28);
+  fill: rgba(251, 191, 36, .55);
   stroke: none;
 }
-.pln-wl-hol.full {
-  fill: rgba(255,255,255,.10);
+.pln-hol-band-label {
+  fill: var(--warn);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  pointer-events: none;
 }
-.pln-wl-hol.partial {
-  fill: rgba(255,255,255,.05);
+.pln-wl-hol.full { }
+.pln-wl-hol.partial { fill: rgba(255,255,255,.05); }
+.pln-wl-hol-floor {
+  stroke: var(--bad);
+  stroke-width: 2;
+  opacity: .85;
+}
+.pln-wl-hol-label {
+  fill: var(--bad);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  pointer-events: none;
+}
+.pln-wl-hol-label.partial {
+  fill: var(--warn);
+  font-weight: 600;
+  font-size: 9.5px;
 }
 
 /* Owner-load strip in the action drawer */
@@ -3988,27 +4084,31 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-size: 12px;
 }
 .person-row:first-child { border-top: 0; }
-/* On-leave visual cue — subtle avatar overlay + inline pill. Does not
-   change the row height and keeps the row still readable at a glance. */
+/* On-leave visual cue — badge floats OUTSIDE the avatar so it never
+   overlaps the initials. Kept small and warmly tinted; the row also
+   desaturates the avatar so the whole row reads as "away". */
 .person-row.is-on-leave .avatar {
   filter: grayscale(.55);
   opacity: .85;
   position: relative;
+  overflow: visible;
 }
 .person-row .avatar-hol {
   position: absolute;
-  right: -4px;
-  bottom: -4px;
-  width: 16px;
-  height: 16px;
+  right: -9px;
+  top: -7px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
-  background: var(--bg-1);
+  background: rgba(251, 191, 36, .18);
   color: var(--warn);
-  font-size: 10px;
-  line-height: 16px;
+  font-size: 11px;
+  line-height: 17px;
   text-align: center;
-  border: 1px solid var(--line);
+  border: 1.5px solid var(--bg-1);
+  outline: 1px solid rgba(251, 191, 36, .55);
   pointer-events: none;
+  box-shadow: 0 1px 2px rgba(0,0,0,.35);
 }
 .p-onleave {
   display: inline-block;
