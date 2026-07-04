@@ -4084,10 +4084,19 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-size: 12px;
 }
 .person-row:first-child { border-top: 0; }
-/* On-leave visual cue — the entire avatar gets a warm amber ring
-   (primary signal, unmissable) and a small solid amber "status pip"
-   sits at bottom-right (secondary signal, contextual). The pip
-   contains a palm glyph rendered in a size that actually reads. */
+/* On-leave visual cue — the row itself gets a light amber wash and a
+   left accent bar so an at-a-glance scan of the People list flags
+   who's out. The avatar carries a warm amber ring (primary signal,
+   unmissable) and a small solid amber "status pip" sits at
+   bottom-right (secondary signal, contextual). */
+.person-row.is-on-leave {
+  background: linear-gradient(90deg, rgba(251, 191, 36, .14) 0%, rgba(251, 191, 36, .06) 40%, rgba(251, 191, 36, .02) 100%);
+  box-shadow: inset 3px 0 0 var(--warn);
+  border-radius: 4px;
+}
+.person-row.is-on-leave.clickable:hover {
+  background: linear-gradient(90deg, rgba(251, 191, 36, .20) 0%, rgba(251, 191, 36, .10) 40%, rgba(251, 191, 36, .04) 100%);
+}
 .person-row.is-on-leave .avatar {
   filter: grayscale(.35);
   position: relative;
