@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-04T11:40:44.128Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-04T11:43:20.837Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3506,11 +3506,17 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .planner-workload {
   border-top: 1px solid var(--line);
   background: var(--bg-1);
-  padding: 10px 14px 10px;
+  /* NO horizontal padding here — the chart inside is positioned via
+     margin-left to match the Gantt's chart column start. Applying
+     padding to this container would shift the histogram off the
+     Gantt's coordinate system. Head + legend get their own padding. */
+  padding: 10px 0;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
+.planner-workload .pln-wl-head,
+.planner-workload .pln-wl-legend { padding: 0 14px; }
 .pln-wl-head {
   display: flex;
   align-items: center;
