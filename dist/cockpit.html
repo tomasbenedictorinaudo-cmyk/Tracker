@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-04T11:51:08.776Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-04T12:07:31.997Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -29928,7 +29928,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         if (!(hours > 0)) continue;
         const commitmentPct = typeof a.commitment === 'number' ? a.commitment : 100;
         const weeksNeeded = hours / ((commitmentPct / 100) * HOURS_PER_WEEK);
-        const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
+        const daysNeeded = Math.max(1, Math.round(weeksNeeded * 7));
         const startD = a.startDate ? parseDate(a.startDate) : (a.due ? new Date(parseDate(a.due).getTime() - (daysNeeded - 1) * dayMs) : null);
         if (!startD) continue;
         // Effective end — extended across the person's holidays so
@@ -30305,7 +30305,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       // Derive the current work-end from anchor + commitment so drag
       // math operates on the same geometry the user sees.
       const weeksNeeded = anchorHours / ((initialCommitment / 100) * HOURS_PER_WEEK);
-      const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
+      const daysNeeded = Math.max(1, Math.round(weeksNeeded * 7));
       const endISO = fmtISO(new Date(parseDate(startISO).getTime() + (daysNeeded - 1) * dayMs));
       const dueISO = a.due || null;
 
@@ -30443,23 +30443,23 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     if (d.bar) d.bar.style.cursor = 'grab';
     if (!d.dragged) return;
     const a = d.a;
-    // Snap to Monday so weekly workload buckets stay clean. Left edge
-    // is snapped by moving the start date; the workEnd is computed
-    // from start + hours ÷ commitment anyway, so no separate snap.
-    const snapToMonday = (iso) => {
-      const dt = parseDate(iso);
-      const dow = dt.getDay();
-      // Snap to the nearest Monday (dow=1). If dow is 4 or later, go
-      // forward; otherwise go back.
-      const delta = dow === 0 ? 1 : dow === 1 ? 0 : dow <= 4 ? 1 - dow : 8 - dow;
-      dt.setDate(dt.getDate() + delta);
-      return fmtISO(dt);
-    };
+    // Daily precision: the drop lands on whichever day the user
+    // released on. No week snapping — actions can start on any day.
     // Never touch a.due — the due date is fixed by the customer.
-    if (d.zone === 'body' || d.zone === 'left') a.startDate = snapToMonday(d.newStartISO);
+    if (d.zone === 'body' || d.zone === 'left') a.startDate = d.newStartISO;
     if (d.zone !== 'body') {
       a.commitment = d.newCommitment;
-      a.plannedHours = Math.round(d.anchorHours);
+      // Anchor hours, but nudge plannedHours so the render's
+      // Math.round(plannedHours ÷ commit ÷ HPW × 7) exactly
+      // reproduces the span the drag drop implied. Without this,
+      // commit rounding cascades into daysNeeded rounding and the
+      // opposite edge shifts up to a day on release.
+      const targetSpanDays = Math.max(1, Math.round((parseDate(d.newEndISO) - parseDate(d.newStartISO)) / dayMs) + 1);
+      const exactHours = (d.newCommitment / 100) * HOURS_PER_WEEK * (targetSpanDays / 7);
+      a.plannedHours = Math.round(exactHours);
+      const roundtripDays = Math.max(1, Math.round(a.plannedHours / ((a.commitment / 100) * HOURS_PER_WEEK) * 7));
+      if (roundtripDays > targetSpanDays) a.plannedHours -= 1;
+      else if (roundtripDays < targetSpanDays) a.plannedHours += 1;
     }
     commit('planner-drag');
     // Undo pill — nudges the user that the change is undoable, with
@@ -30526,7 +30526,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const commitment = typeof a.commitment === 'number' ? a.commitment : 100;
       const hoursRaw = _plannerEffectiveHours(a);
       const weeksNeeded = hoursRaw / ((commitment / 100) * HOURS_PER_WEEK);
-      const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
+      const daysNeeded = Math.max(1, Math.round(weeksNeeded * 7));
       // Extend work-end across any of this person's holidays that
       // fall inside the working window. Anchor hours stay pinned.
       const workEnd = personWorkEndWithHolidays(person, workStart, daysNeeded);
@@ -30562,7 +30562,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         const bCommit = typeof a.baseline.commitment === 'number' ? a.baseline.commitment : commitment;
         const bHours = hoursRaw;
         const bWeeks = bHours / ((bCommit / 100) * HOURS_PER_WEEK);
-        const bDays = Math.max(1, Math.ceil(bWeeks * 7));
+        const bDays = Math.max(1, Math.round(bWeeks * 7));
         const bWorkEnd = bStart ? fmtISO(new Date(parseDate(bStart).getTime() + (bDays - 1) * dayMs)) : null;
         if (bStart && bWorkEnd) {
           const bX = clampX(xFor(bStart));
@@ -30591,7 +30591,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         const pCommit = typeof pA.commitment === 'number' ? pA.commitment : 100;
         const pHours = _plannerEffectiveHours(pA);
         const pWeeks = pHours / ((pCommit / 100) * HOURS_PER_WEEK);
-        const pDays = Math.max(1, Math.ceil(pWeeks * 7));
+        const pDays = Math.max(1, Math.round(pWeeks * 7));
         const pEnd = fmtISO(new Date(parseDate(pStart).getTime() + (pDays - 1) * dayMs));
         depSlackByPred[pid] = { predEndISO: pEnd, predEndX: xFor(pEnd) };
         if (workStart < pEnd) depViolation = true;
@@ -30787,7 +30787,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const hoursRaw = _plannerEffectiveHours(a);
       const commitmentPct = typeof a.commitment === 'number' ? a.commitment : 100;
       const weeksNeeded = hoursRaw / ((commitmentPct / 100) * HOURS_PER_WEEK);
-      const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
+      const daysNeeded = Math.max(1, Math.round(weeksNeeded * 7));
       const workEnd = person
         ? personWorkEndWithHolidays(person, workStart, daysNeeded)
         : fmtISO(new Date(parseDate(workStart).getTime() + (daysNeeded - 1) * dayMs));
