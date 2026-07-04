@@ -3184,6 +3184,29 @@ body.is-card-dragging * { cursor: grabbing !important; }
   color: var(--bad);
 }
 
+/* Holiday editor rows — same visual weight as assignment rows. */
+.holiday-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
+.holiday-row {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 12px minmax(120px, auto) 1fr 26px;
+  gap: 6px;
+  align-items: center;
+}
+.holiday-row input {
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 12px;
+  color-scheme: dark;
+}
+.holiday-row .holiday-del {
+  padding: 0 8px;
+  color: var(--text-faint);
+}
+.holiday-row .holiday-del:hover { color: var(--bad); }
+
 /* Planner view */
 .planner-picker {
   display: inline-flex;
@@ -3595,6 +3618,23 @@ body.is-card-dragging * { cursor: grabbing !important; }
   stroke-width: 1.5;
 }
 
+/* Holiday bands — grey shade the vacation ranges across Gantt +
+   workload chart + axis. Kept behind bars so bars stay legible. */
+.pln-hol-band {
+  fill: rgba(255,255,255,.06);
+  stroke: none;
+}
+.pln-hol-band-axis {
+  fill: rgba(255,255,255,.28);
+  stroke: none;
+}
+.pln-wl-hol.full {
+  fill: rgba(255,255,255,.10);
+}
+.pln-wl-hol.partial {
+  fill: rgba(255,255,255,.05);
+}
+
 /* Owner-load strip in the action drawer */
 .owner-load-strip {
   background: var(--bg-2);
@@ -3649,6 +3689,8 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .olw-bar-base { fill: var(--accent-2, #8b5cf6); opacity: .55; }
 .olw-bar-base.over { fill: var(--bad); opacity: .55; }
 .olw-bar-this { fill: var(--accent); opacity: .95; }
+.olw-hol.full    { fill: rgba(255,255,255,.10); }
+.olw-hol.partial { fill: rgba(255,255,255,.05); }
 .olw-bar-hit  { fill: transparent; cursor: pointer; }
 .olw-bar-g:hover .olw-bar-base { opacity: .75; }
 .olw-bar-g:hover .olw-bar-this { opacity: 1; }
@@ -3955,6 +3997,8 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .spark-bar:hover { opacity: .85; }
 .spark-cap { stroke: var(--text-faint); stroke-width: 1; opacity: .55; }
 .spark-cap-label { fill: var(--text-faint); font-size: 9px; }
+.spark-hol.full    { fill: rgba(255,255,255,.10); }
+.spark-hol.partial { fill: rgba(255,255,255,.05); }
 .spark-tick { fill: var(--text-faint); font-size: 9px; }
 .spark-meta { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 .spark-meta .ok { color: var(--ok); }

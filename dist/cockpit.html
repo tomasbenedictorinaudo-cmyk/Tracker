@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-03T23:23:34.857Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-04T10:49:21.329Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3193,6 +3193,29 @@ body.is-card-dragging * { cursor: grabbing !important; }
   color: var(--bad);
 }
 
+/* Holiday editor rows — same visual weight as assignment rows. */
+.holiday-list { display: flex; flex-direction: column; gap: 4px; margin: 4px 0 6px; }
+.holiday-row {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 12px minmax(120px, auto) 1fr 26px;
+  gap: 6px;
+  align-items: center;
+}
+.holiday-row input {
+  padding: 4px 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 12px;
+  color-scheme: dark;
+}
+.holiday-row .holiday-del {
+  padding: 0 8px;
+  color: var(--text-faint);
+}
+.holiday-row .holiday-del:hover { color: var(--bad); }
+
 /* Planner view */
 .planner-picker {
   display: inline-flex;
@@ -3604,6 +3627,23 @@ body.is-card-dragging * { cursor: grabbing !important; }
   stroke-width: 1.5;
 }
 
+/* Holiday bands — grey shade the vacation ranges across Gantt +
+   workload chart + axis. Kept behind bars so bars stay legible. */
+.pln-hol-band {
+  fill: rgba(255,255,255,.06);
+  stroke: none;
+}
+.pln-hol-band-axis {
+  fill: rgba(255,255,255,.28);
+  stroke: none;
+}
+.pln-wl-hol.full {
+  fill: rgba(255,255,255,.10);
+}
+.pln-wl-hol.partial {
+  fill: rgba(255,255,255,.05);
+}
+
 /* Owner-load strip in the action drawer */
 .owner-load-strip {
   background: var(--bg-2);
@@ -3658,6 +3698,8 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .olw-bar-base { fill: var(--accent-2, #8b5cf6); opacity: .55; }
 .olw-bar-base.over { fill: var(--bad); opacity: .55; }
 .olw-bar-this { fill: var(--accent); opacity: .95; }
+.olw-hol.full    { fill: rgba(255,255,255,.10); }
+.olw-hol.partial { fill: rgba(255,255,255,.05); }
 .olw-bar-hit  { fill: transparent; cursor: pointer; }
 .olw-bar-g:hover .olw-bar-base { opacity: .75; }
 .olw-bar-g:hover .olw-bar-this { opacity: 1; }
@@ -3964,6 +4006,8 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .spark-bar:hover { opacity: .85; }
 .spark-cap { stroke: var(--text-faint); stroke-width: 1; opacity: .55; }
 .spark-cap-label { fill: var(--text-faint); font-size: 9px; }
+.spark-hol.full    { fill: rgba(255,255,255,.10); }
+.spark-hol.partial { fill: rgba(255,255,255,.05); }
 .spark-tick { fill: var(--text-faint); font-size: 9px; }
 .spark-meta { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
 .spark-meta .ok { color: var(--ok); }
@@ -10973,10 +11017,18 @@ body.is-row-dragging *        { user-select: none !important; }
     // capacity = person.capacity (also % of FTE — 100 = 1 FTE).
     // Externals (stakeholders) don't have a capacity to compare against
     // and are never surfaced here.
+    // "This week" capacity is prorated by any holiday days that the
+    // person has scheduled during the current Monday-anchored week.
+    const _wlToday = new Date(); _wlToday.setHours(0, 0, 0, 0);
+    const _wlMonday = new Date(_wlToday);
+    while (_wlMonday.getDay() !== 1) _wlMonday.setDate(_wlMonday.getDate() - 1);
     const workload = state.people.map((p) => {
       const owned = acts.filter((a) => a.owner === p.id && !isClosedStatus(a.status));
       const committed = owned.reduce((s, a) => s + (typeof a.commitment === 'number' ? a.commitment : 100), 0);
-      return { id: p.id, name: p.name, committed, openCount: owned.length, capacity: p.capacity || 100 };
+      const baseCap = p.capacity || 100;
+      const workingDays = personWorkingDaysInWeek(p, _wlMonday);
+      const capacity = Math.round(baseCap * (workingDays / 7));
+      return { id: p.id, name: p.name, committed, openCount: owned.length, capacity, onHoliday: workingDays === 0 };
     });
 
     // Urgency — how much of each open action's originally-planned
@@ -20781,6 +20833,105 @@ body.is-row-dragging *        { user-select: none !important; }
   // Hours per FTE-week. Used to convert commitment % → planned hours.
   const HOURS_PER_WEEK = 40;
 
+  /* -------------------- Per-person holiday helpers --------------------
+   *
+   * A person's `holidays` field is an array of inclusive ISO ranges:
+   *   [{ id, start, end, label? }]
+   *
+   * On holiday days the person's effective working hours are 0. All
+   * capacity displays (Planner cap line, workload chart, owner-load
+   * strip, Dashboard workload tile) should prorate weekly capacity by
+   * the number of NON-holiday days in the week. Planner work-end also
+   * extends by the number of holiday days that fall inside the work
+   * window — anchor hours stay pinned, calendar duration grows.
+   *
+   * Weekends are treated as working days (no business-day model here);
+   * only explicit holiday ranges reduce capacity.
+   *
+   * Ranges live per-person; national/bank holidays under
+   * settings.holidayCountries are a separate feature. */
+  function isPersonOnHolidayISO(person, iso) {
+    if (!person || !iso) return false;
+    const hols = person.holidays || [];
+    for (const h of hols) {
+      if (h && h.start && h.end && iso >= h.start && iso <= h.end) return true;
+    }
+    return false;
+  }
+  // Count holiday-day calendar days in [startISO, endISO], both inclusive.
+  function personHolidayDaysInRange(person, startISO, endISO) {
+    if (!person || !startISO || !endISO) return 0;
+    const hols = person.holidays || [];
+    if (!hols.length) return 0;
+    let total = 0;
+    for (const h of hols) {
+      if (!h || !h.start || !h.end) continue;
+      if (h.end < startISO) continue;
+      if (h.start > endISO) continue;
+      const s = h.start < startISO ? startISO : h.start;
+      const e = h.end   > endISO   ? endISO   : h.end;
+      total += Math.max(0, Math.round((parseDate(e) - parseDate(s)) / dayMs) + 1);
+    }
+    return total;
+  }
+  // Working days in a Monday-anchored 7-day week (0..7).
+  function personWorkingDaysInWeek(person, weekStartDate) {
+    if (!person || !weekStartDate) return 7;
+    const startISO = fmtISO(weekStartDate);
+    const endISO = fmtISO(new Date(weekStartDate.getTime() + 6 * dayMs));
+    const holDays = personHolidayDaysInRange(person, startISO, endISO);
+    return Math.max(0, 7 - holDays);
+  }
+  // Prorated cap for a week (hours), given a capacity % (person.capacity
+  // or a per-project assignment.commitment). Returns 0 for fully-vacation
+  // weeks so overload flags trigger.
+  function personWeekCapHours(person, weekStartDate, capPct) {
+    const base = ((capPct || 0) / 100) * HOURS_PER_WEEK;
+    if (base <= 0) return 0;
+    const workingDays = personWorkingDaysInWeek(person, weekStartDate);
+    return base * (workingDays / 7);
+  }
+  // Ranges (from person.holidays) that overlap a viewport [winStart, winEnd]
+  // as Date objects. Returned as ISO strings clipped to the window.
+  function personHolidayRangesOverlappingWindow(person, winStart, winEnd) {
+    if (!person) return [];
+    const hols = person.holidays || [];
+    const winA = fmtISO(winStart), winB = fmtISO(winEnd);
+    const out = [];
+    for (const h of hols) {
+      if (!h || !h.start || !h.end) continue;
+      if (h.end < winA || h.start > winB) continue;
+      out.push({
+        id: h.id,
+        start: h.start < winA ? winA : h.start,
+        end:   h.end   > winB ? winB : h.end,
+        label: h.label || '',
+      });
+    }
+    return out;
+  }
+  // Given a work window [startISO, endISO_inclusive], compute the ISO
+  // date the work actually ends when holidays are honored (work-end
+  // moves right by the number of holiday days that fall inside the
+  // planned working days). Used by the Planner Gantt to compute bar
+  // width. Pass calendarDaysNeeded (bar length ignoring holidays), we
+  // return the effective end ISO.
+  function personWorkEndWithHolidays(person, startISO, calendarDaysNeeded) {
+    const start = parseDate(startISO);
+    let end = new Date(start.getTime() + (calendarDaysNeeded - 1) * dayMs);
+    if (!person || !(person.holidays && person.holidays.length)) return fmtISO(end);
+    // Extend end one holiday-day at a time until the count of working
+    // days between start and end matches calendarDaysNeeded. Cap at
+    // ~2 years so a pathological long vacation doesn't loop forever.
+    for (let guard = 0; guard < 730; guard++) {
+      const hol = personHolidayDaysInRange(person, startISO, fmtISO(end));
+      const workingDays = (Math.round((end - start) / dayMs) + 1) - hol;
+      if (workingDays >= calendarDaysNeeded) break;
+      end = new Date(end.getTime() + dayMs);
+    }
+    return fmtISO(end);
+  }
+
   // Earned-Value Management metric definitions (used for the budget KPI tooltips)
   const EVM_DEFS = {
     BAC: { name: 'Budget at Completion',     formula: 'Σ weekly budget across the horizon',
@@ -21933,6 +22084,8 @@ body.is-row-dragging *        { user-select: none !important; }
     const today = new Date(); today.setHours(0, 0, 0, 0);
     let weekStart = new Date(today);
     while (weekStart.getDay() !== 1) weekStart = new Date(weekStart.getTime() - dayMs);
+    const person = (state.people || []).find((p) => p.id === personId) || null;
+    const capPct = person ? (person.capacity || 100) : 100;
     const out = [];
     for (let w = 0; w < weeks; w++) {
       const wStart = new Date(weekStart.getTime() + w * 7 * dayMs);
@@ -21941,9 +22094,6 @@ body.is-row-dragging *        { user-select: none !important; }
       let commitmentSum = 0;
       state.projects.forEach((proj) => {
         (proj.actions || []).forEach((a) => {
-          // Archived-but-open work still consumes capacity — archiving
-          // hides it from lists, not from a person's real load.
-          // Closed actions (done OR cancelled) don't consume capacity
           if (a.owner !== personId || isClosedStatus(a.status)) return;
           if (!a.due) return;
           const due = parseDate(a.due);
@@ -21955,8 +22105,13 @@ body.is-row-dragging *        { user-select: none !important; }
           }
         });
       });
-      // `count` is now in % of FTE (commitment sum), not action headcount.
-      out.push({ weekStart: wStart, count: commitmentSum, items });
+      // Prorate the week's cap by any holiday days the person has.
+      // capacityPct = person.capacity × (working days / 7). A fully-
+      // vacationed week reports 0 so consumers can flag "over cap"
+      // whenever there's any work.
+      const workingDays = person ? personWorkingDaysInWeek(person, wStart) : 7;
+      const effectiveCapPct = capPct * (workingDays / 7);
+      out.push({ weekStart: wStart, count: commitmentSum, items, capacityPct: effectiveCapPct });
     }
     return out;
   }
@@ -21984,16 +22139,37 @@ body.is-row-dragging *        { user-select: none !important; }
     const yFor = (v) => padT + innerH - (v / maxVal) * innerH;
     const capY = yFor(cap);
 
+    // Per-week cap prorated by holidays. Fully-vacationed weeks read
+    // as "over" for any load and paint a grey band across the column.
+    const wkCaps = series.map((s) => (typeof s.capacityPct === 'number' ? s.capacityPct : cap));
+    const holBands = series.map((s, i) => {
+      const wkCap = wkCaps[i];
+      if (wkCap <= 0) {
+        return `<rect class="spark-hol full" x="${padL + i * barW}" y="${padT}" width="${barW}" height="${innerH}"><title>On holiday · week of ${s.weekStart.toLocaleDateString()}</title></rect>`;
+      }
+      if (wkCap < cap - 0.01) {
+        return `<rect class="spark-hol partial" x="${padL + i * barW}" y="${padT}" width="${barW}" height="${innerH}"><title>Partial holiday · cap ${Math.round(wkCap)}%</title></rect>`;
+      }
+      return '';
+    }).join('');
     const bars = series.map((s, i) => {
       const x = padL + i * barW;
       const y = yFor(s.count);
       const h = padT + innerH - y;
-      const cls = s.count > cap ? 'over' : s.count > cap * 0.8 ? 'warn' : 'ok';
+      const wkCap = wkCaps[i];
+      const cls = wkCap <= 0 && s.count > 0 ? 'over' : s.count > wkCap ? 'over' : s.count > wkCap * 0.8 ? 'warn' : 'ok';
       const label = s.weekStart.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
       const hours = Math.round((s.count / 100) * HOURS_PER_WEEK);
       return `<rect class="spark-bar ${cls}" x="${x + 2}" y="${y}" width="${Math.max(2, barW - 4)}" height="${Math.max(0, h)}" rx="2">
-        <title>Week of ${label} — ${s.count}% FTE (${hours} h) · cap ${cap}%</title>
+        <title>Week of ${label} — ${s.count}% FTE (${hours} h) · cap ${Math.round(wkCap)}%</title>
       </rect>`;
+    }).join('');
+    // Per-week cap line so the cap dips over vacation.
+    const capSegs = series.map((s, i) => {
+      const x1 = padL + i * barW;
+      const x2 = x1 + barW;
+      const y = yFor(wkCaps[i]);
+      return `<line class="spark-cap" x1="${x1}" x2="${x2}" y1="${y}" y2="${y}" stroke-dasharray="4 3" />`;
     }).join('');
 
     const ticks = series.map((s, i) => {
@@ -22007,7 +22183,8 @@ body.is-row-dragging *        { user-select: none !important; }
 
     return `
       <svg class="spark copyable-chart" data-chart="${chartId}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Workload over time">
-        <line class="spark-cap" x1="${padL}" x2="${W - padR}" y1="${capY}" y2="${capY}" stroke-dasharray="4 3" />
+        ${holBands}
+        ${capSegs}
         <text class="spark-cap-label" x="${W - padR - 4}" y="${Math.max(10, capY - 3)}" text-anchor="end">cap ${cap}%</text>
         ${bars}
         ${ticks}
@@ -22609,7 +22786,11 @@ body.is-row-dragging *        { user-select: none !important; }
       const weeks = Math.max(4, Math.round((winEnd.getTime() - winStart.getTime()) / (7 * dayMs)) + 1);
       const buckets = Array.from({ length: weeks }, (_, i) => {
         const s = new Date(winStart.getTime() + i * 7 * dayMs);
-        return { start: s, end: new Date(s.getTime() + 6 * dayMs + (24 * 3600 * 1000 - 1)), base: 0, thisAction: 0, items: [] };
+        // Per-week cap prorated by holidays. Fully-vacationed weeks
+        // have capPct = 0 so any commitment lands as "over".
+        const workingDays = personWorkingDaysInWeek(owner, s);
+        const capPct = capacity * (workingDays / 7);
+        return { start: s, end: new Date(s.getTime() + 6 * dayMs + (24 * 3600 * 1000 - 1)), base: 0, thisAction: 0, items: [], capPct, isHoliday: workingDays === 0, isPartialHoliday: workingDays > 0 && workingDays < 7 };
       });
       // Base — other open actions owned by this person, optionally scoped to current project.
       const curProjId = curProject().id;
@@ -22659,16 +22840,25 @@ body.is-row-dragging *        { user-select: none !important; }
         const baseHeight = padT + innerH - yBase;
         const overHeight = Math.max(0, yBase - yTop);
         const total = b.base + b.thisAction;
-        const overCap = total > capacity;
+        const overCap = total > b.capPct;
+        const holBand = b.isHoliday
+          ? `<rect class="olw-hol full" x="${xFor(i)}" y="${padT}" width="${groupW}" height="${innerH}"><title>On holiday · week of ${b.start.toLocaleDateString()}</title></rect>`
+          : b.isPartialHoliday
+            ? `<rect class="olw-hol partial" x="${xFor(i)}" y="${padT}" width="${groupW}" height="${innerH}"><title>Partial holiday · cap ${Math.round(b.capPct)}%</title></rect>`
+            : '';
         return `<g class="olw-bar-g" data-w="${i}">
+          ${holBand}
           <rect class="olw-bar-hit" x="${xFor(i)}" y="${padT}" width="${groupW}" height="${innerH}" />
           <rect class="olw-bar-base ${overCap ? 'over' : ''}" x="${xFor(i) + 1.5}" y="${yBase}" width="${barW - 3}" height="${Math.max(0, baseHeight)}" rx="1"></rect>
           <rect class="olw-bar-this" x="${xFor(i) + 1.5}" y="${yTop}" width="${barW - 3}" height="${overHeight}" rx="1"></rect>
-          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.base}% + this ${b.thisAction}% = ${total}%</title>
+          <title>Week of ${b.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} — ${b.base}% + this ${b.thisAction}% = ${total}% · cap ${Math.round(b.capPct)}%</title>
         </g>`;
       }).join('');
-      const capY = yFor(capacity);
-      const capLine = `<line class="olw-cap" x1="${padL}" x2="${W - padR}" y1="${capY}" y2="${capY}" />`;
+      // Cap line — one segment per bucket so it dips over vacation.
+      const capLine = buckets.map((b, i) => {
+        const y = yFor(b.capPct);
+        return `<line class="olw-cap" x1="${xFor(i)}" x2="${xFor(i) + groupW}" y1="${y}" y2="${y}" />`;
+      }).join('');
       // Action-window bracket + drag handles.
       const startBucketIdx = buckets.findIndex((b) => start <= b.end && start >= b.start);
       const dueBucketIdx = buckets.findIndex((b) => due <= b.end && due >= b.start);
@@ -24252,6 +24442,7 @@ body.is-row-dragging *        { user-select: none !important; }
     const p = state.people.find((x) => x.id === personId);
     if (!p) return;
     p.assignments = Array.isArray(p.assignments) ? p.assignments : [];
+    p.holidays = Array.isArray(p.holidays) ? p.holidays : [];
     const projectRow = (proj) => {
       const existing = p.assignments.find((a) => a.projectId === proj.id);
       const val = existing ? existing.commitment : 0;
@@ -24263,6 +24454,14 @@ body.is-row-dragging *        { user-select: none !important; }
         </div>`;
     };
     const visibleProjects = state.projects.filter((pr) => !pr.archived);
+    const holidayRow = (h) => `
+      <div class="holiday-row" data-holiday-id="${escapeHTML(h.id)}">
+        <input type="date" class="holiday-start" value="${escapeHTML(h.start || '')}" title="Start (inclusive)" />
+        <span class="muted" aria-hidden="true">→</span>
+        <input type="date" class="holiday-end" value="${escapeHTML(h.end || '')}" title="End (inclusive)" />
+        <input type="text" class="holiday-label" placeholder="Label (optional)" value="${escapeHTML(h.label || '')}" />
+        <button type="button" class="ghost holiday-del" title="Remove holiday" aria-label="Remove">×</button>
+      </div>`;
     $('#drawerTitle').textContent = 'Edit person';
     $('#drawerBody').innerHTML = `
       <div class="field"><label>Name</label><input id="pEdName" value="${escapeHTML(p.name)}" /></div>
@@ -24278,6 +24477,14 @@ body.is-row-dragging *        { user-select: none !important; }
         <div class="assign-list">
           ${visibleProjects.length ? visibleProjects.map(projectRow).join('') : '<div class="empty">No live projects to assign to.</div>'}
         </div>
+      </div>
+      <div class="field">
+        <label>Holidays <span class="muted">— days when this person cannot work</span></label>
+        <div class="assign-hint">The Planner extends work-ends across these ranges, and every capacity display drops the weekly cap to 0 on holiday days.</div>
+        <div class="holiday-list" id="pEdHolidays">
+          ${p.holidays.length ? p.holidays.map(holidayRow).join('') : '<div class="empty pln-empty-holidays">No holidays set.</div>'}
+        </div>
+        <button type="button" class="ghost" id="pEdHolidayAdd">+ Add holiday</button>
       </div>
       <div style="display:flex; gap:8px; margin-top:6px;">
         <button class="primary" id="pEdSave">Save</button>
@@ -24300,6 +24507,31 @@ body.is-row-dragging *        { user-select: none !important; }
     document.querySelectorAll('#drawerBody .assign-input').forEach((inp) => inp.addEventListener('input', refreshSum));
     $('#pEdCap').addEventListener('input', refreshSum);
     refreshSum();
+    // Holiday editor — add row + remove row, wired with delegation so
+    // freshly-added rows behave without re-wiring.
+    const holList = $('#pEdHolidays');
+    const addHolidayRowInline = (h) => {
+      const empty = holList.querySelector('.pln-empty-holidays');
+      if (empty) empty.remove();
+      const wrap = document.createElement('div');
+      wrap.innerHTML = holidayRow(h).trim();
+      holList.appendChild(wrap.firstElementChild);
+    };
+    $('#pEdHolidayAdd')?.addEventListener('click', () => {
+      const today = new Date();
+      const start = fmtISO(today);
+      const end = fmtISO(new Date(today.getTime() + 6 * dayMs));
+      addHolidayRowInline({ id: uid('hol'), start, end, label: '' });
+    });
+    holList?.addEventListener('click', (e) => {
+      if (e.target?.classList?.contains('holiday-del')) {
+        const row = e.target.closest('.holiday-row');
+        row?.remove();
+        if (!holList.querySelector('.holiday-row')) {
+          holList.innerHTML = '<div class="empty pln-empty-holidays">No holidays set.</div>';
+        }
+      }
+    });
     $('#pEdSave').addEventListener('click', () => {
       const oldName = p.name;
       p.name = $('#pEdName').value.trim() || p.name;
@@ -24314,6 +24546,18 @@ body.is-row-dragging *        { user-select: none !important; }
         if (commitment > 0) newAssignments.push({ projectId, commitment });
       });
       p.assignments = newAssignments;
+      // Holidays — collect from the editor. Drop rows with missing
+      // start or end; normalizer will swap swapped endpoints.
+      const newHolidays = [];
+      document.querySelectorAll('#drawerBody .holiday-row').forEach((row) => {
+        const start = row.querySelector('.holiday-start')?.value || '';
+        const end = row.querySelector('.holiday-end')?.value || '';
+        if (!start || !end) return;
+        const label = (row.querySelector('.holiday-label')?.value || '').trim();
+        const id = row.dataset.holidayId || uid('hol');
+        newHolidays.push({ id, start, end, label });
+      });
+      p.holidays = newHolidays;
       commit('person-edit');
       closeDrawer();
       toast(oldName !== p.name ? 'Renamed to ' + p.name : 'Saved');
@@ -25058,6 +25302,17 @@ body.is-row-dragging *        { user-select: none !important; }
       p.assignments = p.assignments.filter((a) => a && typeof a.projectId === 'string' && a.projectId);
       p.assignments.forEach((a) => {
         a.commitment = Math.max(0, Math.min(100, Number(a.commitment) || 0));
+      });
+      // Per-person vacation ranges. Shape: [{ id, start, end, label? }],
+      // ISO dates, both endpoints inclusive. Zero working-hours for
+      // the person during these ranges — the Planner + workload +
+      // Dashboard tiles all consume this via personHolidayHelpers().
+      if (!Array.isArray(p.holidays)) p.holidays = [];
+      p.holidays = p.holidays.filter((h) => h && typeof h.start === 'string' && typeof h.end === 'string' && h.start && h.end);
+      p.holidays.forEach((h) => {
+        h.id = h.id || uid('hol');
+        if (h.end < h.start) { const s0 = h.start; h.start = h.end; h.end = s0; }
+        if (typeof h.label !== 'string') h.label = '';
       });
     });
     // Stakeholders — external contacts (customer POCs, regulators, sister
@@ -29279,14 +29534,17 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const asg = (person.assignments || []).find((a) => a && a.projectId === curProjId);
       if (asg && typeof asg.commitment === 'number') capPct = asg.commitment;
     }
-    const cap = (capPct / 100) * HOURS_PER_WEEK;
-    if (cap <= 0) return empty;
+    const capBase = (capPct / 100) * HOURS_PER_WEEK;
+    if (capBase <= 0) return empty;
     const today = new Date(); today.setHours(0, 0, 0, 0);
     const monday = new Date(today);
     while (monday.getDay() !== 1) monday.setDate(monday.getDate() - 1);
     const weekStarts = [];
     for (let i = 0; i < 12; i++) weekStarts.push(new Date(monday.getTime() + i * 7 * dayMs));
     const weekHours = weekStarts.map(() => 0);
+    // Per-week prorated cap — 0 for weeks the person is fully on
+    // holiday. Overload = workload > this week's cap.
+    const weekCaps = weekStarts.map((w) => personWeekCapHours(person, w, capPct));
     for (const proj of (state.projects || [])) {
       if (!proj || proj.archived) continue;
       if (scope === 'project' && proj.id !== curProjId) continue;
@@ -29302,22 +29560,36 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
         const startD = a.startDate ? parseDate(a.startDate) : (a.due ? new Date(parseDate(a.due).getTime() - (daysNeeded - 1) * dayMs) : null);
         if (!startD) continue;
-        const endD = new Date(startD.getTime() + (daysNeeded - 1) * dayMs);
-        const perDayHours = hours / daysNeeded;
+        // Effective end — extended across the person's holidays so
+        // hours smear over the calendar honestly.
+        const startISO = fmtISO(startD);
+        const effEndISO = personWorkEndWithHolidays(person, startISO, daysNeeded);
+        const endD = parseDate(effEndISO);
+        const spanDays = Math.max(1, Math.round((endD - startD) / dayMs) + 1);
+        const perDayHours = hours / Math.max(1, daysNeeded);
         weekStarts.forEach((wStart, i) => {
           const wEnd = new Date(wStart.getTime() + 7 * dayMs);
           const overlapStart = Math.max(startD.getTime(), wStart.getTime());
           const overlapEnd = Math.min(endD.getTime() + dayMs, wEnd.getTime());
           if (overlapEnd <= overlapStart) return;
+          const overlapStartISO = fmtISO(new Date(overlapStart));
+          const overlapEndISO = fmtISO(new Date(overlapEnd - dayMs));
           const overlapDays = (overlapEnd - overlapStart) / dayMs;
-          weekHours[i] += overlapDays * perDayHours;
+          const holDaysInOverlap = personHolidayDaysInRange(person, overlapStartISO, overlapEndISO);
+          const workingOverlap = Math.max(0, overlapDays - holDaysInOverlap);
+          weekHours[i] += workingOverlap * perDayHours;
         });
       }
     }
-    const peak = weekHours.length ? Math.max(...weekHours) : 0;
-    const peakPct = Math.round((peak / cap) * 100);
-    const weekPcts = weekHours.map((h) => Math.round((h / cap) * 100));
-    return { over: peak > cap, severe: peak > cap * 1.5, peakPct, weekPcts };
+    // Ratios per week vs the prorated cap; guard divide-by-zero when
+    // that week's cap is 0 (all holiday) — any workload = severe.
+    const weekPcts = weekHours.map((h, i) => {
+      const c = weekCaps[i];
+      if (c <= 0) return h > 0 ? 999 : 0;
+      return Math.round((h / c) * 100);
+    });
+    const peakPct = weekPcts.length ? Math.max(...weekPcts) : 0;
+    return { over: peakPct > 100, severe: peakPct > 150, peakPct, weekPcts };
   }
   function renderPlanner(root) {
     _plannerInit();
@@ -29532,7 +29804,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         }
         return it;
       });
-      const html = _plannerWorkloadHTML(substituted, null, winStartClosure, winEndClosure, dayWClosure, capacityHoursClosure);
+      const html = _plannerWorkloadHTML(substituted, null, winStartClosure, winEndClosure, dayWClosure, capacityHoursClosure, person, capacityPct);
       // Preserve highlight
       const prevHl = s.highlightedActionId;
       wl.outerHTML = html;
@@ -29873,7 +30145,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const hoursRaw = _plannerEffectiveHours(a);
       const weeksNeeded = hoursRaw / ((commitment / 100) * HOURS_PER_WEEK);
       const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
-      const workEnd = fmtISO(new Date(parseDate(workStart).getTime() + (daysNeeded - 1) * dayMs));
+      // Extend work-end across any of this person's holidays that
+      // fall inside the working window. Anchor hours stay pinned.
+      const workEnd = personWorkEndWithHolidays(person, workStart, daysNeeded);
       const barX = clampX(xFor(workStart));
       const barX2 = clampX(xFor(workEnd));
       const barW  = Math.max(4, barX2 - barX);
@@ -30000,6 +30274,21 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         }
       }
     }
+    // Holiday bands — grey vertical strips across the whole grid for
+    // every vacation range that overlaps the window.
+    const gantHolidayBands = personHolidayRangesOverlappingWindow(person, winStart, winEnd).map((h) => {
+      const x1 = Math.max(0, Math.round(((parseDate(h.start) - winStart) / dayMs) * dayW));
+      const x2 = Math.min(chartW, Math.round(((parseDate(h.end).getTime() + dayMs - winStart.getTime()) / dayMs) * dayW));
+      const w = Math.max(1, x2 - x1);
+      const label = h.label ? escapeHTML(h.label) : 'On holiday';
+      return `<rect class="pln-hol-band" x="${x1}" y="0" width="${w}" height="${bars.length * rowH}"><title>${label} · ${h.start} → ${h.end}</title></rect>`;
+    }).join('');
+    // Small axis marker
+    const axisHolidayBands = personHolidayRangesOverlappingWindow(person, winStart, winEnd).map((h) => {
+      const x1 = Math.max(0, Math.round(((parseDate(h.start) - winStart) / dayMs) * dayW));
+      const x2 = Math.min(chartW, Math.round(((parseDate(h.end).getTime() + dayMs - winStart.getTime()) / dayMs) * dayW));
+      return `<rect class="pln-hol-band-axis" x="${x1}" y="12" width="${Math.max(1, x2 - x1)}" height="4" />`;
+    }).join('');
 
     // Row backgrounds and bar SVG
     const rowsHTML = bars.map((row, i) => {
@@ -30061,18 +30350,20 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         <div class="planner-scroll" id="plnScroll" data-day-w="${dayW}" data-win-start="${fmtISO(winStart)}" data-chart-w="${chartW}">
           <div class="planner-axis" style="padding-left:${LABEL_COL_W + LABEL_GAP}px">
             <svg viewBox="0 0 ${chartW} 16" width="${chartW}" height="16" class="pln-axis-svg">
+              ${axisHolidayBands}
               ${monthLabels.join('')}
               ${todayX != null ? `<line x1="${todayX}" x2="${todayX}" y1="0" y2="16" class="pln-today" />` : ''}
             </svg>
           </div>
           <div class="planner-grid" style="width:${LABEL_COL_W + LABEL_GAP + chartW}px">
             <svg viewBox="0 0 ${chartW} ${bars.length * rowH}" width="${chartW}" height="${bars.length * rowH}" class="pln-grid-svg" preserveAspectRatio="none" style="left:${LABEL_COL_W + LABEL_GAP}px; width:${chartW}px">
+              ${gantHolidayBands}
               ${gridLines.join('')}
               ${todayX != null ? `<line x1="${todayX}" x2="${todayX}" y1="0" y2="${bars.length * rowH}" class="pln-today-full" />` : ''}
             </svg>
             <div class="planner-rows">${rowsHTML}</div>
           </div>
-          ${_plannerWorkloadHTML(items, bars, winStart, winEnd, dayW, weeklyCapHours)}
+          ${_plannerWorkloadHTML(items, bars, winStart, winEnd, dayW, weeklyCapHours, person, capacityPct)}
         </div>
       </div>
     `;
@@ -30080,15 +30371,13 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
 
   // Bottom half — stacked weekly workload bars per action, capacity line.
   // Same time window as the Gantt on top.
-  function _plannerWorkloadHTML(items, _unusedBars, winStart, winEnd, dayW, capHours) {
+  function _plannerWorkloadHTML(items, _unusedBars, winStart, winEnd, dayW, capHours, person, capPct) {
     const totalDays = Math.round((winEnd - winStart) / dayMs);
     const chartW = totalDays * dayW;
-    // Natural-pixel geometry — no CSS stretching so text stays undistorted.
     const chartH = 148;
     const padTop = 14, padBottom = 22, padLeft = 4, padRight = 4;
     const plotH = chartH - padTop - padBottom;
 
-    // Bucket weeks — Monday-anchored.
     const weeks = [];
     let cursor = new Date(winStart.getTime());
     while (cursor.getDay() !== 1) cursor.setDate(cursor.getDate() + 1);
@@ -30098,42 +30387,52 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       cursor = next;
     }
 
-    // Reconstruct bar-like structs from raw items so both first-render
-    // and drag-live-update flows share the same logic.
+    // Per-week cap prorated for the person's holidays. Falls back to a
+    // flat capHours if no person is passed (legacy call sites).
+    const weekCaps = person && capPct != null
+      ? weeks.map((w) => personWeekCapHours(person, w.start, capPct))
+      : weeks.map(() => capHours);
+
     const actions = items.map(({ a, project }) => {
       if (!a.due) return null;
       const workStart = a.startDate || fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs));
-      const workEnd = a.due;
-      const hours = _plannerEffectiveHours(a);
-      return { a, project, workStart, workEnd, hours, color: colorFor(a.id) };
+      // Effective work-end honors holidays so hours spread realistically.
+      const hoursRaw = _plannerEffectiveHours(a);
+      const commitmentPct = typeof a.commitment === 'number' ? a.commitment : 100;
+      const weeksNeeded = hoursRaw / ((commitmentPct / 100) * HOURS_PER_WEEK);
+      const daysNeeded = Math.max(1, Math.ceil(weeksNeeded * 7));
+      const workEnd = person
+        ? personWorkEndWithHolidays(person, workStart, daysNeeded)
+        : fmtISO(new Date(parseDate(workStart).getTime() + (daysNeeded - 1) * dayMs));
+      return { a, project, workStart, workEnd, hours: hoursRaw, workingDays: daysNeeded, color: colorFor(a.id) };
     }).filter(Boolean);
 
-    // Per-week per-action hours.
+    // Per-week per-action hours. Holiday days inside an overlap
+    // contribute 0 to the workload, matching "person can't work".
     const weekHours = weeks.map(() => actions.map(() => 0));
     actions.forEach((row, aIdx) => {
       const startD = parseDate(row.workStart);
       const endD = parseDate(row.workEnd);
-      const spanDays = Math.max(1, Math.round((endD - startD) / dayMs) + 1);
-      const perDayHours = row.hours / spanDays;
+      const perDayHours = row.hours / Math.max(1, row.workingDays);
       weeks.forEach((w, wIdx) => {
         const overlapStart = Math.max(startD.getTime(), w.start.getTime());
         const overlapEnd = Math.min(endD.getTime() + dayMs, w.end.getTime());
         if (overlapEnd <= overlapStart) return;
         const overlapDays = (overlapEnd - overlapStart) / dayMs;
-        weekHours[wIdx][aIdx] = overlapDays * perDayHours;
+        const overlapStartISO = fmtISO(new Date(overlapStart));
+        const overlapEndISO = fmtISO(new Date(overlapEnd - dayMs));
+        const holDays = person ? personHolidayDaysInRange(person, overlapStartISO, overlapEndISO) : 0;
+        const workingOverlap = Math.max(0, overlapDays - holDays);
+        weekHours[wIdx][aIdx] = workingOverlap * perDayHours;
       });
     });
 
-    // Y-scale — round the max up to a nice number and always leave
-    // headroom above capacity so overflow reads clearly.
     const weekTotals = weekHours.map((wh) => wh.reduce((s, h) => s + h, 0));
     const rawMax = Math.max(capHours * 1.25, ...weekTotals, 1);
     const niceMax = Math.ceil(rawMax / 20) * 20;
     const yFor = (h) => padTop + plotH * (1 - h / niceMax);
     const barW = Math.max(6, dayW * 7 - 6);
 
-    // Grid — one gridline per 20h step (or per cap-fraction when cap is
-    // small). Keeps the plot readable without a Y-axis.
     const gridStep = niceMax >= 60 ? 20 : Math.round(capHours / 2);
     const gridMarks = [];
     for (let h = gridStep; h <= niceMax; h += gridStep) {
@@ -30141,11 +30440,29 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       gridMarks.push(`<line class="pln-wl-grid" x1="${padLeft}" x2="${chartW - padRight}" y1="${y}" y2="${y}" />`);
     }
 
-    // Stacked bars. Insetting each segment by 0.5px vertically gives a
-    // hairline gap without needing a stroke.
+    // Holiday shading — grey band across weeks that are fully vacation,
+    // and a lighter tint for weeks with any holiday days at all.
+    const holidayBands = person
+      ? weeks.map((w, wIdx) => {
+          const c = weekCaps[wIdx];
+          const base = ((capPct || 0) / 100) * HOURS_PER_WEEK;
+          if (base <= 0) return '';
+          const x0 = Math.round(((w.start.getTime() - winStart.getTime()) / dayMs) * dayW);
+          const xW = Math.round(dayW * 7);
+          if (c <= 0) {
+            return `<rect class="pln-wl-hol full" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}"><title>On holiday · week of ${fmtISO(w.start)}</title></rect>`;
+          }
+          if (c < base - 0.01) {
+            return `<rect class="pln-wl-hol partial" x="${x0}" y="${padTop}" width="${xW}" height="${plotH}"><title>Partial holiday · week of ${fmtISO(w.start)} · cap ${Math.round(c)}h</title></rect>`;
+          }
+          return '';
+        }).join('')
+      : '';
+
     const stacks = weeks.map((w, wIdx) => {
       const x0 = Math.round(((w.start.getTime() - winStart.getTime()) / dayMs) * dayW) + 3;
       let cum = 0;
+      const wkCap = weekCaps[wIdx];
       const segs = actions.map((row, aIdx) => {
         const h = weekHours[wIdx][aIdx];
         if (h < 0.01) return '';
@@ -30153,14 +30470,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         cum += h;
         const yTop = yFor(cum);
         const hPx = Math.max(1, yBottom - yTop - 0.5);
-        const isOver = cum > capHours;
+        const isOver = cum > wkCap;
         return `<rect class="pln-wl-seg ${isOver ? 'is-over-cap' : ''}" x="${x0}" y="${yTop}" width="${barW}" height="${hPx}" rx="1.5" fill="rgba(${row.color.rgb},.85)" data-action-id="${escapeHTML(row.a.id)}" data-week-idx="${wIdx}"><title>${escapeHTML(row.a.title)} · week of ${fmtISO(w.start)} · ${Math.round(h)}h</title></rect>`;
       }).join('');
       const totalH = weekTotals[wIdx];
-      // Only label totals when the stack is tall enough to warrant it
-      // AND wide enough to fit the number without overlap.
       const showTotal = totalH >= 3 && barW >= 20;
-      const totalLabelCls = totalH > capHours ? 'over' : '';
+      const totalLabelCls = totalH > wkCap ? 'over' : '';
       const totalLabel = showTotal
         ? `<text class="pln-wl-total-label ${totalLabelCls}" x="${x0 + barW/2}" y="${Math.max(padTop + 8, yFor(totalH) - 4)}" text-anchor="middle">${Math.round(totalH)}h</text>`
         : '';
@@ -30168,11 +30483,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       return segs + totalLabel + weekLabel;
     }).join('');
 
-    // Capacity line — no in-chart label; the header badge already shows
-    // the value, and any pill collides with a first-week total that
-    // matches capacity.
-    const capY = yFor(capHours);
-    const capLine = `<line class="pln-wl-cap-line" x1="${padLeft}" x2="${chartW - padRight}" y1="${capY}" y2="${capY}"><title>Capacity: ${Math.round(capHours)}h/week</title></line>`;
+    // Capacity line — one segment per week so it dips over vacation.
+    const capSegments = weeks.map((w, wIdx) => {
+      const y = yFor(weekCaps[wIdx]);
+      const x1 = Math.round(((w.start.getTime() - winStart.getTime()) / dayMs) * dayW);
+      const x2 = x1 + Math.round(dayW * 7);
+      return `<line class="pln-wl-cap-line" x1="${x1}" x2="${x2}" y1="${y}" y2="${y}"><title>Capacity · ${Math.round(weekCaps[wIdx])}h/week</title></line>`;
+    }).join('');
+    const capLine = capSegments;
 
     // Legend from actions (top 6 by total hours). Keep it compact.
     const withTotals = actions.map((row, aIdx) => ({
@@ -30201,6 +30519,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         </div>
         <div class="pln-wl-chart" style="width:${chartW}px; height:${chartH}px; margin-left:${LABEL_COL_W + LABEL_GAP}px">
           <svg width="${chartW}" height="${chartH}" viewBox="0 0 ${chartW} ${chartH}" class="pln-wl-svg">
+            ${holidayBands}
             ${gridMarks.join('')}
             ${stacks}
             ${capLine}
