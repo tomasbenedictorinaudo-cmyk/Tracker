@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-04T11:43:20.837Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-04T11:51:08.776Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -30338,7 +30338,17 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const totalDelta = e.clientX - drag.pressX;
     if (!drag.dragged && Math.abs(totalDelta) < 3) return;
     drag.dragged = true;
-    const deltaDays = Math.round(totalDelta / dayW);
+
+    // Two flavors of "delta":
+    //   deltaPx   — raw fractional pixel delta from mousedown → used
+    //               ONLY for the bar's visual x/width so the drag feels
+    //               smooth. No day rounding, no jumps.
+    //   deltaDays — rounded whole-day delta → used for date/commitment
+    //               values (which live on day boundaries). Text labels
+    //               tick over day-by-day; this matches how the model
+    //               stores time and is expected UX.
+    const deltaPx = totalDelta;
+    const deltaDays = Math.round(deltaPx / dayW);
     const startD = parseDate(drag.startISO);
     const endD = parseDate(drag.endISO);
 
@@ -30346,20 +30356,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     let newEnd = drag.endISO;
 
     if (drag.zone === 'body') {
-      // Shift the whole work window. Commitment untouched → workEnd
-      // shifts by the same amount as start.
       newStart = fmtISO(new Date(startD.getTime() + deltaDays * dayMs));
       newEnd = fmtISO(new Date(endD.getTime() + deltaDays * dayMs));
     } else if (drag.zone === 'left') {
-      // Reshape from the left. Bar's right edge (workEnd) stays put;
-      // start moves and commitment adjusts to preserve plannedHours.
       let ns = new Date(startD.getTime() + deltaDays * dayMs);
       const maxNs = new Date(endD.getTime() - dayMs);
       if (ns > maxNs) ns = maxNs;
       newStart = fmtISO(ns);
     } else if (drag.zone === 'right') {
-      // Reshape from the right. Start stays put; work-end moves and
-      // commitment adjusts. NEVER touches the due date.
       let ne = new Date(endD.getTime() + deltaDays * dayMs);
       const minNe = new Date(startD.getTime() + dayMs);
       if (ne < minNe) ne = minNe;
@@ -30371,9 +30375,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const spanDays = Math.max(1, Math.round((parseDate(newEnd) - parseDate(newStart)) / dayMs) + 1);
       const weeks = spanDays / 7;
       newCommitment = Math.round((drag.anchorHours / (HOURS_PER_WEEK * weeks)) * 100);
-      // Soft ceiling — commitment can go past 200 %, just visualizes
-      // as "extreme". Only hard clamp at 500 % to prevent unrenderable
-      // states / infinite tiny bars.
       if (newCommitment > 500) newCommitment = 500;
     }
 
@@ -30381,40 +30382,51 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     drag.newEndISO = newEnd;
     drag.newCommitment = newCommitment;
 
-    const dayToX = (iso) => {
-      const t = parseDate(iso).getTime();
-      return Math.round(((t - winStart.getTime()) / dayMs) * dayW);
-    };
-    const x1 = dayToX(newStart);
-    const x2 = dayToX(newEnd);
-    const w = Math.max(4, x2 - x1);
+    // --- VISUAL positions (fractional pixels) ---
+    // Anchor to the bar's original x/width and shift by raw pixel delta
+    // so the drag tracks the cursor 1:1.
+    const dayToXf = (iso) => ((parseDate(iso).getTime() - winStart.getTime()) / dayMs) * dayW;
+    const origX1 = dayToXf(drag.startISO);
+    const origX2 = dayToXf(drag.endISO);
+    let dispX1 = origX1;
+    let dispX2 = origX2;
+    if (drag.zone === 'body') {
+      dispX1 = origX1 + deltaPx;
+      dispX2 = origX2 + deltaPx;
+    } else if (drag.zone === 'left') {
+      dispX1 = origX1 + deltaPx;
+      // Clamp: at least 1 day of width remains
+      if (dispX1 > dispX2 - dayW) dispX1 = dispX2 - dayW;
+    } else if (drag.zone === 'right') {
+      dispX2 = origX2 + deltaPx;
+      if (dispX2 < dispX1 + dayW) dispX2 = dispX1 + dayW;
+    }
+    const w = Math.max(4, dispX2 - dispX1);
     if (drag.bar) {
-      drag.bar.setAttribute('x', x1);
+      drag.bar.setAttribute('x', dispX1);
       drag.bar.setAttribute('width', w);
     }
     if (drag.label) {
-      drag.label.setAttribute('x', x1 + w / 2);
+      drag.label.setAttribute('x', dispX1 + w / 2);
       drag.label.textContent = `${newCommitment}%`;
     }
     if (drag.handleLeft) {
       const hw = Math.min(8, w / 3);
-      drag.handleLeft.setAttribute('x', x1 - 2);
+      drag.handleLeft.setAttribute('x', dispX1 - 2);
       drag.handleLeft.setAttribute('width', hw);
     }
     if (drag.handleRight) {
       const hw = Math.min(8, w / 3);
-      drag.handleRight.setAttribute('x', x1 + w - hw + 2);
+      drag.handleRight.setAttribute('x', dispX1 + w - hw + 2);
       drag.handleRight.setAttribute('width', hw);
     }
-    // Due-glyph never moves — the whole point of this drag model is
-    // that the due date is fixed by the customer, not by the plan.
+    // Due-glyph never moves.
     if (drag.group) {
       drag.group.classList.toggle('is-over-cap', newCommitment > 100);
       drag.group.classList.toggle('is-way-over-cap', newCommitment > 150);
       drag.group.classList.toggle('is-extreme-cap', newCommitment > 200);
     }
     if (drag.badgeEl && drag.dueISO) {
-      // Margin = fixed due minus the live work-end.
       const marginDays = Math.round((parseDate(drag.dueISO) - parseDate(newEnd)) / dayMs);
       drag.badgeEl.innerHTML = marginDays > 0
         ? `<span class="pln-margin ok">+${marginDays}d</span>`
@@ -30422,7 +30434,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           ? `<span class="pln-margin bad">${marginDays}d</span>`
           : `<span class="pln-margin warn">±0d</span>`;
     }
-    // Also update the workload chart live if it's mounted.
     _plannerLiveUpdateWorkload();
   });
   window.addEventListener('mouseup', () => {
