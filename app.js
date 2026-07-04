@@ -13286,23 +13286,29 @@
       return `<line class="spark-cap" x1="${x1}" x2="${x2}" y1="${y}" y2="${y}" stroke-dasharray="4 3" />`;
     }).join('');
 
-    const ticks = series.map((s, i) => {
-      // Show monthly tick + label at month start
+    // Tick labels rendered as HTML overlays (positioned by percent) so
+    // they render at their natural aspect regardless of the SVG's
+    // non-uniform stretch. Same for the cap label.
+    const tickHtml = series.map((s, i) => {
       const isMonthStart = s.weekStart.getDate() <= 7;
       if (!isMonthStart) return '';
-      const x = padL + i * barW + barW / 2;
+      const leftPct = ((padL + i * barW + barW / 2) / W) * 100;
       const lbl = s.weekStart.toLocaleDateString(undefined, { month: 'short' });
-      return `<text class="spark-tick" x="${x}" y="${H - 2}" text-anchor="middle">${lbl}</text>`;
+      return `<span class="spark-tick-html" style="left:${leftPct}%">${escapeHTML(lbl)}</span>`;
     }).join('');
+    const capLeftPct = ((W - padR - 4) / W) * 100;
+    const capTopPct = (Math.max(10, capY - 3) / H) * 100;
 
     return `
-      <svg class="spark copyable-chart" data-chart="${chartId}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Workload over time">
-        ${holBands}
-        ${capSegs}
-        <text class="spark-cap-label" x="${W - padR - 4}" y="${Math.max(10, capY - 3)}" text-anchor="end">cap ${cap}%</text>
-        ${bars}
-        ${ticks}
-      </svg>`;
+      <div class="spark-frame">
+        <svg class="spark copyable-chart" data-chart="${chartId}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Workload over time">
+          ${holBands}
+          ${capSegs}
+          ${bars}
+        </svg>
+        <span class="spark-cap-label-html" style="left:${capLeftPct}%; top:${capTopPct}%">cap ${cap}%</span>
+        <div class="spark-ticks-html">${tickHtml}</div>
+      </div>`;
   }
 
   function renderPeople(root) {

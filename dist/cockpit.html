@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-04T11:38:22.507Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-04T11:40:44.128Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -4161,6 +4161,38 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .spark-bar:hover { opacity: .85; }
 .spark-cap { stroke: var(--text-faint); stroke-width: 1; opacity: .55; }
 .spark-cap-label { fill: var(--text-faint); font-size: 9px; }
+/* Sparkline HTML overlays — tick labels and cap label live outside
+   the SVG so they render at natural aspect ratio even though the
+   SVG bars use preserveAspectRatio="none". */
+.spark-frame {
+  position: relative;
+  width: 100%;
+  height: 70px;
+}
+.spark-frame .spark { width: 100%; height: 100%; }
+.spark-ticks-html {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 12px;
+  pointer-events: none;
+}
+.spark-tick-html {
+  position: absolute;
+  bottom: 0;
+  transform: translateX(-50%);
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 12px;
+  white-space: nowrap;
+}
+.spark-cap-label-html {
+  position: absolute;
+  transform: translate(-100%, -100%);
+  color: var(--text-faint);
+  font-size: 9px;
+  pointer-events: none;
+  white-space: nowrap;
+}
 .spark-hol.full    { fill: rgba(255,255,255,.10); }
 .spark-hol.partial { fill: rgba(255,255,255,.05); }
 .spark-tick { fill: var(--text-faint); font-size: 9px; }
@@ -22341,23 +22373,29 @@ body.is-row-dragging *        { user-select: none !important; }
       return `<line class="spark-cap" x1="${x1}" x2="${x2}" y1="${y}" y2="${y}" stroke-dasharray="4 3" />`;
     }).join('');
 
-    const ticks = series.map((s, i) => {
-      // Show monthly tick + label at month start
+    // Tick labels rendered as HTML overlays (positioned by percent) so
+    // they render at their natural aspect regardless of the SVG's
+    // non-uniform stretch. Same for the cap label.
+    const tickHtml = series.map((s, i) => {
       const isMonthStart = s.weekStart.getDate() <= 7;
       if (!isMonthStart) return '';
-      const x = padL + i * barW + barW / 2;
+      const leftPct = ((padL + i * barW + barW / 2) / W) * 100;
       const lbl = s.weekStart.toLocaleDateString(undefined, { month: 'short' });
-      return `<text class="spark-tick" x="${x}" y="${H - 2}" text-anchor="middle">${lbl}</text>`;
+      return `<span class="spark-tick-html" style="left:${leftPct}%">${escapeHTML(lbl)}</span>`;
     }).join('');
+    const capLeftPct = ((W - padR - 4) / W) * 100;
+    const capTopPct = (Math.max(10, capY - 3) / H) * 100;
 
     return `
-      <svg class="spark copyable-chart" data-chart="${chartId}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Workload over time">
-        ${holBands}
-        ${capSegs}
-        <text class="spark-cap-label" x="${W - padR - 4}" y="${Math.max(10, capY - 3)}" text-anchor="end">cap ${cap}%</text>
-        ${bars}
-        ${ticks}
-      </svg>`;
+      <div class="spark-frame">
+        <svg class="spark copyable-chart" data-chart="${chartId}" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="Workload over time">
+          ${holBands}
+          ${capSegs}
+          ${bars}
+        </svg>
+        <span class="spark-cap-label-html" style="left:${capLeftPct}%; top:${capTopPct}%">cap ${cap}%</span>
+        <div class="spark-ticks-html">${tickHtml}</div>
+      </div>`;
   }
 
   function renderPeople(root) {

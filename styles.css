@@ -4152,6 +4152,38 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .spark-bar:hover { opacity: .85; }
 .spark-cap { stroke: var(--text-faint); stroke-width: 1; opacity: .55; }
 .spark-cap-label { fill: var(--text-faint); font-size: 9px; }
+/* Sparkline HTML overlays — tick labels and cap label live outside
+   the SVG so they render at natural aspect ratio even though the
+   SVG bars use preserveAspectRatio="none". */
+.spark-frame {
+  position: relative;
+  width: 100%;
+  height: 70px;
+}
+.spark-frame .spark { width: 100%; height: 100%; }
+.spark-ticks-html {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 12px;
+  pointer-events: none;
+}
+.spark-tick-html {
+  position: absolute;
+  bottom: 0;
+  transform: translateX(-50%);
+  color: var(--text-faint);
+  font-size: 9px;
+  line-height: 12px;
+  white-space: nowrap;
+}
+.spark-cap-label-html {
+  position: absolute;
+  transform: translate(-100%, -100%);
+  color: var(--text-faint);
+  font-size: 9px;
+  pointer-events: none;
+  white-space: nowrap;
+}
 .spark-hol.full    { fill: rgba(255,255,255,.10); }
 .spark-hol.partial { fill: rgba(255,255,255,.05); }
 .spark-tick { fill: var(--text-faint); font-size: 9px; }
