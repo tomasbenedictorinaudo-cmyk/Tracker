@@ -21605,7 +21605,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         <div class="pln-row-label">
           <span class="col-dot ${statusDot?.dot || ''}"></span>
           <span class="pln-row-title" title="${escapeHTML(row.a.title)}">${escapeHTML(row.a.title)}${row.depViolation ? '<span class="pln-dep-flag" title="Starts before a predecessor finishes">⇤</span>' : ''}${row.conflict ? '<span class="pln-conflict-flag" title="Overlaps another action of this owner in an over-cap week">⚠</span>' : ''}</span>
-          <span class="pln-row-meta">${row.hours}h${row.logged > 0 ? ` <span class="muted">· ${Math.round(row.logged)}h logged</span>` : ''} · ${escapeHTML(row.project.name)} <span class="pln-row-badge">${row.marginBadge}</span>${row.baseline && (row.baseline.startDrift || row.baseline.dueDrift) ? ` <span class="pln-base-drift" title="drift from baseline — start ${row.baseline.startDrift >= 0 ? '+' : ''}${row.baseline.startDrift}d, due ${row.baseline.dueDrift >= 0 ? '+' : ''}${row.baseline.dueDrift}d">base ${row.baseline.dueDrift >= 0 ? '+' : ''}${row.baseline.dueDrift}d</span>` : ''}</span>
+          <span class="pln-row-meta">${row.hours}h${row.logged > 0 ? ` <span class="muted">· ${Math.round(row.logged)}h logged</span>` : ''} · ${escapeHTML(row.project.name)}${row.baseline && (row.baseline.startDrift || row.baseline.dueDrift) ? ` <span class="pln-base-drift" title="drift from baseline — start ${row.baseline.startDrift >= 0 ? '+' : ''}${row.baseline.startDrift}d, due ${row.baseline.dueDrift >= 0 ? '+' : ''}${row.baseline.dueDrift}d">base ${row.baseline.dueDrift >= 0 ? '+' : ''}${row.baseline.dueDrift}d</span>` : ''}</span>
+          <span class="pln-row-badge">${row.marginBadge}</span>
         </div>
         <div class="pln-row-chart">
           <svg class="pln-row-svg" viewBox="0 0 ${chartW} ${rowH}" preserveAspectRatio="none" width="${chartW}" height="${rowH}">

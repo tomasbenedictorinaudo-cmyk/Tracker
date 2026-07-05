@@ -3386,7 +3386,10 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .pln-row.is-done { opacity: .55; }
 .pln-row-label {
   display: grid;
-  grid-template-columns: 10px 1fr;
+  /* Three columns: dot · elastic content · fixed badge lane.
+     The badge sits in its own auto-sized column so long titles
+     ellipsize their content without ever clipping the margin chip. */
+  grid-template-columns: 10px minmax(0, 1fr) auto;
   grid-template-rows: auto auto;
   column-gap: 6px;
   row-gap: 1px;
@@ -3394,8 +3397,6 @@ body.is-card-dragging * { cursor: grabbing !important; }
   min-width: 0;
   font-size: 12px;
   align-content: center;
-  /* Stick to the left edge so labels stay visible while the chart
-     scrolls horizontally through the full project timeline. */
   position: sticky;
   left: 0;
   z-index: 2;
@@ -3421,6 +3422,12 @@ body.is-card-dragging * { cursor: grabbing !important; }
   white-space: nowrap;
   min-width: 0;
 }
+.pln-row-label > .pln-row-badge {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  align-self: center;
+  justify-self: end;
+}
 .pln-row-chart {
   position: relative;
   height: 100%;
@@ -3440,12 +3447,11 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .pln-due-line {
   pointer-events: none;
 }
-/* Margin badge lives in the label column so it stays visible while
-   the chart scrolls horizontally. */
+/* Margin badge lives in the label column's dedicated right lane so
+   long titles ellipsize without ever clipping this chip. */
 .pln-row-badge {
   display: inline-flex;
-  margin-left: 6px;
-  vertical-align: middle;
+  padding-left: 6px;
   pointer-events: none;
 }
 .pln-margin {
