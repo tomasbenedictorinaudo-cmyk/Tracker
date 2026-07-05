@@ -21194,30 +21194,32 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       // The bar spans [startISO, endISO] where endISO is the COMPUTED
       // work-end (start + plannedHours ÷ commitment), not the due date.
       // Due date is captured separately and never touched by drag.
-      const startISO = a.startDate || (a.due ? fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs)) : null);
-      if (!startISO) return;
+      // Use the bar's ACTUAL visual endpoints (from the data attributes
+      // written during render) so the drag geometry starts exactly
+      // where the user sees the bar — including any holiday extensions
+      // that shifted the right edge past the naive plannedHours ÷
+      // commit end. Otherwise the bar snaps left by the holiday-day
+      // count on release.
+      const startISO = group?.dataset?.start || a.startDate || (a.due ? fmtISO(new Date(parseDate(a.due).getTime() - 2 * dayMs)) : null);
+      const endISO   = group?.dataset?.end   || (a.due ? fmtISO(new Date(parseDate(a.due).getTime())) : startISO);
+      if (!startISO || !endISO) return;
       const initialCommitment = typeof a.commitment === 'number' ? a.commitment : 100;
       let anchorHours = a.plannedHours;
       if (typeof anchorHours !== 'number' || anchorHours <= 0) {
-        // No stored hours yet — infer from the current commitment × the
-        // current bar geometry (which itself came from a.due when
-        // plannedHours was null; the seed is inherited so behavior
-        // matches what the user sees).
         const seedEnd = a.due
           ? parseDate(a.due)
           : new Date(parseDate(startISO).getTime() + 6 * dayMs);
         const seedDays = Math.max(1, Math.round((seedEnd - parseDate(startISO)) / dayMs) + 1);
         anchorHours = (initialCommitment / 100) * HOURS_PER_WEEK * (seedDays / 7);
       }
-      // Derive the current work-end from anchor + commitment so drag
-      // math operates on the same geometry the user sees.
-      const weeksNeeded = anchorHours / ((initialCommitment / 100) * HOURS_PER_WEEK);
-      const daysNeeded = Math.max(1, Math.round(weeksNeeded * 7));
-      const endISO = fmtISO(new Date(parseDate(startISO).getTime() + (daysNeeded - 1) * dayMs));
       const dueISO = a.due || null;
+      // Stash the owning person so mouseup's compensation can honor
+      // holiday-day math (visual span ≠ working-days span when
+      // holidays fall inside the window).
+      const person = (state.people || []).find((p) => p.id === a.owner) || null;
 
       _plannerDrag.drag = {
-        a, zone, startISO, endISO, dueISO, initialCommitment, anchorHours,
+        a, person, zone, startISO, endISO, dueISO, initialCommitment, anchorHours,
         group, bar, label, handleLeft, handleRight, badgeEl, dueGlyph,
         pressX: e.clientX,
         dragged: false,
@@ -21356,17 +21358,22 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     if (d.zone === 'body' || d.zone === 'left') a.startDate = d.newStartISO;
     if (d.zone !== 'body') {
       a.commitment = d.newCommitment;
-      // Anchor hours, but nudge plannedHours so the render's
-      // Math.round(plannedHours ÷ commit ÷ HPW × 7) exactly
-      // reproduces the span the drag drop implied. Without this,
-      // commit rounding cascades into daysNeeded rounding and the
-      // opposite edge shifts up to a day on release.
-      const targetSpanDays = Math.max(1, Math.round((parseDate(d.newEndISO) - parseDate(d.newStartISO)) / dayMs) + 1);
-      const exactHours = (d.newCommitment / 100) * HOURS_PER_WEEK * (targetSpanDays / 7);
+      // Target the VISUAL span the user dropped on. When holidays fall
+      // inside the window, the visual (calendar) span exceeds the
+      // working-days span the model stores — subtract the vacation
+      // days so plannedHours produces a workEnd that lands exactly on
+      // the user's drop point after personWorkEndWithHolidays extends
+      // back across those days at render time.
+      const targetStartISO = a.startDate || d.newStartISO;
+      const targetEndISO   = d.newEndISO;
+      const targetVisualDays = Math.max(1, Math.round((parseDate(targetEndISO) - parseDate(targetStartISO)) / dayMs) + 1);
+      const holDaysInSpan = d.person ? personHolidayDaysInRange(d.person, targetStartISO, targetEndISO) : 0;
+      const targetWorkingDays = Math.max(1, targetVisualDays - holDaysInSpan);
+      const exactHours = (d.newCommitment / 100) * HOURS_PER_WEEK * (targetWorkingDays / 7);
       a.plannedHours = Math.round(exactHours);
-      const roundtripDays = Math.max(1, Math.round(a.plannedHours / ((a.commitment / 100) * HOURS_PER_WEEK) * 7));
-      if (roundtripDays > targetSpanDays) a.plannedHours -= 1;
-      else if (roundtripDays < targetSpanDays) a.plannedHours += 1;
+      const roundtripWorking = Math.max(1, Math.round(a.plannedHours / ((a.commitment / 100) * HOURS_PER_WEEK) * 7));
+      if (roundtripWorking > targetWorkingDays) a.plannedHours -= 1;
+      else if (roundtripWorking < targetWorkingDays) a.plannedHours += 1;
     }
     commit('planner-drag');
     // Undo pill — nudges the user that the change is undoable, with
