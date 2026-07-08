@@ -7608,6 +7608,27 @@
             </div>
           </div>
           <div class="dkpi-sub">${d.evm.hasData ? 'cost / schedule index · all CCs' : 'add a budget to a cost-centre'}</div>
+          ${_kpiTooltip({
+            title: 'Project performance — CPI · SPI',
+            meaning: d.evm.hasData
+              ? `Earned-Value indices roll up every cost-centre in the project. CPI = ${d.evm.CPI.toFixed(2)} (${d.evm.CPI >= 1 ? 'under' : 'over'} budget for the work done). SPI = ${d.evm.SPI.toFixed(2)} (${d.evm.SPI >= 1 ? 'ahead of' : 'behind'} the planned schedule). Currently BAC = ${Math.round(d.evm.BAC)}, PV = ${Math.round(d.evm.PV)}, EV = ${Math.round(d.evm.EV)}, AC = ${Math.round(d.evm.AC)}.`
+              : 'Earned-Value indices roll up every cost-centre in the project. CPI compares the value of the work done to the money actually spent. SPI compares the value of the work done to what should have been done by now.',
+            formula: 'CPI = EV ÷ AC     ·     SPI = EV ÷ PV',
+            inputs: [
+              { name: 'BAC', desc: 'Budget At Completion — total approved budget across every cost-centre in the horizon.' },
+              { name: 'PV',  desc: 'Planned Value — sum of the budget that was scheduled to be spent up to today.' },
+              { name: 'EV',  desc: 'Earned Value — planned cost × % complete on each action. Done actions credit their full planned cost; in-flight ones credit elapsed ÷ total duration; blocked / not-started credit 0.' },
+              { name: 'AC',  desc: 'Actual Cost — cost actually incurred so far, from logged hours × the owner\'s hourly rate on each action.' },
+            ],
+            minimumData: [
+              { scope: 'Per cost-centre', desc: 'a weekly budget or range budget set in the Budgets panel — no budget = no BAC = no PV = KPI reads "—".' },
+              { scope: 'Per action', desc: 'a start date AND a due date — those define the "elapsed ÷ total duration" fraction used for EV on in-flight work.' },
+              { scope: 'Per action', desc: 'a commitment % (defaults to 100 %) so planned cost = commitment × hourly rate × duration.' },
+              { scope: 'Per person',  desc: 'an hourly rate on the People page — without one, planned cost defaults to €100/h and AC uses the same fallback.' },
+              { scope: 'Per action', desc: 'at least one logged-hours entry to make AC anything other than 0. No log = AC = 0 = CPI reads as ∞.' },
+            ],
+            notComputable: d.evm.hasData ? null : 'Cannot compute — no cost-centre has a budget set. Open the Budgets panel and add a weekly or range budget to at least one CC.',
+          })}
         </div>
 
         <div class="dkpi">
