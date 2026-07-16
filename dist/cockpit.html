@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-16T22:22:05.295Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-16T22:26:24.097Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -8128,6 +8128,25 @@ body.is-row-dragging *        { user-select: none !important; }
   border-color: rgba(248,113,121,.60);
 }
 .notes-body .nt-hl-bad .nt-hl-icon { color: var(--bad); }
+/* Solo variant — inserted when the highlight button is clicked with
+   no selection: drops just a small colored icon at the caret, no
+   background block. Still counts toward the TOC severity chips. */
+.notes-body .nt-hl-solo {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: inline-block;
+  vertical-align: baseline;
+  line-height: 1;
+}
+.notes-body .nt-hl-solo .nt-hl-icon {
+  margin: 0 2px;
+  font-size: 1em;
+  transform: none;
+}
+.notes-body .nt-hl-solo.nt-hl-ok   .nt-hl-icon { color: var(--ok);   }
+.notes-body .nt-hl-solo.nt-hl-warn .nt-hl-icon { color: var(--warn); }
+.notes-body .nt-hl-solo.nt-hl-bad  .nt-hl-icon { color: var(--bad);  }
 
 /* Fullscreen toggle in the notes head — icon swap on state. */
 #btnNotesFullscreen { display: inline-flex; align-items: center; justify-content: center; }
@@ -26241,24 +26260,30 @@ body.notes-fullscreen { overflow: hidden; }
         }
         const iconMap = { ok: '✓', warn: '⚠', bad: '✕' };
         const label   = { ok: 'success', warn: 'warning', bad: 'failure' }[kind] || kind;
-        if (range.collapsed) return; // nothing selected
-        // Remove any existing highlight wrappers first so classes don't stack
-        _unhighlightRange(body, range);
-        const contents = range.extractContents();
         const mark = document.createElement('mark');
-        mark.className = `nt-hl nt-hl-${kind}`;
+        mark.className = `nt-hl nt-hl-${kind}${range.collapsed ? ' nt-hl-solo' : ''}`;
         mark.setAttribute('data-hl', kind);
         mark.setAttribute('title', label);
         const icon = document.createElement('span');
         icon.className = 'nt-hl-icon';
         icon.setAttribute('aria-hidden', 'true');
         icon.textContent = iconMap[kind] || '';
-        const text = document.createElement('span');
-        text.className = 'nt-hl-text';
-        text.appendChild(contents);
         mark.appendChild(icon);
-        mark.appendChild(text);
-        range.insertNode(mark);
+        if (range.collapsed) {
+          // No selection → drop just the semantic icon at the caret.
+          range.insertNode(mark);
+        } else {
+          // Wrap the selection: unwrap any pre-existing highlight so
+          // classes don't stack, then wrap in a fresh <mark> containing
+          // the icon and a .nt-hl-text span with the extracted contents.
+          _unhighlightRange(body, range);
+          const contents = range.extractContents();
+          const text = document.createElement('span');
+          text.className = 'nt-hl-text';
+          text.appendChild(contents);
+          mark.appendChild(text);
+          range.insertNode(mark);
+        }
         // Move the caret to after the inserted mark and clear the selection.
         sel.removeAllRanges();
         const after = document.createRange();

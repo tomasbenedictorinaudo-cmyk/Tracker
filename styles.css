@@ -8119,6 +8119,25 @@ body.is-row-dragging *        { user-select: none !important; }
   border-color: rgba(248,113,121,.60);
 }
 .notes-body .nt-hl-bad .nt-hl-icon { color: var(--bad); }
+/* Solo variant — inserted when the highlight button is clicked with
+   no selection: drops just a small colored icon at the caret, no
+   background block. Still counts toward the TOC severity chips. */
+.notes-body .nt-hl-solo {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  display: inline-block;
+  vertical-align: baseline;
+  line-height: 1;
+}
+.notes-body .nt-hl-solo .nt-hl-icon {
+  margin: 0 2px;
+  font-size: 1em;
+  transform: none;
+}
+.notes-body .nt-hl-solo.nt-hl-ok   .nt-hl-icon { color: var(--ok);   }
+.notes-body .nt-hl-solo.nt-hl-warn .nt-hl-icon { color: var(--warn); }
+.notes-body .nt-hl-solo.nt-hl-bad  .nt-hl-icon { color: var(--bad);  }
 
 /* Fullscreen toggle in the notes head — icon swap on state. */
 #btnNotesFullscreen { display: inline-flex; align-items: center; justify-content: center; }

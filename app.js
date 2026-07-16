@@ -16781,24 +16781,30 @@
         }
         const iconMap = { ok: '✓', warn: '⚠', bad: '✕' };
         const label   = { ok: 'success', warn: 'warning', bad: 'failure' }[kind] || kind;
-        if (range.collapsed) return; // nothing selected
-        // Remove any existing highlight wrappers first so classes don't stack
-        _unhighlightRange(body, range);
-        const contents = range.extractContents();
         const mark = document.createElement('mark');
-        mark.className = `nt-hl nt-hl-${kind}`;
+        mark.className = `nt-hl nt-hl-${kind}${range.collapsed ? ' nt-hl-solo' : ''}`;
         mark.setAttribute('data-hl', kind);
         mark.setAttribute('title', label);
         const icon = document.createElement('span');
         icon.className = 'nt-hl-icon';
         icon.setAttribute('aria-hidden', 'true');
         icon.textContent = iconMap[kind] || '';
-        const text = document.createElement('span');
-        text.className = 'nt-hl-text';
-        text.appendChild(contents);
         mark.appendChild(icon);
-        mark.appendChild(text);
-        range.insertNode(mark);
+        if (range.collapsed) {
+          // No selection → drop just the semantic icon at the caret.
+          range.insertNode(mark);
+        } else {
+          // Wrap the selection: unwrap any pre-existing highlight so
+          // classes don't stack, then wrap in a fresh <mark> containing
+          // the icon and a .nt-hl-text span with the extracted contents.
+          _unhighlightRange(body, range);
+          const contents = range.extractContents();
+          const text = document.createElement('span');
+          text.className = 'nt-hl-text';
+          text.appendChild(contents);
+          mark.appendChild(text);
+          range.insertNode(mark);
+        }
         // Move the caret to after the inserted mark and clear the selection.
         sel.removeAllRanges();
         const after = document.createRange();
