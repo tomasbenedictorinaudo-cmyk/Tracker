@@ -8190,10 +8190,10 @@ body.notes-fullscreen { overflow: hidden; }
    The `!important` here is deliberate: pasted `style="font-family:…"`
    and browser execCommand output both set inline styles that would
    otherwise win over the base rule. */
-.notes-body *:not(code):not(pre):not(kbd):not(samp):not(.nt-hl-icon) {
+.notes-body *:not(code):not(pre):not(kbd):not(samp):not(.nt-hl-icon):not(.gm-chip-icon) {
   font-family: inherit !important;
 }
-.notes-body *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(code):not(pre):not(kbd):not(samp):not(.nt-hl-icon) {
+.notes-body *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(code):not(pre):not(kbd):not(samp):not(.nt-hl-icon):not(.gm-chip):not(.gm-chip-subject):not(.gm-chip-meta) {
   font-size: inherit !important;
 }
 .notes-body code, .notes-body pre, .notes-body kbd, .notes-body samp {
@@ -8413,6 +8413,158 @@ body.notes-fullscreen { overflow: hidden; }
   border-color: rgba(248,113,121,.50);
 }
 .notes-toc-chip.bad:hover  { background: rgba(248,113,121,.26); }
+
+/* Gmail chip — used in the notes body (rich HTML) AND in every
+   comment / note display path via renderTextWithChips(). Envelope
+   icon, subject in a bright weight, muted meta line, and a floating
+   ↗ that lights up on hover. */
+.gm-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  vertical-align: middle;
+  max-width: 100%;
+  margin: 1px 2px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(234, 67, 53, .12), rgba(234, 67, 53, .06));
+  border: 1px solid rgba(234, 67, 53, .40);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 12px;
+  line-height: 1.25;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform .1s ease, box-shadow var(--transition);
+  overflow: hidden;
+}
+.gm-chip:hover {
+  background: linear-gradient(180deg, rgba(234, 67, 53, .22), rgba(234, 67, 53, .10));
+  border-color: rgba(234, 67, 53, .70);
+  box-shadow: 0 2px 8px rgba(234, 67, 53, .18);
+  transform: translateY(-1px);
+}
+.gm-chip-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  background: linear-gradient(135deg, #ea4335, #d33b2c);
+  color: white;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.15);
+}
+.gm-chip-body {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  max-width: 340px;
+}
+.gm-chip-subject {
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+.gm-chip-meta {
+  color: var(--text-faint);
+  font-size: 10px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.gm-chip-open {
+  color: var(--text-faint);
+  font-size: 11px;
+  opacity: .6;
+  flex-shrink: 0;
+  padding-left: 2px;
+  transition: opacity var(--transition), color var(--transition);
+}
+.gm-chip:hover .gm-chip-open { opacity: 1; color: #ea4335; }
+
+/* Subject prompt popover shown next to the caret after pasting a
+   Gmail URL. Small, focused input with Save / Skip. */
+.gm-subject-pop {
+  position: absolute;
+  z-index: 6000;
+  min-width: 300px;
+  max-width: 380px;
+  padding: 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.55), 0 0 0 1px var(--line-2);
+  color: var(--text);
+  animation: gm-pop-in .12s ease-out;
+}
+@keyframes gm-pop-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: none; }
+}
+.gm-sp-head {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.gm-sp-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #ea4335, #d33b2c);
+  color: white;
+  font-size: 10px;
+}
+.gm-sp-input {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+.gm-sp-input:focus { border-color: rgba(234, 67, 53, .70); box-shadow: 0 0 0 2px rgba(234, 67, 53, .18); }
+.gm-sp-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+.gm-sp-actions button {
+  padding: 5px 12px;
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--text);
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+.gm-sp-actions .gm-sp-skip:hover { background: var(--bg-3); }
+.gm-sp-actions .gm-sp-ok {
+  background: linear-gradient(135deg, #ea4335, #d33b2c);
+  color: white;
+  border-color: #d33b2c;
+}
+.gm-sp-actions .gm-sp-ok:hover { filter: brightness(1.1); }
 
 /* Flash the landed highlight briefly so users see where they jumped. */
 .notes-body .nt-hl.nt-hl-flash {

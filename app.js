@@ -2947,8 +2947,7 @@
     const parts = [];
     if (a.description) parts.push(`<div class="hover-desc">${a.description}</div>`);
     if (a.notes) {
-      const safeNote = escapeHTML(a.notes).replace(/\n/g, '<br>');
-      parts.push(`<div class="hover-note"><span class="hover-note-lbl">Note</span>${safeNote}</div>`);
+      parts.push(`<div class="hover-note"><span class="hover-note-lbl">Note</span>${renderTextWithChips(a.notes)}</div>`);
     }
     if (!parts.length) return;
     el.innerHTML = parts.join('');
@@ -9541,13 +9540,13 @@
           return `<div class="report-row clickable bad" data-open-action="${a.id}"><span>${escapeHTML(a.title)}</span><span class="report-meta">${escapeHTML(personName(a.owner))} · ${reason}</span></div>`;
         }, 'Nothing late or blocked — nice work.')}
         ${reportSection('Decisions made', data.decisions, (d) =>
-          `<div class="report-row"><span>${escapeHTML(d.title)}</span><span class="report-meta">${escapeHTML(personName(d.owner))} · ${escapeHTML(d.date || '—')}</span></div>${d.rationale ? `<div class="report-rationale">${escapeHTML(d.rationale)}</div>` : ''}`,
+          `<div class="report-row"><span>${escapeHTML(d.title)}</span><span class="report-meta">${escapeHTML(personName(d.owner))} · ${escapeHTML(d.date || '—')}</span></div>${d.rationale ? `<div class="report-rationale">${renderTextWithChips(d.rationale)}</div>` : ''}`,
           'No decisions logged in this period.')}
         ${reportSection('Change requests decided', data.crsDecided, (c) =>
           `<div class="report-row clickable" data-open-cr="${c.id}"><span>${escapeHTML(c.title)}</span><span class="report-meta">${escapeHTML(c.status)}${c.decisionDate ? ' · ' + c.decisionDate : ''}${c.decisionBy ? ' · ' + escapeHTML(personName(c.decisionBy)) : ''}</span></div>`,
           'No CRs decided in this period.')}
         ${reportSection('Top risks (by residual)', data.topRisks, (r) =>
-          `<div class="report-row clickable" data-open-risk="${r.id}"><span>${escapeHTML(r.title)}</span><span class="report-meta">residual ${r._score}</span></div>${r.mitigation ? `<div class="report-rationale">${escapeHTML(r.mitigation)}</div>` : ''}`,
+          `<div class="report-row clickable" data-open-risk="${r.id}"><span>${escapeHTML(r.title)}</span><span class="report-meta">residual ${r._score}</span></div>${r.mitigation ? `<div class="report-rationale">${renderTextWithChips(r.mitigation)}</div>` : ''}`,
           'No risks logged.')}
         <div class="report-section">
           <div class="report-section-title">What's next (next 14 days)</div>
@@ -10021,7 +10020,7 @@
         <div class="mtx-tip-row"><span class="mtx-tip-lbl">Inherent</span><span>P${inh.probability} × I${inh.impact} = <b>${inhScore}</b></span></div>
         <div class="mtx-tip-row"><span class="mtx-tip-lbl">Residual</span><span>P${res.probability} × I${res.impact} = <b>${resScore}</b></span></div>
         <div class="mtx-tip-row"><span class="mtx-tip-lbl">Owner</span><span>${escapeHTML(personName(r.owner))}</span></div>
-        ${r.mitigation ? `<div class="mtx-tip-mit"><span class="mtx-tip-lbl">${isOpp ? 'Capture' : 'Mitigation'}</span>${escapeHTML(r.mitigation)}</div>` : ''}
+        ${r.mitigation ? `<div class="mtx-tip-mit"><span class="mtx-tip-lbl">${isOpp ? 'Capture' : 'Mitigation'}</span>${renderTextWithChips(r.mitigation)}</div>` : ''}
         ${linked ? `<div class="mtx-tip-link">↗ ${escapeHTML(linked.title)} <span style="color:var(--text-faint)">— ${escapeHTML(personName(linked.owner))}</span></div>` : ''}`;
       tip.style.display = 'block';
       const rr = tip.getBoundingClientRect();
@@ -10521,7 +10520,7 @@
               ${moved ? `<span class="ro-pre">${inhScore}</span><span class="ro-arrow">→</span><b>${resScore}</b>` : `<b>${inhScore}</b>`}
             </span>
             <span class="row-meta">
-              <span class="ro-resp" title="${responseLbl}">${escapeHTML(r.mitigation || '—')}</span>
+              <span class="ro-resp" title="${responseLbl}">${r.mitigation ? renderTextWithChips(r.mitigation) : '—'}</span>
               ${mitChip}
               <span class="ro-owner">${escapeHTML(personName(r.owner))}</span>
             </span>
@@ -14281,7 +14280,7 @@
                 <span class="comment-when">${escapeHTML(when)}</span>
                 <button class="comment-del" data-action="del-comment" title="Delete comment">×</button>
               </div>
-              <div class="comment-text">${escapeHTML(c.text)}</div>
+              <div class="comment-text">${renderTextWithChips(c.text)}</div>
             </div>`;
           }).join('') : '<div class="comments-empty">No comments yet.</div>'}
         </div>
@@ -15895,6 +15894,172 @@
    *   - setOrder     (idsInOrder: string[]) => void; mutate the source array
    *   - commitName   action name passed to commit() after a real reorder
    */
+  /* -------------------- Gmail chip system --------------------
+   * Cross-cutting: any comment field (action notes, risk mitigation,
+   * decision rationale, action-comment thread, notes body, …) can
+   * accept a pasted Gmail URL and turn it into a compact, clickable
+   * "envelope" chip carrying the subject the user types.
+   *
+   * Storage:
+   *   - Contenteditable (notes body): rich HTML chip inserted inline.
+   *   - Textarea:  plain-text token `[gmail:s|<enc-subj>|<url>]` gets
+   *     stored; on display, renderTextWithChips(text) swaps it for
+   *     the rich chip.
+   */
+  const _GMAIL_URL_RE = /https?:\/\/mail\.google\.com\/mail\/u\/\d+\/(?:#[^\s"'<>]+)?/i;
+  const _GMAIL_TOKEN_RE = /\[gmail:s\|([^|\]]*)\|([^\]]+)\]/g;
+  function _isGmailUrl(url) { return _GMAIL_URL_RE.test(url); }
+  function _parseGmailUrl(url) {
+    // Pull the u/N account index and the trailing thread id (last
+    // path segment after the hash).
+    const acc = (url.match(/\/u\/(\d+)/) || [])[1] || '0';
+    const idMatch = url.match(/#[^/]+\/([A-Za-z0-9]+)/);
+    const threadId = idMatch ? idMatch[1] : '';
+    return { url, account: acc, threadId };
+  }
+  function _gmailChipHTML({ url, subject, threadId }) {
+    const label = subject && subject.trim() ? subject.trim() : 'Gmail thread';
+    const idHint = threadId ? threadId.slice(0, 6) : '';
+    return `<a class="gm-chip" href="${escapeHTML(url)}" data-gmail-thread="${escapeHTML(threadId)}" data-gmail-subject="${escapeHTML(subject || '')}" target="_blank" rel="noopener noreferrer" title="Open in Gmail — ${escapeHTML(url)}" contenteditable="false">
+      <span class="gm-chip-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v.4l8 5 8-5V8H4Zm16 2.4-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 10.4V16h16v-5.6Z"/></svg></span>
+      <span class="gm-chip-body">
+        <span class="gm-chip-subject">${escapeHTML(label)}</span>
+        <span class="gm-chip-meta">${subject ? 'Gmail' : 'Gmail thread'}${idHint ? ' · ' + escapeHTML(idHint) : ''}</span>
+      </span>
+      <span class="gm-chip-open" aria-hidden="true">↗</span>
+    </a>`;
+  }
+  function _gmailTokenText(subject, url) {
+    return `[gmail:s|${encodeURIComponent(subject || '')}|${url}]`;
+  }
+  // Public: escape plain text and render Gmail tokens as chips.
+  // Also newline → <br>. Safe to embed anywhere `escapeHTML(text)` was used.
+  function renderTextWithChips(text) {
+    if (text == null) return '';
+    const src = String(text);
+    let out = '';
+    let last = 0;
+    _GMAIL_TOKEN_RE.lastIndex = 0;
+    let m;
+    while ((m = _GMAIL_TOKEN_RE.exec(src)) !== null) {
+      const raw = m[0];
+      const subject = decodeURIComponent(m[1] || '');
+      const url = m[2];
+      out += escapeHTML(src.slice(last, m.index)).replace(/\n/g, '<br>');
+      if (_isGmailUrl(url)) {
+        const parsed = _parseGmailUrl(url);
+        out += _gmailChipHTML({ url, subject, threadId: parsed.threadId });
+      } else {
+        out += escapeHTML(raw);
+      }
+      last = m.index + raw.length;
+    }
+    out += escapeHTML(src.slice(last)).replace(/\n/g, '<br>');
+    return out;
+  }
+  // Small floating popover — asks for the subject next to the pasted
+  // Gmail URL. Positions itself near the caret; supports Enter to
+  // confirm, Esc to skip (chip stays but with a placeholder subject).
+  function _openGmailSubjectPrompt(anchorRect, initialText, onCommit, onCancel) {
+    document.querySelectorAll('.gm-subject-pop').forEach((el) => el.remove());
+    const pop = document.createElement('div');
+    pop.className = 'gm-subject-pop';
+    pop.innerHTML = `
+      <div class="gm-sp-head"><span class="gm-sp-glyph">✉</span> Give this email a title</div>
+      <input type="text" class="gm-sp-input" placeholder="Subject of the email" value="${escapeHTML(initialText || '')}" />
+      <div class="gm-sp-actions">
+        <button type="button" class="gm-sp-skip">Skip</button>
+        <button type="button" class="gm-sp-ok">Save</button>
+      </div>`;
+    document.body.appendChild(pop);
+    const w = pop.offsetWidth || 320;
+    const h = pop.offsetHeight || 100;
+    let left = anchorRect.left + window.scrollX;
+    let top  = anchorRect.bottom + window.scrollY + 6;
+    if (left + w + 12 > window.innerWidth) left = window.innerWidth - w - 12;
+    if (top + h + 12 > window.innerHeight + window.scrollY) {
+      top = anchorRect.top + window.scrollY - h - 6;
+    }
+    pop.style.left = Math.max(8, left) + 'px';
+    pop.style.top  = Math.max(8, top)  + 'px';
+    const input = pop.querySelector('.gm-sp-input');
+    input.focus();
+    input.select();
+    const close = (commit) => {
+      const val = input.value.trim();
+      pop.remove();
+      document.removeEventListener('mousedown', outside, true);
+      if (commit) onCommit(val); else onCancel && onCancel();
+    };
+    const outside = (ev) => { if (!pop.contains(ev.target)) close(false); };
+    setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+    pop.querySelector('.gm-sp-ok').addEventListener('click', () => close(true));
+    pop.querySelector('.gm-sp-skip').addEventListener('click', () => close(false));
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); close(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); close(false); }
+    });
+  }
+  // Global paste handler — runs before per-field handlers via capture.
+  // Detects a bare Gmail URL in the clipboard's text/plain payload and
+  // handles it. If the payload isn't a Gmail URL, we do nothing (the
+  // browser's default paste still runs).
+  document.addEventListener('paste', (e) => {
+    const target = e.target;
+    if (!target) return;
+    const isCE = target.isContentEditable || target.closest?.('[contenteditable="true"]');
+    const isTA = target.tagName === 'TEXTAREA';
+    const isIN = target.tagName === 'INPUT' && (target.type === 'text' || target.type === '');
+    if (!(isCE || isTA || isIN)) return;
+    const cd = e.clipboardData;
+    if (!cd) return;
+    const text = (cd.getData('text/plain') || '').trim();
+    if (!text || !_isGmailUrl(text)) return;
+    // Only handle if the clipboard is JUST the URL, not URL + more prose.
+    if (text.split(/\s+/).length !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const parsed = _parseGmailUrl(text);
+    // Cache the drop point so we can restore it after the subject
+    // prompt closes (focusing the popup input clears the selection).
+    let cachedRange = null, cachedSel = { start: null, end: null };
+    let rect;
+    if (isCE) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        cachedRange = sel.getRangeAt(0).cloneRange();
+        rect = cachedRange.getBoundingClientRect();
+      }
+    } else {
+      cachedSel.start = target.selectionStart ?? target.value.length;
+      cachedSel.end   = target.selectionEnd   ?? cachedSel.start;
+    }
+    if (!rect || (rect.left === 0 && rect.top === 0)) rect = target.getBoundingClientRect();
+    _openGmailSubjectPrompt(rect, '', (subject) => {
+      if (isCE) {
+        target.focus();
+        if (cachedRange) {
+          const sel = window.getSelection();
+          sel.removeAllRanges();
+          sel.addRange(cachedRange);
+        }
+        const html = _gmailChipHTML({ url: text, subject, threadId: parsed.threadId }) + '&nbsp;';
+        document.execCommand('insertHTML', false, html);
+        const ceHost = target.closest?.('[contenteditable="true"]') || target;
+        ceHost.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        const token = _gmailTokenText(subject, text);
+        const start = cachedSel.start ?? target.value.length;
+        const end   = cachedSel.end   ?? start;
+        target.value = target.value.slice(0, start) + token + target.value.slice(end);
+        const caret = start + token.length;
+        target.focus();
+        target.setSelectionRange(caret, caret);
+        target.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    });
+  }, true);
+
   function wireListReorder(listEl, opts) {
     if (!listEl) return;
     const rows = listEl.querySelectorAll(opts.rowSelector);
