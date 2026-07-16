@@ -8179,13 +8179,31 @@ body.notes-fullscreen { overflow: hidden; }
   font-size: 13px;
   line-height: 1.55;
   color: var(--text);
+  font-family: var(--font-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif);
+}
+/* Force a single body font on everything inside the notes editor —
+   defeats pasted rich text that ships inline font-family / font-size.
+   Only monospace and semantic highlight icons override the family;
+   headings keep the sizes defined by the h1–h6 rules below.
+   The `!important` here is deliberate: pasted `style="font-family:…"`
+   and browser execCommand output both set inline styles that would
+   otherwise win over the base rule. */
+.notes-body *:not(code):not(pre):not(kbd):not(samp):not(.nt-hl-icon) {
+  font-family: inherit !important;
+}
+.notes-body *:not(h1):not(h2):not(h3):not(h4):not(h5):not(h6):not(code):not(pre):not(kbd):not(samp):not(.nt-hl-icon) {
+  font-size: inherit !important;
+}
+.notes-body code, .notes-body pre, .notes-body kbd, .notes-body samp {
+  font-family: var(--font-mono, "SF Mono", Menlo, Consolas, "Roboto Mono", monospace);
+  font-size: .92em;
 }
 .notes-body:focus { outline: none; }
 .notes-body p { margin: 0 0 10px; }
 /* Five distinct heading levels for meeting notes — each visually clearer than
    the next. H1 carries an underline accent so titles stand out. */
 .notes-body h1 {
-  font-size: 18px; line-height: 1.25;
+  font-size: 18px !important; line-height: 1.25;
   margin: 18px 0 8px;
   color: var(--text);
   font-weight: 800;
@@ -8194,25 +8212,25 @@ body.notes-fullscreen { overflow: hidden; }
   padding-bottom: 4px;
 }
 .notes-body h2 {
-  font-size: 16px; line-height: 1.3;
+  font-size: 16px !important; line-height: 1.3;
   margin: 16px 0 6px;
   color: var(--text);
   font-weight: 700;
 }
 .notes-body h3 {
-  font-size: 14.5px; line-height: 1.35;
+  font-size: 14.5px !important; line-height: 1.35;
   margin: 14px 0 5px;
   color: var(--text);
   font-weight: 700;
 }
 .notes-body h4 {
-  font-size: 13.5px;
+  font-size: 13.5px !important;
   margin: 12px 0 4px;
   color: var(--text-dim);
   font-weight: 700;
 }
 .notes-body h5 {
-  font-size: 12.5px;
+  font-size: 12.5px !important;
   margin: 10px 0 4px;
   color: var(--text-faint);
   font-weight: 700;
@@ -8220,7 +8238,7 @@ body.notes-fullscreen { overflow: hidden; }
   letter-spacing: .06em;
 }
 .notes-body h6 {
-  font-size: 12px;
+  font-size: 12px !important;
   margin: 10px 0 4px;
   color: var(--text-faint);
   font-weight: 600;

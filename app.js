@@ -16393,6 +16393,41 @@
       applyNotesPanel();
     });
 
+    // Paste sanitizer — strips font-family / font-size / any <font>
+    // wrappers from clipboard content before it lands in the editor.
+    // The CSS `!important` rule already forces the body font at render
+    // time, but sanitizing on paste keeps the stored HTML clean too
+    // (so exports, XLSX, and the raw store don't carry Word / Docs
+    // font stacks around).
+    $('#notesBody')?.addEventListener('paste', (e) => {
+      const cd = e.clipboardData || window.clipboardData;
+      if (!cd) return;
+      const html = cd.getData('text/html');
+      if (!html) return; // let plain-text paste through untouched
+      e.preventDefault();
+      const scrub = document.createElement('div');
+      scrub.innerHTML = html;
+      // Unwrap legacy <font> tags entirely.
+      scrub.querySelectorAll('font').forEach((f) => {
+        const frag = document.createDocumentFragment();
+        while (f.firstChild) frag.appendChild(f.firstChild);
+        f.replaceWith(frag);
+      });
+      // Strip font-* declarations from every inline style attribute.
+      scrub.querySelectorAll('[style]').forEach((el) => {
+        const clean = el.getAttribute('style')
+          .split(';')
+          .map((d) => d.trim())
+          .filter((d) => d && !/^font(-family|-size|-variant)?\s*:/i.test(d) && !/^letter-spacing\s*:/i.test(d))
+          .join('; ');
+        if (clean) el.setAttribute('style', clean); else el.removeAttribute('style');
+      });
+      // Drop <style> and <meta> blocks that Word / Docs like to attach.
+      scrub.querySelectorAll('style, meta, link').forEach((el) => el.remove());
+      document.execCommand('insertHTML', false, scrub.innerHTML);
+      scheduleNotesSave();
+    });
+
     // Fullscreen toggle — expands the notes panel to the full viewport.
     // Persists per-session (not stored) so a new visit opens sidebar-sized.
     $('#btnNotesFullscreen')?.addEventListener('click', () => {
