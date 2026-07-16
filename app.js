@@ -2844,7 +2844,7 @@
           <button class="icon-btn" id="noteClose" title="Close">×</button>
         </div>
         <div style="padding:14px 16px;">
-          <textarea id="noteText" placeholder="Plain-text note (use the description for rich text)" style="width:100%; min-height:140px; resize:vertical; background:var(--bg-2); border:1px solid var(--line); border-radius:var(--radius-sm); padding:10px; color:var(--text); font: inherit; line-height:1.5; outline:none;">${escapeHTML(a.notes || '')}</textarea>
+          ${ceComposeHTML({ id: 'noteText', value: a.notes, placeholder: 'Notes, links, Gmail threads — description holds rich text', style: 'width:100%; min-height:140px;' })}
         </div>
         <div class="desc-foot">
           <button class="ghost" id="noteCancel">Cancel</button>
@@ -2857,7 +2857,7 @@
     overlay.querySelector('#noteClose').addEventListener('click', close);
     overlay.querySelector('#noteCancel').addEventListener('click', close);
     overlay.querySelector('#noteSave').addEventListener('click', () => {
-      a.notes = document.getElementById('noteText').value.trim();
+      a.notes = readCE('noteText').trim();
       a.updatedAt = todayISO();
       commit('note');
       close();
@@ -10109,7 +10109,7 @@
           <div class="field"><label>Owner</label>
             <select id="reOwner">${actorOptionsHTML(r.owner)}</select>
           </div>
-          <div class="field"><label id="reMitLbl">${isOpp ? 'Capture plan' : 'Mitigation'}</label><textarea id="reMit" style="min-height:80px;">${escapeHTML(r.mitigation || '')}</textarea></div>
+          <div class="field"><label id="reMitLbl">${isOpp ? 'Capture plan' : 'Mitigation'}</label>${ceComposeHTML({ id: 'reMit', value: r.mitigation, placeholder: isOpp ? 'How this will be captured — Gmail links welcome' : 'How this will be mitigated — Gmail links welcome', style: 'min-height:80px;' })}</div>
           <div class="field"><label>Linked action (optional)</label>
             <select id="reActionLink">
               <option value="">— none —</option>
@@ -10181,7 +10181,7 @@
         probability: clamp(parseInt(document.getElementById('rePR').value, 10) || r.inherent.probability, 1, 5),
         impact:      clamp(parseInt(document.getElementById('reIR').value, 10) || r.inherent.impact,      1, 5),
       };
-      r.mitigation = document.getElementById('reMit').value;
+      r.mitigation = readCE('reMit');
       r.owner = document.getElementById('reOwner').value;
       r.actionId = document.getElementById('reActionLink').value || null;
       commit('risk-edit');
@@ -10732,7 +10732,7 @@
         </div>
         <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
           <div class="field"><label>Title</label><input id="deTitle" value="${escapeHTML(d.title)}" /></div>
-          <div class="field"><label>Rationale</label><textarea id="deRat" style="min-height:90px;">${escapeHTML(d.rationale || '')}</textarea></div>
+          <div class="field"><label>Rationale</label>${ceComposeHTML({ id: 'deRat', value: d.rationale, placeholder: 'Rationale — why this call, links to context…', style: 'min-height:90px;' })}</div>
           <div class="qa-row">
             <div class="field"><label>Owner</label>
               <select id="deOwner" data-person-select>${personOptionsHtml(d.owner)}</select>
@@ -10818,7 +10818,7 @@
 
     overlay.querySelector('#deSave').addEventListener('click', () => {
       d.title = document.getElementById('deTitle').value.trim() || d.title;
-      d.rationale = document.getElementById('deRat').value;
+      d.rationale = readCE('deRat');
       d.owner = document.getElementById('deOwner').value;
       d.date = document.getElementById('deDate').value || d.date;
       d.component = document.getElementById('deComponent').value || null;
@@ -11235,8 +11235,8 @@
             <div class="field"><label>Schedule impact (days)</label><input id="crSched" type="number" value="${c.impact.schedule || 0}" /></div>
             <div class="field"><label>Cost impact (€)</label><input id="crCost" type="number" value="${c.impact.cost || 0}" /></div>
           </div>
-          <div class="field"><label>Scope impact</label><textarea id="crScope" placeholder="What scope changes (added/removed/modified)" style="min-height:50px;">${escapeHTML(c.impact.scope || '')}</textarea></div>
-          <div class="field"><label>Risk impact</label><textarea id="crRisk" placeholder="New risks introduced or mitigated" style="min-height:50px;">${escapeHTML(c.impact.risk || '')}</textarea></div>
+          <div class="field"><label>Scope impact</label>${ceComposeHTML({ id: 'crScope', value: c.impact.scope, placeholder: 'What scope changes (added/removed/modified)', style: 'min-height:50px;' })}</div>
+          <div class="field"><label>Risk impact</label>${ceComposeHTML({ id: 'crRisk', value: c.impact.risk, placeholder: 'New risks introduced or mitigated', style: 'min-height:50px;' })}</div>
           <div class="field"><label>Link (URL or path)</label><input id="crLinkUrl" value="${escapeHTML(c.linkUrl || '')}" placeholder="https://… or file:///…" /></div>
           <div class="qa-row">
             <div class="field"><label>Component (optional)</label>
@@ -11288,8 +11288,8 @@
       c.impact = {
         schedule: parseFloat(document.getElementById('crSched').value) || 0,
         cost:     parseFloat(document.getElementById('crCost').value)  || 0,
-        scope:    document.getElementById('crScope').value,
-        risk:     document.getElementById('crRisk').value,
+        scope:    readCE('crScope'),
+        risk:     readCE('crRisk'),
       };
       c.linkUrl   = document.getElementById('crLinkUrl').value.trim() || null;
       c.priorityLevel = document.getElementById('crPriorityLevel')?.value || c.priorityLevel || 'med';
@@ -11364,7 +11364,7 @@
           ${isMerged ? '' : '<span class="row-grip link-grip" title="Drag to reorder or move into a folder" aria-hidden="true">⋮⋮</span>'}
           <a class="link-title" href="${escapeHTML(l.url)}" target="_blank" rel="noopener noreferrer">↗ ${escapeHTML(l.title || host || l.url)}</a>
           <div class="link-host">${escapeHTML(host)}</div>
-          ${l.description ? `<div class="link-desc">${escapeHTML(l.description)}</div>` : ''}
+          ${l.description ? `<div class="link-desc">${renderTextWithChips(l.description)}</div>` : ''}
           ${comp ? `<div class="link-comp"><span class="link-comp-swatch" style="background:rgb(${compRgb})"></span>${escapeHTML(comp.name)}</div>` : ''}
         </div>`;
     }
@@ -11678,7 +11678,7 @@
         <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
           <div class="field"><label>Title</label><input id="lnTitle" value="${escapeHTML(l.title || '')}" /></div>
           <div class="field"><label>URL or path</label><input id="lnUrl" value="${escapeHTML(l.url || '')}" placeholder="https://… or file:///…" /></div>
-          <div class="field"><label>Description</label><textarea id="lnDesc" style="min-height:80px;">${escapeHTML(l.description || '')}</textarea></div>
+          <div class="field"><label>Description</label>${ceComposeHTML({ id: 'lnDesc', value: l.description, placeholder: 'Description — links, context, related emails…', style: 'min-height:80px;' })}</div>
           <div class="qa-row">
             <div class="field"><label>Component (optional)</label>
               <select id="lnComp">
@@ -11713,7 +11713,7 @@
       if (!url) return toast('URL required');
       l.title = document.getElementById('lnTitle').value.trim() || url;
       l.url = url;
-      l.description = document.getElementById('lnDesc').value;
+      l.description = readCE('lnDesc');
       l.component = document.getElementById('lnComp').value || null;
       l.folderId = document.getElementById('lnFolder')?.value || null;
       commit('link-edit');
@@ -13188,7 +13188,7 @@
         </div>
         <div style="padding:14px 16px; display:flex; flex-direction:column; gap:10px;">
           <div class="field"><label>Name</label><input id="prName" value="${escapeHTML(p.name)}" /></div>
-          <div class="field"><label>Description</label><textarea id="prDesc" style="min-height:100px;">${escapeHTML(p.description || '')}</textarea></div>
+          <div class="field"><label>Description</label>${ceComposeHTML({ id: 'prDesc', value: p.description, placeholder: 'Project description — goals, scope, related emails…', style: 'min-height:100px;' })}</div>
         </div>
         <div class="desc-foot">
           <button class="ghost" id="prCancel">Cancel</button>
@@ -13205,7 +13205,7 @@
       const name = document.getElementById('prName').value.trim();
       if (!name) return toast('Name required');
       p.name = name;
-      p.description = document.getElementById('prDesc').value;
+      p.description = readCE('prDesc');
       commit('project-edit');
       close();
       toast('Saved');
@@ -14761,7 +14761,7 @@
           <label>Commitment <span class="muted" id="qCmtVal">100%</span></label>
           <input id="qCmt" type="range" min="5" max="100" step="5" value="100" oninput="document.getElementById('qCmtVal').textContent = this.value + '%';" />
         </div>
-        <div class="field"><label>Notes</label><textarea id="qNotes" placeholder="Optional context">${escapeHTML(initNotes)}</textarea></div>`;
+        <div class="field"><label>Notes</label>${ceComposeHTML({ id: 'qNotes', value: initNotes, placeholder: 'Optional context — Gmail links welcome' })}</div>`;
     } else if (qaType === "component") {
       const knownCCs = getCostCentres();
       body.innerHTML = `
@@ -14833,7 +14833,7 @@
         <div class="field"><label>Owner</label>
           <select id="qOwner" data-person-select>${personOptionsHtml('')}</select>
         </div>
-        <div class="field"><label id="qMitLbl">${kind === 'opportunity' ? 'Capture plan' : 'Mitigation'}</label><textarea id="qMit" placeholder="Brief description of the response"></textarea></div>
+        <div class="field"><label id="qMitLbl">${kind === 'opportunity' ? 'Capture plan' : 'Mitigation'}</label>${ceComposeHTML({ id: 'qMit', placeholder: 'Brief description of the response — Gmail links welcome' })}</div>
         <div class="field"><label>Linked action (optional)</label>
           <select id="qActionLink">
             <option value="">— none —</option>
@@ -14851,7 +14851,7 @@
     } else if (qaType === 'decision') {
       body.innerHTML = `
         <div class="field"><label>Title</label><input id="qTitle" /></div>
-        <div class="field"><label>Rationale</label><textarea id="qRat"></textarea></div>
+        <div class="field"><label>Rationale</label>${ceComposeHTML({ id: 'qRat', placeholder: 'Why this call — Gmail links welcome' })}</div>
         <div class="qa-row">
           <div class="field"><label>Owner</label>
             <select id="qOwner" data-person-select>${personOptionsHtml('')}</select>
@@ -14960,7 +14960,7 @@
       const tpls = state.templates || [];
       body.innerHTML = `
         <div class="field"><label>Name</label><input id="qName" /></div>
-        <div class="field"><label>Description</label><textarea id="qDesc"></textarea></div>
+        <div class="field"><label>Description</label>${ceComposeHTML({ id: 'qDesc', placeholder: 'Project description — Gmail links welcome' })}</div>
         ${tpls.length ? `
         <div class="field"><label>Start from <span class="muted">— template, or empty</span></label>
           <select id="qFrom">
@@ -14972,7 +14972,7 @@
       body.innerHTML = `
         <div class="field"><label>Title</label><input id="qTitle" placeholder="Display name" /></div>
         <div class="field"><label>URL or path</label><input id="qUrl" placeholder="https://… or file:///…" /></div>
-        <div class="field"><label>Description</label><textarea id="qDesc" placeholder="What this is and when to use it"></textarea></div>
+        <div class="field"><label>Description</label>${ceComposeHTML({ id: 'qDesc', placeholder: 'What this is and when to use it — Gmail links welcome' })}</div>
         <div class="qa-row">
           <div class="field"><label>Component (optional)</label>
             <select id="qComp">
@@ -15018,7 +15018,7 @@
         deliverable: $('#qDel').value || null,
         milestone: null,
         description: qaInit.description || null,
-        notes: $('#qNotes').value || '',
+        notes: readCE('qNotes') || '',
         createdAt: todayISO(), updatedAt: todayISO(),
         history: [{ at: todayISO(), what: 'Created' }],
       };
@@ -15087,7 +15087,7 @@
         identifier: generateRiskIdentifier(proj, kind),
         inherent: { probability: inhP, impact: inhI },
         residual: { probability: resP, impact: resI },
-        mitigation: $('#qMit').value || '',
+        mitigation: readCE('qMit') || '',
         actionId: $('#qActionLink').value || null,
         owner: $('#qOwner').value,
       });
@@ -15100,7 +15100,7 @@
       proj.decisions = proj.decisions || [];
       proj.decisions.push({
         id: uid('dec'), title,
-        rationale: $('#qRat').value || '',
+        rationale: readCE('qRat') || '',
         owner: $('#qOwner').value,
         date: $('#qDate').value || todayISO(),
         component: $('#qComponent')?.value || null,
@@ -15145,7 +15145,7 @@
       if (!name) return toast('Name required');
       const np = {
         id: uid('pr'), name,
-        description: $('#qDesc').value || '',
+        description: readCE('qDesc') || '',
         actions: [], deliverables: [], milestones: [], risks: [], decisions: [], changes: [], components: [], links: [],
       };
       const fromId = $('#qFrom')?.value;
@@ -15165,7 +15165,7 @@
       proj.links = proj.links || [];
       proj.links.push({
         id: uid('lk'), title, url,
-        description: $('#qDesc').value || '',
+        description: readCE('qDesc') || '',
         component: $('#qComp').value || null,
         folderId: $('#qFolder')?.value || qaInit.folderId || null,
       });
@@ -15963,6 +15963,20 @@
   // Public alias mirroring the naming used at call sites in the drawer /
   // notes builders. Both names call the same walker.
   function serializeChipsToText(el) { return _serializeChipsToText(el); }
+  // Drop-in replacement for `<textarea id=X value=Y>` in any form field
+  // that should accept Gmail chips. Renders a rich contenteditable div
+  // seeded with `renderTextWithChips(value)` so existing tokens display
+  // as chips on open. Callers read the value back through `readCE(id)`.
+  function ceComposeHTML({ id, value, placeholder, className, style } = {}) {
+    const cls = ['ce-compose', className].filter(Boolean).join(' ');
+    const sty = style ? ` style="${style}"` : '';
+    const ph  = placeholder ? ` data-placeholder="${escapeHTML(placeholder)}"` : '';
+    return `<div id="${id}" class="${cls}" contenteditable="true"${ph}${sty}>${renderTextWithChips(value || '')}</div>`;
+  }
+  function readCE(id) {
+    const el = typeof id === 'string' ? document.getElementById(id) : id;
+    return serializeChipsToText(el);
+  }
   function _gmailTokenText(subject, url) {
     return `[gmail:s|${encodeURIComponent(subject || '')}|${url}]`;
   }
