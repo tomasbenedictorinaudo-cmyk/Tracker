@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-16T21:17:43.359Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-16T21:41:44.294Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -8123,10 +8123,12 @@ body.is-row-dragging *        { user-select: none !important; }
 }
 body.notes-fullscreen { overflow: hidden; }
 .notes-panel.is-fullscreen .notes-resize { display: none; }
+/* Fullscreen: let the body fill the panel edge-to-edge instead of
+   capping at a reading-column width. */
 .notes-panel.is-fullscreen .notes-body {
-  max-width: 900px;
-  margin: 0 auto;
-  padding-inline: 16px;
+  max-width: none;
+  margin: 0;
+  padding-inline: 24px;
 }
 /* Compact H1–H5 group — distinct from word-style buttons */
 .notes-toolbar button.nt-h {
