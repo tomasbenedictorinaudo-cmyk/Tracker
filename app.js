@@ -15998,17 +15998,51 @@
     const body = $('#notesBody');
     const toc  = $('#notesToc');
     if (!body || !toc) return;
+    // First, stamp a stable id on every highlight so the TOC icons can
+    // deep-link straight to the mark. Preserve any existing ids so
+    // clicking a chip lands on the same target across rebuilds.
+    const marks = body.querySelectorAll('mark.nt-hl');
+    marks.forEach((m, i) => {
+      if (!m.id) m.id = `nt-hl-${i}-${(m.dataset.hl || 'x')}`;
+    });
     const headings = body.querySelectorAll('h1, h2, h3, h4, h5, h6');
     const items = [];
     headings.forEach((h, i) => {
       const text = (h.textContent || '').trim();
       if (!text) return;
-      // Stable id per heading position; preserve any author-set id.
       if (!h.id) {
         const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'h';
         h.id = `nt-h-${i}-${slug}`;
       }
-      items.push({ id: h.id, text, lvl: parseInt(h.tagName[1], 10) || 3 });
+      items.push({ id: h.id, text, lvl: parseInt(h.tagName[1], 10) || 3, el: h });
+    });
+    // For each heading, walk forward through the DOM collecting nt-hl
+    // marks until we hit the next heading of same or higher level.
+    // That defines the "section" this heading owns.
+    const allHeadings = [...headings];
+    items.forEach((it, i) => {
+      const own = it.lvl;
+      // Find the DOM node that ends this section.
+      let end = null;
+      for (let j = i + 1; j < allHeadings.length; j++) {
+        const other = allHeadings[j];
+        const olvl = parseInt(other.tagName[1], 10);
+        if (olvl <= own) { end = other; break; }
+      }
+      const hits = { ok: [], warn: [], bad: [] };
+      // Walk forward. NodeIterator with a document position check would
+      // work; a simple `nextNode` walk stopping at `end` is enough.
+      let cursor = it.el;
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_ELEMENT);
+      walker.currentNode = cursor;
+      while ((cursor = walker.nextNode())) {
+        if (cursor === end) break;
+        if (cursor.tagName === 'MARK' && cursor.classList.contains('nt-hl')) {
+          const kind = cursor.dataset.hl;
+          if (hits[kind]) hits[kind].push(cursor.id);
+        }
+      }
+      it.hits = hits;
     });
     const resize = $('#notesTocResize');
     if (!items.length) {
@@ -16016,19 +16050,62 @@
       if (resize) resize.hidden = true;
       return;
     }
+    const chipHTML = (hits) => {
+      const parts = [];
+      if (hits.bad.length)  parts.push(`<button type="button" class="notes-toc-chip bad"  data-toc-kind="bad"  title="${hits.bad.length} failure${hits.bad.length === 1 ? '' : 's'} — click to jump">✕ ${hits.bad.length}</button>`);
+      if (hits.warn.length) parts.push(`<button type="button" class="notes-toc-chip warn" data-toc-kind="warn" title="${hits.warn.length} warning${hits.warn.length === 1 ? '' : 's'} — click to jump">⚠ ${hits.warn.length}</button>`);
+      if (hits.ok.length)   parts.push(`<button type="button" class="notes-toc-chip ok"   data-toc-kind="ok"   title="${hits.ok.length} success${hits.ok.length === 1 ? '' : 'es'} — click to jump">✓ ${hits.ok.length}</button>`);
+      return parts.join('');
+    };
     toc.innerHTML = `
       <div class="notes-toc-head">Contents</div>
       <ol class="notes-toc-list">
         ${items.map((it) => `
-          <li class="notes-toc-item lvl-${it.lvl}">
+          <li class="notes-toc-item lvl-${it.lvl}" data-hl-ok="${it.hits.ok.join(',')}" data-hl-warn="${it.hits.warn.join(',')}" data-hl-bad="${it.hits.bad.join(',')}">
             <a href="#${escapeHTML(it.id)}" data-toc-target="${escapeHTML(it.id)}">${escapeHTML(it.text)}</a>
+            <span class="notes-toc-chips">${chipHTML(it.hits)}</span>
           </li>`).join('')}
       </ol>`;
     toc.hidden = false;
     if (resize) resize.hidden = false;
-    // Apply the user's persisted TOC height (if any) on every rebuild
-    // — TOC content changes but the chosen visual height should stick.
     applyNotesTocHeight();
+    _wireNotesTocChips(toc);
+  }
+
+  // Chip click / cycle logic. Each chip owns a rotating cursor keyed
+  // on section-index + kind so successive clicks step through hits
+  // instead of always jumping to the first one.
+  const _tocCycleCursor = new Map();
+  function _wireNotesTocChips(toc) {
+    if (toc.dataset.chipsWired === '1') return;
+    toc.dataset.chipsWired = '1';
+    toc.addEventListener('click', (e) => {
+      const chip = e.target.closest('.notes-toc-chip[data-toc-kind]');
+      if (!chip) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const li = chip.closest('.notes-toc-item');
+      const kind = chip.dataset.tocKind;
+      const ids = (li?.getAttribute(`data-hl-${kind}`) || '').split(',').filter(Boolean);
+      if (!ids.length) return;
+      const key = `${[...toc.querySelectorAll('.notes-toc-item')].indexOf(li)}:${kind}`;
+      const next = (_tocCycleCursor.get(key) || 0) % ids.length;
+      _tocCycleCursor.set(key, next + 1);
+      const target = document.getElementById(ids[next]);
+      if (!target) return;
+      const scroller = $('#notesBody');
+      // Highlight briefly to signal where we landed.
+      target.classList.add('nt-hl-flash');
+      setTimeout(() => target.classList.remove('nt-hl-flash'), 1200);
+      // Scroll the notes body so target is centered vertically.
+      if (scroller) {
+        const t = target.getBoundingClientRect();
+        const s = scroller.getBoundingClientRect();
+        scroller.scrollTo({ top: scroller.scrollTop + (t.top - s.top) - (s.height / 2) + (t.height / 2), behavior: 'smooth' });
+      } else {
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      }
+    });
   }
 
   // Apply state.settings.notesTocHeight (px) to the TOC element. Clamped

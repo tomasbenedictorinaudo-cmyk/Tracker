@@ -8353,6 +8353,9 @@ body.notes-fullscreen { overflow: hidden; }
   margin: 0;
   font-size: 11.5px;
   line-height: 1.4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 .notes-toc-item a {
   display: block;
@@ -8365,6 +8368,60 @@ body.notes-fullscreen { overflow: hidden; }
   overflow: hidden;
   text-overflow: ellipsis;
   transition: color var(--transition), background var(--transition), border-color var(--transition);
+  flex: 1;
+  min-width: 0;
+}
+.notes-toc-chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding-right: 4px;
+}
+.notes-toc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 5px;
+  height: 16px;
+  line-height: 14px;
+  border-radius: 8px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background var(--transition), border-color var(--transition), transform .1s ease;
+}
+.notes-toc-chip:hover { transform: translateY(-1px); }
+.notes-toc-chip.ok {
+  color: var(--ok);
+  background: rgba(74,222,128,.12);
+  border-color: rgba(74,222,128,.45);
+}
+.notes-toc-chip.ok:hover   { background: rgba(74,222,128,.24); }
+.notes-toc-chip.warn {
+  color: var(--warn);
+  background: rgba(251,191,36,.15);
+  border-color: rgba(251,191,36,.50);
+}
+.notes-toc-chip.warn:hover { background: rgba(251,191,36,.28); }
+.notes-toc-chip.bad {
+  color: var(--bad);
+  background: rgba(248,113,121,.14);
+  border-color: rgba(248,113,121,.50);
+}
+.notes-toc-chip.bad:hover  { background: rgba(248,113,121,.26); }
+
+/* Flash the landed highlight briefly so users see where they jumped. */
+.notes-body .nt-hl.nt-hl-flash {
+  animation: nt-hl-flash 1.2s ease-out;
+}
+@keyframes nt-hl-flash {
+  0%   { box-shadow: 0 0 0 0 currentColor; filter: brightness(1.6); }
+  30%  { box-shadow: 0 0 0 6px rgba(255,255,255,0); filter: brightness(1.4); }
+  100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); filter: none; }
 }
 .notes-toc-item a:hover {
   color: var(--accent);
