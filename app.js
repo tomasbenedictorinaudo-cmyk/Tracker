@@ -15921,13 +15921,13 @@
   function _gmailChipHTML({ url, subject, threadId }) {
     const label = subject && subject.trim() ? subject.trim() : 'Gmail thread';
     const idHint = threadId ? threadId.slice(0, 6) : '';
-    return `<a class="gm-chip" href="${escapeHTML(url)}" data-gmail-thread="${escapeHTML(threadId)}" data-gmail-subject="${escapeHTML(subject || '')}" target="_blank" rel="noopener noreferrer" title="Double-click the envelope to open in Gmail — ${escapeHTML(url)}" contenteditable="false">
-      <span class="gm-chip-icon" aria-hidden="true" title="Double-click to open"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v.4l8 5 8-5V8H4Zm16 2.4-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 10.4V16h16v-5.6Z"/></svg></span>
+    return `<a class="gm-chip" href="${escapeHTML(url)}" data-gmail-thread="${escapeHTML(threadId)}" data-gmail-subject="${escapeHTML(subject || '')}" target="_blank" rel="noopener noreferrer" title="Double-click to open in Gmail — ${escapeHTML(url)}" contenteditable="false">
+      <span class="gm-chip-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v.4l8 5 8-5V8H4Zm16 2.4-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 10.4V16h16v-5.6Z"/></svg></span>
       <span class="gm-chip-body">
         <span class="gm-chip-subject">${escapeHTML(label)}</span>
-        <span class="gm-chip-meta">${subject ? 'Gmail' : 'Gmail thread'}${idHint ? ' · ' + escapeHTML(idHint) : ''}</span>
+        <span class="gm-chip-meta">${subject ? 'Gmail — double-click to open' : 'Gmail thread — double-click to open'}${idHint ? ' · ' + escapeHTML(idHint) : ''}</span>
       </span>
-      <span class="gm-chip-open" aria-hidden="true" title="Double-click the envelope to open">↗</span>
+      <span class="gm-chip-open" aria-hidden="true">↗</span>
     </a>`;
   }
   // Walk a contenteditable's DOM and rebuild the token-bearing plain-text
@@ -16104,9 +16104,7 @@
     e.preventDefault();
   }, true);
   document.addEventListener('dblclick', (e) => {
-    const opener = e.target.closest?.('.gm-chip-icon, .gm-chip-open');
-    if (!opener) return;
-    const chip = opener.closest('.gm-chip');
+    const chip = e.target.closest?.('.gm-chip');
     if (!chip) return;
     e.preventDefault();
     e.stopPropagation();

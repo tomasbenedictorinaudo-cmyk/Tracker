@@ -8462,7 +8462,7 @@ body.notes-fullscreen { overflow: hidden; }
   text-decoration: none;
   font-size: 12px;
   line-height: 1.25;
-  cursor: default;
+  cursor: pointer;
   transition: background var(--transition), border-color var(--transition), transform .1s ease, box-shadow var(--transition);
   overflow: hidden;
   -webkit-user-modify: read-only;
