@@ -13649,7 +13649,7 @@
         <label>Effort tracking <span class="muted">— actuals feed CPI / EAC on the Dashboard</span></label>
         <div class="effort-track" id="dEffort"></div>
       </div>
-      <div class="field"><label>Notes / justification</label><textarea id="dNotes">${escapeHTML(a.notes || '')}</textarea></div>
+      <div class="field"><label>Notes / justification</label><div id="dNotes" class="ce-compose ce-notes" contenteditable="true" data-placeholder="Notes, links, Gmail threads…">${renderTextWithChips(a.notes || '')}</div></div>
       <div class="field"><label>Comments</label>
         <div class="comments" id="dComments"></div>
       </div>
@@ -14285,7 +14285,7 @@
           }).join('') : '<div class="comments-empty">No comments yet.</div>'}
         </div>
         <div class="comment-compose">
-          <textarea id="dCommentNew" placeholder="Add a comment…" rows="2"></textarea>
+          <div id="dCommentNew" class="ce-compose ce-comment" contenteditable="true" data-placeholder="Add a comment…"></div>
           <button class="ghost" id="dCommentPost" disabled>Post</button>
         </div>`;
       wrap.querySelectorAll('[data-action="del-comment"]').forEach((btn) => {
@@ -14303,9 +14303,10 @@
       });
       const ta = $('#dCommentNew');
       const post = $('#dCommentPost');
-      ta?.addEventListener('input', () => { post.disabled = !ta.value.trim(); });
+      const isEmpty = () => !serializeChipsToText(ta).trim();
+      ta?.addEventListener('input', () => { post.disabled = isEmpty(); });
       post?.addEventListener('click', () => {
-        const text = ta.value.trim();
+        const text = serializeChipsToText(ta).trim();
         if (!text) return;
         a.comments = a.comments || [];
         a.comments.push({
@@ -14539,7 +14540,7 @@
       a.tags = drawerTags.slice();
       const tagsChanged = oldTags.length !== a.tags.length || oldTags.some((t, i) => t !== a.tags[i]);
       if (tagsChanged) a.history.push({ at: todayISO(), what: `Tags: ${oldTags.length} → ${a.tags.length}` });
-      a.notes = $('#dNotes').value;
+      a.notes = serializeChipsToText($('#dNotes'));
       a.updatedAt = todayISO();
       if (oldStatus !== a.status) {
         a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${a.status}` });
@@ -15920,15 +15921,48 @@
   function _gmailChipHTML({ url, subject, threadId }) {
     const label = subject && subject.trim() ? subject.trim() : 'Gmail thread';
     const idHint = threadId ? threadId.slice(0, 6) : '';
-    return `<a class="gm-chip" href="${escapeHTML(url)}" data-gmail-thread="${escapeHTML(threadId)}" data-gmail-subject="${escapeHTML(subject || '')}" target="_blank" rel="noopener noreferrer" title="Open in Gmail — ${escapeHTML(url)}" contenteditable="false">
-      <span class="gm-chip-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v.4l8 5 8-5V8H4Zm16 2.4-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 10.4V16h16v-5.6Z"/></svg></span>
+    return `<a class="gm-chip" href="${escapeHTML(url)}" data-gmail-thread="${escapeHTML(threadId)}" data-gmail-subject="${escapeHTML(subject || '')}" target="_blank" rel="noopener noreferrer" title="Double-click the envelope to open in Gmail — ${escapeHTML(url)}" contenteditable="false">
+      <span class="gm-chip-icon" aria-hidden="true" title="Double-click to open"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v.4l8 5 8-5V8H4Zm16 2.4-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 10.4V16h16v-5.6Z"/></svg></span>
       <span class="gm-chip-body">
         <span class="gm-chip-subject">${escapeHTML(label)}</span>
         <span class="gm-chip-meta">${subject ? 'Gmail' : 'Gmail thread'}${idHint ? ' · ' + escapeHTML(idHint) : ''}</span>
       </span>
-      <span class="gm-chip-open" aria-hidden="true">↗</span>
+      <span class="gm-chip-open" aria-hidden="true" title="Double-click the envelope to open">↗</span>
     </a>`;
   }
+  // Walk a contenteditable's DOM and rebuild the token-bearing plain-text
+  // form (chips → `[gmail:s|<enc-subj>|<url>]`, <br> → \n, block boundaries
+  // → \n). Used to serialize rich compose fields back to `a.notes` /
+  // `comment.text` without losing chip payloads.
+  function _serializeChipsToText(el) {
+    if (!el) return '';
+    let out = '';
+    const walk = (node) => {
+      for (const n of node.childNodes) {
+        if (n.nodeType === 3) { out += n.nodeValue; continue; }
+        if (n.nodeType !== 1) continue;
+        if (n.classList?.contains('gm-chip')) {
+          const subj = n.getAttribute('data-gmail-subject') || '';
+          const url = n.getAttribute('href') || '';
+          out += _gmailTokenText(subj, url);
+          continue;
+        }
+        const tag = n.tagName;
+        if (tag === 'BR') { out += '\n'; continue; }
+        if (tag === 'DIV' || tag === 'P') {
+          if (out && !out.endsWith('\n')) out += '\n';
+          walk(n);
+          continue;
+        }
+        walk(n);
+      }
+    };
+    walk(el);
+    return out.replace(/ /g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  // Public alias mirroring the naming used at call sites in the drawer /
+  // notes builders. Both names call the same walker.
+  function serializeChipsToText(el) { return _serializeChipsToText(el); }
   function _gmailTokenText(subject, url) {
     return `[gmail:s|${encodeURIComponent(subject || '')}|${url}]`;
   }
@@ -16058,6 +16092,26 @@
         target.dispatchEvent(new Event('input', { bubbles: true }));
       }
     });
+  }, true);
+  // Chip click behavior: single click is a no-op (so a chip inside
+  // editable text doesn't yank the user off-page when they meant to
+  // place the caret); double-click on the envelope icon (or the ↗)
+  // opens the Gmail thread in a new tab. Right-click still exposes
+  // the browser's "Copy link" via the underlying <a href>.
+  document.addEventListener('click', (e) => {
+    const chip = e.target.closest?.('.gm-chip');
+    if (!chip) return;
+    e.preventDefault();
+  }, true);
+  document.addEventListener('dblclick', (e) => {
+    const opener = e.target.closest?.('.gm-chip-icon, .gm-chip-open');
+    if (!opener) return;
+    const chip = opener.closest('.gm-chip');
+    if (!chip) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const url = chip.getAttribute('href');
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
   }, true);
 
   function wireListReorder(listEl, opts) {

@@ -756,7 +756,8 @@ input, select, textarea { font: inherit; color: inherit; }
   line-height: 1.45;
 }
 .comment-compose { display: flex; gap: 8px; align-items: stretch; }
-.comment-compose textarea {
+.comment-compose textarea,
+.comment-compose .ce-compose {
   flex: 1;
   background: var(--bg-2);
   border: 1px solid var(--line);
@@ -769,12 +770,40 @@ input, select, textarea { font: inherit; color: inherit; }
   resize: vertical;
   min-height: 38px;
 }
-.comment-compose textarea:focus { outline: none; border-color: var(--accent); }
+.comment-compose textarea:focus,
+.comment-compose .ce-compose:focus { outline: none; border-color: var(--accent); }
 .comment-compose button {
   align-self: stretch;
   padding: 6px 12px;
   font-size: 12px;
 }
+
+/* Rich-compose contenteditable — visually mimics a textarea but lets
+   Gmail chips render inline as you type. Used in the action drawer's
+   comment thread + notes field, and elsewhere the paste handler needs
+   to drop a chip visibly at the caret. */
+.ce-compose {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+  outline: none;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  min-height: 44px;
+  cursor: text;
+}
+.ce-compose:focus { border-color: var(--accent); }
+.ce-compose:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.ce-notes { min-height: 96px; }
 
 /* Phase L — first-run tour overlay */
 .tour-overlay {
@@ -8433,9 +8462,11 @@ body.notes-fullscreen { overflow: hidden; }
   text-decoration: none;
   font-size: 12px;
   line-height: 1.25;
-  cursor: pointer;
+  cursor: default;
   transition: background var(--transition), border-color var(--transition), transform .1s ease, box-shadow var(--transition);
   overflow: hidden;
+  -webkit-user-modify: read-only;
+  user-select: none;
 }
 .gm-chip:hover {
   background: linear-gradient(180deg, rgba(234, 67, 53, .22), rgba(234, 67, 53, .10));
@@ -8454,7 +8485,14 @@ body.notes-fullscreen { overflow: hidden; }
   color: white;
   flex-shrink: 0;
   box-shadow: 0 1px 2px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.15);
+  cursor: pointer;
+  transition: transform .1s ease, box-shadow var(--transition);
 }
+.gm-chip-icon:hover {
+  transform: scale(1.08);
+  box-shadow: 0 2px 6px rgba(234, 67, 53, .55), inset 0 1px 0 rgba(255,255,255,.25);
+}
+.gm-chip-open { cursor: pointer; }
 .gm-chip-body {
   display: inline-flex;
   flex-direction: column;

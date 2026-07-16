@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-16T22:01:02.733Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-16T22:13:29.271Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -765,7 +765,8 @@ input, select, textarea { font: inherit; color: inherit; }
   line-height: 1.45;
 }
 .comment-compose { display: flex; gap: 8px; align-items: stretch; }
-.comment-compose textarea {
+.comment-compose textarea,
+.comment-compose .ce-compose {
   flex: 1;
   background: var(--bg-2);
   border: 1px solid var(--line);
@@ -778,12 +779,40 @@ input, select, textarea { font: inherit; color: inherit; }
   resize: vertical;
   min-height: 38px;
 }
-.comment-compose textarea:focus { outline: none; border-color: var(--accent); }
+.comment-compose textarea:focus,
+.comment-compose .ce-compose:focus { outline: none; border-color: var(--accent); }
 .comment-compose button {
   align-self: stretch;
   padding: 6px 12px;
   font-size: 12px;
 }
+
+/* Rich-compose contenteditable — visually mimics a textarea but lets
+   Gmail chips render inline as you type. Used in the action drawer's
+   comment thread + notes field, and elsewhere the paste handler needs
+   to drop a chip visibly at the caret. */
+.ce-compose {
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.45;
+  outline: none;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  min-height: 44px;
+  cursor: text;
+}
+.ce-compose:focus { border-color: var(--accent); }
+.ce-compose:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+  pointer-events: none;
+}
+.ce-notes { min-height: 96px; }
 
 /* Phase L — first-run tour overlay */
 .tour-overlay {
@@ -8442,9 +8471,11 @@ body.notes-fullscreen { overflow: hidden; }
   text-decoration: none;
   font-size: 12px;
   line-height: 1.25;
-  cursor: pointer;
+  cursor: default;
   transition: background var(--transition), border-color var(--transition), transform .1s ease, box-shadow var(--transition);
   overflow: hidden;
+  -webkit-user-modify: read-only;
+  user-select: none;
 }
 .gm-chip:hover {
   background: linear-gradient(180deg, rgba(234, 67, 53, .22), rgba(234, 67, 53, .10));
@@ -8463,7 +8494,14 @@ body.notes-fullscreen { overflow: hidden; }
   color: white;
   flex-shrink: 0;
   box-shadow: 0 1px 2px rgba(0,0,0,.3), inset 0 1px 0 rgba(255,255,255,.15);
+  cursor: pointer;
+  transition: transform .1s ease, box-shadow var(--transition);
 }
+.gm-chip-icon:hover {
+  transform: scale(1.08);
+  box-shadow: 0 2px 6px rgba(234, 67, 53, .55), inset 0 1px 0 rgba(255,255,255,.25);
+}
+.gm-chip-open { cursor: pointer; }
 .gm-chip-body {
   display: inline-flex;
   flex-direction: column;
@@ -23071,7 +23109,7 @@ body.notes-fullscreen { overflow: hidden; }
         <label>Effort tracking <span class="muted">— actuals feed CPI / EAC on the Dashboard</span></label>
         <div class="effort-track" id="dEffort"></div>
       </div>
-      <div class="field"><label>Notes / justification</label><textarea id="dNotes">${escapeHTML(a.notes || '')}</textarea></div>
+      <div class="field"><label>Notes / justification</label><div id="dNotes" class="ce-compose ce-notes" contenteditable="true" data-placeholder="Notes, links, Gmail threads…">${renderTextWithChips(a.notes || '')}</div></div>
       <div class="field"><label>Comments</label>
         <div class="comments" id="dComments"></div>
       </div>
@@ -23707,7 +23745,7 @@ body.notes-fullscreen { overflow: hidden; }
           }).join('') : '<div class="comments-empty">No comments yet.</div>'}
         </div>
         <div class="comment-compose">
-          <textarea id="dCommentNew" placeholder="Add a comment…" rows="2"></textarea>
+          <div id="dCommentNew" class="ce-compose ce-comment" contenteditable="true" data-placeholder="Add a comment…"></div>
           <button class="ghost" id="dCommentPost" disabled>Post</button>
         </div>`;
       wrap.querySelectorAll('[data-action="del-comment"]').forEach((btn) => {
@@ -23725,9 +23763,10 @@ body.notes-fullscreen { overflow: hidden; }
       });
       const ta = $('#dCommentNew');
       const post = $('#dCommentPost');
-      ta?.addEventListener('input', () => { post.disabled = !ta.value.trim(); });
+      const isEmpty = () => !serializeChipsToText(ta).trim();
+      ta?.addEventListener('input', () => { post.disabled = isEmpty(); });
       post?.addEventListener('click', () => {
-        const text = ta.value.trim();
+        const text = serializeChipsToText(ta).trim();
         if (!text) return;
         a.comments = a.comments || [];
         a.comments.push({
@@ -23961,7 +24000,7 @@ body.notes-fullscreen { overflow: hidden; }
       a.tags = drawerTags.slice();
       const tagsChanged = oldTags.length !== a.tags.length || oldTags.some((t, i) => t !== a.tags[i]);
       if (tagsChanged) a.history.push({ at: todayISO(), what: `Tags: ${oldTags.length} → ${a.tags.length}` });
-      a.notes = $('#dNotes').value;
+      a.notes = serializeChipsToText($('#dNotes'));
       a.updatedAt = todayISO();
       if (oldStatus !== a.status) {
         a.history.push({ at: todayISO(), what: `Status: ${oldStatus} → ${a.status}` });
@@ -25342,15 +25381,48 @@ body.notes-fullscreen { overflow: hidden; }
   function _gmailChipHTML({ url, subject, threadId }) {
     const label = subject && subject.trim() ? subject.trim() : 'Gmail thread';
     const idHint = threadId ? threadId.slice(0, 6) : '';
-    return `<a class="gm-chip" href="${escapeHTML(url)}" data-gmail-thread="${escapeHTML(threadId)}" data-gmail-subject="${escapeHTML(subject || '')}" target="_blank" rel="noopener noreferrer" title="Open in Gmail — ${escapeHTML(url)}" contenteditable="false">
-      <span class="gm-chip-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v.4l8 5 8-5V8H4Zm16 2.4-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 10.4V16h16v-5.6Z"/></svg></span>
+    return `<a class="gm-chip" href="${escapeHTML(url)}" data-gmail-thread="${escapeHTML(threadId)}" data-gmail-subject="${escapeHTML(subject || '')}" target="_blank" rel="noopener noreferrer" title="Double-click the envelope to open in Gmail — ${escapeHTML(url)}" contenteditable="false">
+      <span class="gm-chip-icon" aria-hidden="true" title="Double-click to open"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v.4l8 5 8-5V8H4Zm16 2.4-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 10.4V16h16v-5.6Z"/></svg></span>
       <span class="gm-chip-body">
         <span class="gm-chip-subject">${escapeHTML(label)}</span>
         <span class="gm-chip-meta">${subject ? 'Gmail' : 'Gmail thread'}${idHint ? ' · ' + escapeHTML(idHint) : ''}</span>
       </span>
-      <span class="gm-chip-open" aria-hidden="true">↗</span>
+      <span class="gm-chip-open" aria-hidden="true" title="Double-click the envelope to open">↗</span>
     </a>`;
   }
+  // Walk a contenteditable's DOM and rebuild the token-bearing plain-text
+  // form (chips → `[gmail:s|<enc-subj>|<url>]`, <br> → \n, block boundaries
+  // → \n). Used to serialize rich compose fields back to `a.notes` /
+  // `comment.text` without losing chip payloads.
+  function _serializeChipsToText(el) {
+    if (!el) return '';
+    let out = '';
+    const walk = (node) => {
+      for (const n of node.childNodes) {
+        if (n.nodeType === 3) { out += n.nodeValue; continue; }
+        if (n.nodeType !== 1) continue;
+        if (n.classList?.contains('gm-chip')) {
+          const subj = n.getAttribute('data-gmail-subject') || '';
+          const url = n.getAttribute('href') || '';
+          out += _gmailTokenText(subj, url);
+          continue;
+        }
+        const tag = n.tagName;
+        if (tag === 'BR') { out += '\n'; continue; }
+        if (tag === 'DIV' || tag === 'P') {
+          if (out && !out.endsWith('\n')) out += '\n';
+          walk(n);
+          continue;
+        }
+        walk(n);
+      }
+    };
+    walk(el);
+    return out.replace(/ /g, ' ').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  }
+  // Public alias mirroring the naming used at call sites in the drawer /
+  // notes builders. Both names call the same walker.
+  function serializeChipsToText(el) { return _serializeChipsToText(el); }
   function _gmailTokenText(subject, url) {
     return `[gmail:s|${encodeURIComponent(subject || '')}|${url}]`;
   }
@@ -25480,6 +25552,26 @@ body.notes-fullscreen { overflow: hidden; }
         target.dispatchEvent(new Event('input', { bubbles: true }));
       }
     });
+  }, true);
+  // Chip click behavior: single click is a no-op (so a chip inside
+  // editable text doesn't yank the user off-page when they meant to
+  // place the caret); double-click on the envelope icon (or the ↗)
+  // opens the Gmail thread in a new tab. Right-click still exposes
+  // the browser's "Copy link" via the underlying <a href>.
+  document.addEventListener('click', (e) => {
+    const chip = e.target.closest?.('.gm-chip');
+    if (!chip) return;
+    e.preventDefault();
+  }, true);
+  document.addEventListener('dblclick', (e) => {
+    const opener = e.target.closest?.('.gm-chip-icon, .gm-chip-open');
+    if (!opener) return;
+    const chip = opener.closest('.gm-chip');
+    if (!chip) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const url = chip.getAttribute('href');
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
   }, true);
 
   function wireListReorder(listEl, opts) {
