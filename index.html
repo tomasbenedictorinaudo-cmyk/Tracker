@@ -152,6 +152,10 @@
       <div class="notes-head">
         <div class="notes-title">Meeting notes</div>
         <div class="notes-meta" id="notesMeta"></div>
+        <button class="icon-btn" id="btnNotesFullscreen" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">
+          <svg class="nt-fs-in" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <svg class="nt-fs-out" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
         <button class="icon-btn" id="btnNotesClose" title="Close">×</button>
       </div>
       <div class="notes-toolbar">
@@ -173,6 +177,12 @@
           <span class="nt-color-bar" id="ntColorBar"></span>
           <input type="color" id="ntColorInput" value="#6ea8ff" />
         </label>
+        <span class="sep"></span>
+        <button data-hl="ok"   class="nt-hl-btn nt-hl-btn-ok"   title="Highlight as success">✓</button>
+        <button data-hl="warn" class="nt-hl-btn nt-hl-btn-warn" title="Highlight as warning">⚠</button>
+        <button data-hl="bad"  class="nt-hl-btn nt-hl-btn-bad"  title="Highlight as failure">✕</button>
+        <button data-hl="clear" title="Remove highlight">◌</button>
+        <span class="sep"></span>
         <button data-cmd="removeFormat" title="Clear formatting">✕</button>
       </div>
       <nav class="notes-toc" id="notesToc" aria-label="Notes contents" hidden></nav>

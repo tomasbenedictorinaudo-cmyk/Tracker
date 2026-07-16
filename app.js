@@ -16101,6 +16101,46 @@
     notesLangTimer = setTimeout(applyNotesLangDetection, 700);
   }
 
+  // Unwrap any <mark class="nt-hl…"> descendants of `root` that
+   // intersect `range`. Used by the "clear highlight" button and by
+   // the semantic-highlight buttons before wrapping so classes don't
+   // stack on repeated clicks.
+  function _unhighlightRange(root, range) {
+    if (!root || !range) return;
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, {
+      acceptNode: (n) => (n.tagName === 'MARK' && n.classList.contains('nt-hl')) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP,
+    });
+    const hits = [];
+    let n;
+    while ((n = walker.nextNode())) {
+      const r = document.createRange();
+      r.selectNode(n);
+      // Intersects the caller's range?
+      if (range.compareBoundaryPoints(Range.END_TO_START, r) <= 0 &&
+          range.compareBoundaryPoints(Range.START_TO_END, r) >= 0) {
+        hits.push(n);
+      }
+    }
+    hits.forEach((m) => {
+      // Replace <mark class="nt-hl…"><span icon><span text>content</span></span></mark>
+      // with just the inner content nodes.
+      const textSpan = m.querySelector(':scope > .nt-hl-text');
+      const parent = m.parentNode;
+      if (!parent) return;
+      const frag = document.createDocumentFragment();
+      if (textSpan) {
+        while (textSpan.firstChild) frag.appendChild(textSpan.firstChild);
+      } else {
+        while (m.firstChild) {
+          const c = m.firstChild;
+          if (c.classList && c.classList.contains('nt-hl-icon')) { m.removeChild(c); continue; }
+          frag.appendChild(c);
+        }
+      }
+      parent.replaceChild(frag, m);
+    });
+  }
+
   function scheduleNotesSave() {
     clearTimeout(notesSaveTimer);
     const s = $('#notesSaved');
@@ -16351,6 +16391,79 @@
       state.notesOpen = false;
       saveState();
       applyNotesPanel();
+    });
+
+    // Fullscreen toggle — expands the notes panel to the full viewport.
+    // Persists per-session (not stored) so a new visit opens sidebar-sized.
+    $('#btnNotesFullscreen')?.addEventListener('click', () => {
+      const p = $('#notesPanel');
+      if (!p) return;
+      p.classList.toggle('is-fullscreen');
+      document.body.classList.toggle('notes-fullscreen', p.classList.contains('is-fullscreen'));
+      $('#notesBody')?.focus();
+    });
+    // Esc exits fullscreen (only when notes are focused, and the drawer /
+    // command palette aren't holding Esc for themselves).
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+      const p = $('#notesPanel');
+      if (!p || !p.classList.contains('is-fullscreen')) return;
+      if (e.defaultPrevented) return;
+      const active = document.activeElement;
+      if (!(active && p.contains(active))) return;
+      e.preventDefault();
+      p.classList.remove('is-fullscreen');
+      document.body.classList.remove('notes-fullscreen');
+    });
+
+    // Semantic highlight buttons — wrap the current selection in a
+    // <mark> chip with an icon so the annotation reads as "warning /
+    // success / failure" not just a background colour. Round-trip via
+    // execCommand so undo/redo captures the change.
+    panel.querySelectorAll('.notes-toolbar [data-hl]').forEach((btn) => {
+      btn.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const kind = btn.dataset.hl;
+        const body = $('#notesBody');
+        if (!body) return;
+        body.focus();
+        const sel = window.getSelection();
+        if (!sel || sel.rangeCount === 0) return;
+        const range = sel.getRangeAt(0);
+        if (kind === 'clear') {
+          // Unwrap any <mark class="nt-hl"> that intersects the selection.
+          _unhighlightRange(body, range);
+          scheduleNotesSave();
+          return;
+        }
+        const iconMap = { ok: '✓', warn: '⚠', bad: '✕' };
+        const label   = { ok: 'success', warn: 'warning', bad: 'failure' }[kind] || kind;
+        if (range.collapsed) return; // nothing selected
+        // Remove any existing highlight wrappers first so classes don't stack
+        _unhighlightRange(body, range);
+        const contents = range.extractContents();
+        const mark = document.createElement('mark');
+        mark.className = `nt-hl nt-hl-${kind}`;
+        mark.setAttribute('data-hl', kind);
+        mark.setAttribute('title', label);
+        const icon = document.createElement('span');
+        icon.className = 'nt-hl-icon';
+        icon.setAttribute('aria-hidden', 'true');
+        icon.textContent = iconMap[kind] || '';
+        const text = document.createElement('span');
+        text.className = 'nt-hl-text';
+        text.appendChild(contents);
+        mark.appendChild(icon);
+        mark.appendChild(text);
+        range.insertNode(mark);
+        // Move the caret to after the inserted mark and clear the selection.
+        sel.removeAllRanges();
+        const after = document.createRange();
+        after.setStartAfter(mark);
+        after.collapse(true);
+        sel.addRange(after);
+        scheduleNotesSave();
+      });
     });
 
     // Drag-to-resize on the panel's left edge

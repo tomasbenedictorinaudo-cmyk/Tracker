@@ -8035,6 +8035,90 @@ body.is-row-dragging *        { user-select: none !important; }
   font-weight: 600;
 }
 .notes-toolbar .notes-action-btn:hover { background: var(--accent); color: white; }
+
+/* Semantic highlight buttons — coloured tint hints at the resulting
+   chip; hover promotes the tint so they feel like real "apply" tools. */
+.nt-hl-btn {
+  min-width: 26px;
+  border-radius: 4px;
+  font-weight: 700;
+  border: 1px solid var(--line-2) !important;
+}
+.nt-hl-btn-ok   { color: var(--ok);   background: rgba(74,222,128,.10) !important; border-color: rgba(74,222,128,.35) !important; }
+.nt-hl-btn-warn { color: var(--warn); background: rgba(251,191,36,.10) !important; border-color: rgba(251,191,36,.35) !important; }
+.nt-hl-btn-bad  { color: var(--bad);  background: rgba(248,113,121,.10) !important; border-color: rgba(248,113,121,.35) !important; }
+.nt-hl-btn-ok:hover   { background: rgba(74,222,128,.22) !important; color: var(--ok); }
+.nt-hl-btn-warn:hover { background: rgba(251,191,36,.22) !important; color: var(--warn); }
+.nt-hl-btn-bad:hover  { background: rgba(248,113,121,.22) !important; color: var(--bad); }
+
+/* Inline highlight chips in the notes body. Coloured background, a
+   slightly darker border, and a leading icon to identify semantics
+   (✓ success · ⚠ warning · ✕ failure). Uses .nt-hl-icon for the
+   glyph and .nt-hl-text for the wrapped content — the split avoids
+   the icon getting merged into the surrounding text run. */
+.notes-body .nt-hl {
+  display: inline;
+  padding: 0 6px 1px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  color: inherit;
+  line-height: 1.4;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.notes-body .nt-hl-icon {
+  display: inline-block;
+  margin-right: 4px;
+  font-weight: 800;
+  font-size: .9em;
+  vertical-align: baseline;
+  transform: translateY(-0.5px);
+}
+.notes-body .nt-hl-text { color: inherit; }
+.notes-body .nt-hl-ok {
+  background: rgba(74,222,128,.18);
+  border-color: rgba(74,222,128,.55);
+}
+.notes-body .nt-hl-ok .nt-hl-icon { color: var(--ok); }
+.notes-body .nt-hl-warn {
+  background: rgba(251,191,36,.22);
+  border-color: rgba(251,191,36,.60);
+}
+.notes-body .nt-hl-warn .nt-hl-icon { color: var(--warn); }
+.notes-body .nt-hl-bad {
+  background: rgba(248,113,121,.20);
+  border-color: rgba(248,113,121,.60);
+}
+.notes-body .nt-hl-bad .nt-hl-icon { color: var(--bad); }
+
+/* Fullscreen toggle in the notes head — icon swap on state. */
+#btnNotesFullscreen { display: inline-flex; align-items: center; justify-content: center; }
+#btnNotesFullscreen .nt-fs-out { display: none; }
+.notes-panel.is-fullscreen #btnNotesFullscreen .nt-fs-in  { display: none; }
+.notes-panel.is-fullscreen #btnNotesFullscreen .nt-fs-out { display: inline-block; }
+
+/* Fullscreen notes — panel jumps out of the grid and covers the
+   viewport with a soft backdrop. Toolbars keep their normal styling;
+   only the outer geometry changes. */
+.notes-panel.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  border-left: none;
+  box-shadow: 0 20px 60px rgba(0,0,0,.55);
+  animation: nt-fs-in .18s ease-out;
+}
+@keyframes nt-fs-in {
+  from { opacity: .4; transform: scale(.985); }
+  to   { opacity: 1; transform: none; }
+}
+body.notes-fullscreen { overflow: hidden; }
+.notes-panel.is-fullscreen .notes-resize { display: none; }
+.notes-panel.is-fullscreen .notes-body {
+  max-width: 900px;
+  margin: 0 auto;
+  padding-inline: 16px;
+}
 /* Compact H1–H5 group — distinct from word-style buttons */
 .notes-toolbar button.nt-h {
   padding: 3px 6px;
