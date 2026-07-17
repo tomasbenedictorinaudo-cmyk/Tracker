@@ -14630,6 +14630,12 @@
               <label>Role <span class="muted">(optional)</span></label>
               <input id="newPersonRole" type="text" autocomplete="off" placeholder="e.g. Reviewer" />
             </div>
+            <div class="field">
+              <label class="qa-toggle" style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="newPersonExternal" style="margin-top:3px;" />
+                <span style="font-size:12px; color:var(--text-faint); line-height:1.4;">External stakeholder — customer POC, vendor rep, sister-project SE. Ownable but doesn't consume team capacity.</span>
+              </label>
+            </div>
             <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
               <button class="ghost" id="newPersonCancel">Cancel</button>
               <button class="primary" id="newPersonSave">Add person</button>
@@ -14640,15 +14646,24 @@
       const nameInp = overlay.querySelector('#newPersonName');
       const roleInp = overlay.querySelector('#newPersonRole');
       const close = (id) => { overlay.remove(); resolve(id); };
+      const extInp = overlay.querySelector('#newPersonExternal');
       const save = () => {
         const name = (nameInp.value || '').trim();
         if (!name) { nameInp.focus(); nameInp.setAttribute('placeholder', 'Name is required'); nameInp.classList.add('field-err'); return; }
         const role = (roleInp.value || '').trim();
-        const person = { id: uid('p'), name, role, capacity: 100, hourlyRate: 100 };
-        state.people.push(person);
-        stampEdit(person, null, 'created inline from Quick Add');
+        const isExternal = !!extInp?.checked;
+        let record;
+        if (isExternal) {
+          state.stakeholders = state.stakeholders || [];
+          record = { id: uid('sh'), name, role, external: true };
+          state.stakeholders.push(record);
+        } else {
+          record = { id: uid('p'), name, role, capacity: 100, hourlyRate: 100 };
+          state.people.push(record);
+        }
+        stampEdit(record, null, 'created inline from Quick Add');
         saveState();
-        close(person.id);
+        close(record.id);
       };
       overlay.querySelector('#newPersonClose').addEventListener('click', () => close(null));
       overlay.querySelector('#newPersonCancel').addEventListener('click', () => close(null));
@@ -14954,8 +14969,23 @@
         <div class="field"><label>Name</label><input id="qName" /></div>
         <div class="qa-row">
           <div class="field"><label>Role</label><input id="qRole" /></div>
-          <div class="field"><label>Capacity</label><input id="qCap" type="number" min="1" max="20" value="5" /></div>
+          <div class="field"><label>Capacity <span class="muted" id="qCapHint">(% FTE)</span></label><input id="qCap" type="number" min="1" max="20" value="5" /></div>
+        </div>
+        <div class="field">
+          <label class="qa-toggle">
+            <input type="checkbox" id="qExternal" />
+            <span>External stakeholder — customer POC, vendor rep, sister-project SE. Ownable but doesn't consume team capacity.</span>
+          </label>
         </div>`;
+      const ext = body.querySelector('#qExternal');
+      const cap = body.querySelector('#qCap');
+      const capHint = body.querySelector('#qCapHint');
+      ext?.addEventListener('change', () => {
+        // Externals have no capacity — hide the input while checked.
+        cap.disabled = ext.checked;
+        cap.style.opacity = ext.checked ? '.4' : '';
+        capHint.textContent = ext.checked ? '(not used — external)' : '(% FTE)';
+      });
     } else if (qaType === 'project') {
       const tpls = state.templates || [];
       body.innerHTML = `
@@ -15135,11 +15165,21 @@
     } else if (qaType === 'person') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
-      state.people.push({
-        id: uid('p'), name,
-        role: $('#qRole').value || '',
-        capacity: clamp(parseInt($('#qCap').value, 10) || 5, 1, 20),
-      });
+      const isExternal = !!$('#qExternal')?.checked;
+      if (isExternal) {
+        state.stakeholders = state.stakeholders || [];
+        state.stakeholders.push({
+          id: uid('sh'), name,
+          role: $('#qRole').value || '',
+          external: true,
+        });
+      } else {
+        state.people.push({
+          id: uid('p'), name,
+          role: $('#qRole').value || '',
+          capacity: clamp(parseInt($('#qCap').value, 10) || 5, 1, 20),
+        });
+      }
     } else if (qaType === 'project') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
@@ -15928,6 +15968,7 @@
         <span class="gm-chip-meta">${subject ? 'Gmail — double-click to open' : 'Gmail thread — double-click to open'}${idHint ? ' · ' + escapeHTML(idHint) : ''}</span>
       </span>
       <span class="gm-chip-open" aria-hidden="true">↗</span>
+      <button type="button" class="gm-chip-del" title="Remove this Gmail chip" aria-label="Remove" contenteditable="false">×</button>
     </a>`;
   }
   // Walk a contenteditable's DOM and rebuild the token-bearing plain-text
@@ -16124,6 +16165,65 @@
     e.stopPropagation();
     const url = chip.getAttribute('href');
     if (url) window.open(url, '_blank', 'noopener,noreferrer');
+  }, true);
+  // Chip × delete affordance — takes precedence over the click-swallow
+  // above (which preventDefaults every click on .gm-chip so links
+  // don't fire). Only meaningful when the chip lives inside a
+  // contenteditable — reading views render chips too, and there the
+  // delete button just hides via the .ce-compose-only CSS gate.
+  document.addEventListener('click', (e) => {
+    const del = e.target.closest?.('.gm-chip-del');
+    if (!del) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const chip = del.closest('.gm-chip');
+    if (!chip) return;
+    const host = chip.closest('[contenteditable="true"]');
+    // Remove trailing whitespace text node that the paste handler
+    // appended after the chip, so deleting a chip doesn't leave a
+    // dangling non-breaking space behind.
+    const next = chip.nextSibling;
+    if (next && next.nodeType === 3 && /^\s+$/.test(next.nodeValue || '')) next.remove();
+    chip.remove();
+    host?.dispatchEvent(new Event('input', { bubbles: true }));
+  }, true);
+  // Backspace / Delete when the caret sits right after or right before
+  // a chip → remove the chip. Browsers vary on whether the native key
+  // deletes a contenteditable="false" atom; this makes it predictable
+  // and keeps the paste-handler's trailing &nbsp; from surviving.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+    const target = e.target;
+    if (!target?.isContentEditable && !target?.closest?.('[contenteditable="true"]')) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.isCollapsed || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    let chip = null;
+    if (e.key === 'Backspace') {
+      // Look at what precedes the caret.
+      let node = range.startContainer;
+      let offset = range.startOffset;
+      if (node.nodeType === 3 && offset > 0) return; // caret mid-text
+      const prev = node.nodeType === 3
+        ? node.previousSibling
+        : (node.childNodes[offset - 1] || null);
+      if (prev?.classList?.contains?.('gm-chip')) chip = prev;
+    } else {
+      let node = range.startContainer;
+      let offset = range.startOffset;
+      if (node.nodeType === 3 && offset < node.nodeValue.length) return;
+      const next = node.nodeType === 3
+        ? node.nextSibling
+        : (node.childNodes[offset] || null);
+      if (next?.classList?.contains?.('gm-chip')) chip = next;
+    }
+    if (!chip) return;
+    e.preventDefault();
+    const host = chip.closest('[contenteditable="true"]');
+    const adj = chip.nextSibling;
+    if (adj && adj.nodeType === 3 && /^\s+$/.test(adj.nodeValue || '')) adj.remove();
+    chip.remove();
+    host?.dispatchEvent(new Event('input', { bubbles: true }));
   }, true);
 
   function wireListReorder(listEl, opts) {

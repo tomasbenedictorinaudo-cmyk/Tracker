@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-16T22:26:24.097Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-17T18:43:04.410Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -8554,6 +8554,33 @@ body.notes-fullscreen { overflow: hidden; }
   transition: opacity var(--transition), color var(--transition);
 }
 .gm-chip:hover .gm-chip-open { opacity: 1; color: #ea4335; }
+/* Delete "×" — only visible inside a contenteditable host so read
+   views (register rows, comment thread, notes body when saved, etc.)
+   don't show the affordance. Hover-only inside compose fields. */
+.gm-chip-del {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(234, 67, 53, .18);
+  color: #ea4335;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition), transform .1s ease;
+}
+[contenteditable="true"] .gm-chip .gm-chip-del,
+[contenteditable="true"] .gm-chip:hover .gm-chip-del { display: inline-flex; }
+.gm-chip-del:hover {
+  background: rgba(234, 67, 53, .35);
+  transform: scale(1.08);
+}
 
 /* Subject prompt popover shown next to the caret after pasting a
    Gmail URL. Small, focused input with Save / Skip. */
@@ -24109,6 +24136,12 @@ body.notes-fullscreen { overflow: hidden; }
               <label>Role <span class="muted">(optional)</span></label>
               <input id="newPersonRole" type="text" autocomplete="off" placeholder="e.g. Reviewer" />
             </div>
+            <div class="field">
+              <label class="qa-toggle" style="display:flex; align-items:flex-start; gap:8px; cursor:pointer;">
+                <input type="checkbox" id="newPersonExternal" style="margin-top:3px;" />
+                <span style="font-size:12px; color:var(--text-faint); line-height:1.4;">External stakeholder — customer POC, vendor rep, sister-project SE. Ownable but doesn't consume team capacity.</span>
+              </label>
+            </div>
             <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
               <button class="ghost" id="newPersonCancel">Cancel</button>
               <button class="primary" id="newPersonSave">Add person</button>
@@ -24119,15 +24152,24 @@ body.notes-fullscreen { overflow: hidden; }
       const nameInp = overlay.querySelector('#newPersonName');
       const roleInp = overlay.querySelector('#newPersonRole');
       const close = (id) => { overlay.remove(); resolve(id); };
+      const extInp = overlay.querySelector('#newPersonExternal');
       const save = () => {
         const name = (nameInp.value || '').trim();
         if (!name) { nameInp.focus(); nameInp.setAttribute('placeholder', 'Name is required'); nameInp.classList.add('field-err'); return; }
         const role = (roleInp.value || '').trim();
-        const person = { id: uid('p'), name, role, capacity: 100, hourlyRate: 100 };
-        state.people.push(person);
-        stampEdit(person, null, 'created inline from Quick Add');
+        const isExternal = !!extInp?.checked;
+        let record;
+        if (isExternal) {
+          state.stakeholders = state.stakeholders || [];
+          record = { id: uid('sh'), name, role, external: true };
+          state.stakeholders.push(record);
+        } else {
+          record = { id: uid('p'), name, role, capacity: 100, hourlyRate: 100 };
+          state.people.push(record);
+        }
+        stampEdit(record, null, 'created inline from Quick Add');
         saveState();
-        close(person.id);
+        close(record.id);
       };
       overlay.querySelector('#newPersonClose').addEventListener('click', () => close(null));
       overlay.querySelector('#newPersonCancel').addEventListener('click', () => close(null));
@@ -24433,8 +24475,23 @@ body.notes-fullscreen { overflow: hidden; }
         <div class="field"><label>Name</label><input id="qName" /></div>
         <div class="qa-row">
           <div class="field"><label>Role</label><input id="qRole" /></div>
-          <div class="field"><label>Capacity</label><input id="qCap" type="number" min="1" max="20" value="5" /></div>
+          <div class="field"><label>Capacity <span class="muted" id="qCapHint">(% FTE)</span></label><input id="qCap" type="number" min="1" max="20" value="5" /></div>
+        </div>
+        <div class="field">
+          <label class="qa-toggle">
+            <input type="checkbox" id="qExternal" />
+            <span>External stakeholder — customer POC, vendor rep, sister-project SE. Ownable but doesn't consume team capacity.</span>
+          </label>
         </div>`;
+      const ext = body.querySelector('#qExternal');
+      const cap = body.querySelector('#qCap');
+      const capHint = body.querySelector('#qCapHint');
+      ext?.addEventListener('change', () => {
+        // Externals have no capacity — hide the input while checked.
+        cap.disabled = ext.checked;
+        cap.style.opacity = ext.checked ? '.4' : '';
+        capHint.textContent = ext.checked ? '(not used — external)' : '(% FTE)';
+      });
     } else if (qaType === 'project') {
       const tpls = state.templates || [];
       body.innerHTML = `
@@ -24614,11 +24671,21 @@ body.notes-fullscreen { overflow: hidden; }
     } else if (qaType === 'person') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
-      state.people.push({
-        id: uid('p'), name,
-        role: $('#qRole').value || '',
-        capacity: clamp(parseInt($('#qCap').value, 10) || 5, 1, 20),
-      });
+      const isExternal = !!$('#qExternal')?.checked;
+      if (isExternal) {
+        state.stakeholders = state.stakeholders || [];
+        state.stakeholders.push({
+          id: uid('sh'), name,
+          role: $('#qRole').value || '',
+          external: true,
+        });
+      } else {
+        state.people.push({
+          id: uid('p'), name,
+          role: $('#qRole').value || '',
+          capacity: clamp(parseInt($('#qCap').value, 10) || 5, 1, 20),
+        });
+      }
     } else if (qaType === 'project') {
       const name = $('#qName').value.trim();
       if (!name) return toast('Name required');
@@ -25407,6 +25474,7 @@ body.notes-fullscreen { overflow: hidden; }
         <span class="gm-chip-meta">${subject ? 'Gmail — double-click to open' : 'Gmail thread — double-click to open'}${idHint ? ' · ' + escapeHTML(idHint) : ''}</span>
       </span>
       <span class="gm-chip-open" aria-hidden="true">↗</span>
+      <button type="button" class="gm-chip-del" title="Remove this Gmail chip" aria-label="Remove" contenteditable="false">×</button>
     </a>`;
   }
   // Walk a contenteditable's DOM and rebuild the token-bearing plain-text
@@ -25603,6 +25671,65 @@ body.notes-fullscreen { overflow: hidden; }
     e.stopPropagation();
     const url = chip.getAttribute('href');
     if (url) window.open(url, '_blank', 'noopener,noreferrer');
+  }, true);
+  // Chip × delete affordance — takes precedence over the click-swallow
+  // above (which preventDefaults every click on .gm-chip so links
+  // don't fire). Only meaningful when the chip lives inside a
+  // contenteditable — reading views render chips too, and there the
+  // delete button just hides via the .ce-compose-only CSS gate.
+  document.addEventListener('click', (e) => {
+    const del = e.target.closest?.('.gm-chip-del');
+    if (!del) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const chip = del.closest('.gm-chip');
+    if (!chip) return;
+    const host = chip.closest('[contenteditable="true"]');
+    // Remove trailing whitespace text node that the paste handler
+    // appended after the chip, so deleting a chip doesn't leave a
+    // dangling non-breaking space behind.
+    const next = chip.nextSibling;
+    if (next && next.nodeType === 3 && /^\s+$/.test(next.nodeValue || '')) next.remove();
+    chip.remove();
+    host?.dispatchEvent(new Event('input', { bubbles: true }));
+  }, true);
+  // Backspace / Delete when the caret sits right after or right before
+  // a chip → remove the chip. Browsers vary on whether the native key
+  // deletes a contenteditable="false" atom; this makes it predictable
+  // and keeps the paste-handler's trailing &nbsp; from surviving.
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Backspace' && e.key !== 'Delete') return;
+    const target = e.target;
+    if (!target?.isContentEditable && !target?.closest?.('[contenteditable="true"]')) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.isCollapsed || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    let chip = null;
+    if (e.key === 'Backspace') {
+      // Look at what precedes the caret.
+      let node = range.startContainer;
+      let offset = range.startOffset;
+      if (node.nodeType === 3 && offset > 0) return; // caret mid-text
+      const prev = node.nodeType === 3
+        ? node.previousSibling
+        : (node.childNodes[offset - 1] || null);
+      if (prev?.classList?.contains?.('gm-chip')) chip = prev;
+    } else {
+      let node = range.startContainer;
+      let offset = range.startOffset;
+      if (node.nodeType === 3 && offset < node.nodeValue.length) return;
+      const next = node.nodeType === 3
+        ? node.nextSibling
+        : (node.childNodes[offset] || null);
+      if (next?.classList?.contains?.('gm-chip')) chip = next;
+    }
+    if (!chip) return;
+    e.preventDefault();
+    const host = chip.closest('[contenteditable="true"]');
+    const adj = chip.nextSibling;
+    if (adj && adj.nodeType === 3 && /^\s+$/.test(adj.nodeValue || '')) adj.remove();
+    chip.remove();
+    host?.dispatchEvent(new Event('input', { bubbles: true }));
   }, true);
 
   function wireListReorder(listEl, opts) {
@@ -26242,6 +26369,34 @@ body.notes-fullscreen { overflow: hidden; }
     // <mark> chip with an icon so the annotation reads as "warning /
     // success / failure" not just a background colour. Round-trip via
     // execCommand so undo/redo captures the change.
+    // Clamp a range so it lives inside a block child of notesBody
+    // instead of directly at body level. Without this, clicking a
+    // highlight button without a prior caret in a paragraph would
+    // insert the <mark> as a sibling of <p> (dirty contenteditable
+    // HTML the browser wouldn't otherwise produce).
+    function _normalizeNotesRange(body, sel) {
+      let range = (sel && sel.rangeCount) ? sel.getRangeAt(0) : null;
+      const insideBody = range && body.contains(range.commonAncestorContainer);
+      if (!insideBody || range.startContainer === body) {
+        // Ensure there's a block child to host the mark.
+        let host = body.lastElementChild;
+        if (!host) { host = document.createElement('p'); body.appendChild(host); }
+        // If the range collapsed at a body-level offset, prefer the
+        // child right at that offset (or the last one) — otherwise
+        // land at the end of the last block.
+        if (insideBody && range.collapsed) {
+          const idx = range.startOffset;
+          const candidate = body.childNodes[idx - 1] || body.childNodes[idx] || host;
+          if (candidate && candidate.nodeType === 1) host = candidate;
+        }
+        range = document.createRange();
+        range.selectNodeContents(host);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      return range;
+    }
     panel.querySelectorAll('.notes-toolbar [data-hl]').forEach((btn) => {
       btn.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -26250,8 +26405,9 @@ body.notes-fullscreen { overflow: hidden; }
         if (!body) return;
         body.focus();
         const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0) return;
-        const range = sel.getRangeAt(0);
+        if (!sel) return;
+        const range = _normalizeNotesRange(body, sel);
+        if (!range) return;
         if (kind === 'clear') {
           // Unwrap any <mark class="nt-hl"> that intersects the selection.
           _unhighlightRange(body, range);

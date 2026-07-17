@@ -8545,6 +8545,33 @@ body.notes-fullscreen { overflow: hidden; }
   transition: opacity var(--transition), color var(--transition);
 }
 .gm-chip:hover .gm-chip-open { opacity: 1; color: #ea4335; }
+/* Delete "×" — only visible inside a contenteditable host so read
+   views (register rows, comment thread, notes body when saved, etc.)
+   don't show the affordance. Hover-only inside compose fields. */
+.gm-chip-del {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgba(234, 67, 53, .18);
+  color: #ea4335;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition), transform .1s ease;
+}
+[contenteditable="true"] .gm-chip .gm-chip-del,
+[contenteditable="true"] .gm-chip:hover .gm-chip-del { display: inline-flex; }
+.gm-chip-del:hover {
+  background: rgba(234, 67, 53, .35);
+  transform: scale(1.08);
+}
 
 /* Subject prompt popover shown next to the caret after pasting a
    Gmail URL. Small, focused input with Save / Skip. */
