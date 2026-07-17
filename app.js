@@ -16763,6 +16763,34 @@
     // <mark> chip with an icon so the annotation reads as "warning /
     // success / failure" not just a background colour. Round-trip via
     // execCommand so undo/redo captures the change.
+    // Clamp a range so it lives inside a block child of notesBody
+    // instead of directly at body level. Without this, clicking a
+    // highlight button without a prior caret in a paragraph would
+    // insert the <mark> as a sibling of <p> (dirty contenteditable
+    // HTML the browser wouldn't otherwise produce).
+    function _normalizeNotesRange(body, sel) {
+      let range = (sel && sel.rangeCount) ? sel.getRangeAt(0) : null;
+      const insideBody = range && body.contains(range.commonAncestorContainer);
+      if (!insideBody || range.startContainer === body) {
+        // Ensure there's a block child to host the mark.
+        let host = body.lastElementChild;
+        if (!host) { host = document.createElement('p'); body.appendChild(host); }
+        // If the range collapsed at a body-level offset, prefer the
+        // child right at that offset (or the last one) — otherwise
+        // land at the end of the last block.
+        if (insideBody && range.collapsed) {
+          const idx = range.startOffset;
+          const candidate = body.childNodes[idx - 1] || body.childNodes[idx] || host;
+          if (candidate && candidate.nodeType === 1) host = candidate;
+        }
+        range = document.createRange();
+        range.selectNodeContents(host);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+      return range;
+    }
     panel.querySelectorAll('.notes-toolbar [data-hl]').forEach((btn) => {
       btn.addEventListener('mousedown', (e) => {
         e.preventDefault();
@@ -16771,8 +16799,9 @@
         if (!body) return;
         body.focus();
         const sel = window.getSelection();
-        if (!sel || sel.rangeCount === 0) return;
-        const range = sel.getRangeAt(0);
+        if (!sel) return;
+        const range = _normalizeNotesRange(body, sel);
+        if (!range) return;
         if (kind === 'clear') {
           // Unwrap any <mark class="nt-hl"> that intersects the selection.
           _unhighlightRange(body, range);
