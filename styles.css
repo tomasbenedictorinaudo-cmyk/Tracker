@@ -4127,6 +4127,39 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-size: 12px;
 }
 .person-row:first-child { border-top: 0; }
+/* External stakeholder row — simpler layout than the workload rows.
+   No sparkline; a small "EXT" chip on the left of the load area
+   makes the kind unmistakable, and the load column carries an open-
+   action count instead of an FTE bar. */
+.person-row.ext-row {
+  grid-template-columns: 250px 80px 1fr;
+}
+.person-row.ext-row .avatar.ext-avatar {
+  background: linear-gradient(135deg, rgba(96, 165, 250, .28), rgba(96, 165, 250, .10));
+  border: 1px solid rgba(96, 165, 250, .55);
+  color: rgba(191, 219, 254, 1);
+}
+.person-row.ext-row .ext-chip {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(96, 165, 250, .15);
+  color: rgba(147, 197, 253, 1);
+  border: 1px solid rgba(96, 165, 250, .40);
+  font-size: 10px;
+  letter-spacing: .06em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.person-row.ext-row .ext-load {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+.person-row.ext-row .ext-count b { color: var(--text); font-size: 14px; }
+.person-row.ext-row .ext-count-sub { font-size: 11px; }
 /* On-leave visual cue — the row itself gets a light amber wash and a
    left accent bar so an at-a-glance scan of the People list flags
    who's out. The avatar carries a warm amber ring (primary signal,

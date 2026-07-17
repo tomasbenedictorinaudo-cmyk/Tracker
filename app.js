@@ -13340,9 +13340,14 @@
       const peakWeek = series.reduce((mx, s) => s.count > mx.count ? s : mx, series[0] || { count: 0 });
       return { p, open, series, peakWeek };
     });
+    const externals = (state.stakeholders || []).map((s) => {
+      const open = state.projects.flatMap((pr) => pr.actions || []).filter((a) => (a.owner === s.id || a.originator === s.id) && a.status !== 'done').length;
+      const owned = state.projects.flatMap((pr) => pr.actions || []).filter((a) => a.owner === s.id).length;
+      return { s, open, owned };
+    });
     view.innerHTML = `
       <div class="page-head">
-        <div><div class="page-title">People</div><div class="page-sub">${state.people.length} members • capacity in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year) • workload across all projects, projected over the next 12 weeks</div></div>
+        <div><div class="page-title">People</div><div class="page-sub">${state.people.length} team members${externals.length ? ` · ${externals.length} external stakeholder${externals.length === 1 ? '' : 's'}` : ''} • capacity in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year) • workload across all projects, projected over the next 12 weeks</div></div>
         <div class="page-actions">
           <button class="ghost" id="btnNewPerson">+ Person</button>
         </div>
@@ -13393,9 +13398,60 @@
               </div>`;
           }).join('')}
         </div>
-      </div>`;
+      </div>
+      ${externals.length ? `
+      <div class="panel">
+        <div class="panel-title">
+          External stakeholders <span class="panel-sub">— customer POCs, vendors, sister-project leads. Ownable but no team-side capacity.</span>
+        </div>
+        <div id="peopleExt">
+          ${externals.filter(({ s }) => matchesSearch(s.name, s.role, s.organization)).map(({ s, open, owned }) => `
+            <div class="person-row ext-row clickable" data-stakeholder-id="${escapeHTML(s.id)}" title="Click to filter Register to ${escapeHTML(s.name)}">
+              ${ROW_GRIP_HTML}
+              <div class="name-cell">
+                <span class="avatar ext-avatar" title="External stakeholder">${initials(s.name)}</span>
+                <span class="who">
+                  <b>${escapeHTML(s.name)}</b>
+                  <span>${escapeHTML(s.role || '—')}${s.organization ? ` · ${escapeHTML(s.organization)}` : ''}</span>
+                </span>
+              </div>
+              <div class="ext-meta">
+                <span class="ext-chip" title="External — no team-side capacity">EXT</span>
+              </div>
+              <div class="ext-load">
+                <span class="ext-count" title="Open actions owned or originated by this stakeholder"><b>${open}</b> open</span>
+                ${owned ? `<span class="ext-count-sub">${owned} owned total</span>` : ''}
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>` : ''}`;
     root.appendChild(view);
     $('#btnNewPerson').addEventListener('click', () => openQuickAdd('person'));
+    // External-stakeholder rows: click to filter the Register to that
+    // stakeholder; right-click to delete.
+    $$('.ext-row', view).forEach((row) => {
+      row.addEventListener('click', () => {
+        state.filters = state.filters || {};
+        state.filters.owner = row.dataset.stakeholderId;
+        saveState();
+        setView('register');
+      });
+      row.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const id = row.dataset.stakeholderId;
+        const s = (state.stakeholders || []).find((x) => x.id === id);
+        if (!s) return;
+        showContextMenu(e.clientX, e.clientY, [
+          { icon: '✕', label: 'Delete stakeholder', onClick: () => {
+            const open = state.projects.flatMap((pr) => pr.actions || []).filter((a) => a.owner === s.id).length;
+            if (!confirm(`Delete ${s.name}?${open ? ` (${open} action${open === 1 ? '' : 's'} will be unassigned).` : ''}`)) return;
+            state.projects.forEach((pr) => (pr.actions || []).forEach((a) => { if (a.owner === s.id) a.owner = null; }));
+            state.stakeholders = (state.stakeholders || []).filter((x) => x.id !== s.id);
+            commit('stakeholder-delete');
+          } },
+        ]);
+      });
+    });
     wireListReorder(view.querySelector('#peopleWl'), {
       rowSelector: '.person-row[data-owner-id]',
       idAttr: 'ownerId',
