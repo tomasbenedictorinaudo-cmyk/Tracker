@@ -4298,13 +4298,41 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .sk-req-inputrow { position: relative; margin-top: 8px; }
 
 /* ── Skills Matrix ─────────────────────────────────────────────
-   Table with angled header labels + fixed-width dot cells. Rows
-   are people; first column is a sticky name label. */
-.sk-mtx-toolbar {
+   Clean heatmap. Vertical column headers, pure color-intensity
+   cells (no glyphs), sticky first column + top header. Cells read
+   as a single visual band: darker = higher level. */
+.sk-mtx-legend {
   display: flex;
   align-items: center;
   gap: 14px;
   padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-faint);
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.sk-mtx-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.sk-mtx-legend-warn { color: var(--warn); }
+.sk-mtx-legend-bad  { color: var(--bad); }
+.sk-swatch {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border-radius: 3px;
+  vertical-align: middle;
+}
+.sk-swatch.lvl-1 { background: rgba(148, 163, 184, .28); }
+.sk-swatch.lvl-2 { background: rgba(96, 165, 250, .55); }
+.sk-swatch.lvl-3 { background: rgba(74, 222, 128, .70); }
+.sk-swatch.developing { background: rgba(96, 165, 250, .18); box-shadow: inset 0 0 0 1.5px rgba(96, 165, 250, .90); }
+.sk-swatch.warn { background: rgba(251, 191, 36, .22); box-shadow: inset 0 0 0 1.5px rgba(251, 191, 36, .70); }
+.sk-swatch.bad  { background: rgba(248, 113, 121, .20); box-shadow: inset 0 0 0 1.5px rgba(248, 113, 121, .70); }
+
+.sk-mtx-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
   background: var(--bg-2);
   border-bottom: 1px solid var(--line);
   font-size: 12px;
@@ -4325,23 +4353,26 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-size: 12px;
 }
 .sk-mtx-flag input { accent-color: var(--accent); }
-.sk-mtx-summary { margin-left: auto; font-size: 11.5px; color: var(--text-faint); }
+.sk-mtx-summary {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
 .sk-mtx-summary .sk-warn { color: var(--warn); font-weight: 600; }
 .sk-mtx-scroll {
   overflow: auto;
-  max-height: 60vh;
-  padding: 4px;
+  max-height: 70vh;
+  background: var(--bg-1);
 }
 .sk-mtx {
-  border-collapse: separate;
-  border-spacing: 0;
+  border-collapse: collapse;
   font-size: 11px;
   min-width: 100%;
 }
 .sk-mtx thead th {
-  height: 130px;
+  height: 150px;
   vertical-align: bottom;
-  padding: 0 2px 6px;
+  padding: 4px 0;
   background: var(--bg-2);
   border-bottom: 1px solid var(--line);
   position: sticky;
@@ -4352,48 +4383,65 @@ body.is-card-dragging * { cursor: grabbing !important; }
   width: 200px;
   min-width: 200px;
   text-align: left !important;
-  padding: 0 8px 6px !important;
+  padding: 0 12px 8px !important;
   font-weight: 600;
   color: var(--text-faint);
+  font-size: 10.5px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
   z-index: 4 !important;
   background: var(--bg-2) !important;
   border-right: 1px solid var(--line);
+  position: sticky;
+  left: 0;
 }
 .sk-mtx-h {
-  width: 34px;
-  min-width: 34px;
-  max-width: 34px;
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  border-left: 1px solid rgba(148, 163, 184, .06);
 }
+.sk-mtx-h:first-of-type { border-left: 1px solid var(--line); }
 .sk-mtx-h-inner {
-  display: block;
-  transform: rotate(-55deg);
-  transform-origin: bottom left;
-  width: 30px;
-  height: 110px;
-  position: relative;
-  left: 22px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  height: 140px;
+  padding-bottom: 4px;
 }
 .sk-mtx-h-label {
-  display: inline-block;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
   white-space: nowrap;
-  padding: 0 4px;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text);
-  max-width: 130px;
+  font-size: 11px;
+  letter-spacing: .01em;
+  max-height: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
+  padding: 2px 0;
 }
-.sk-mtx-h.is-required .sk-mtx-h-label { color: rgba(147, 197, 253, 1); }
-.sk-mtx-h.is-single .sk-mtx-h-label { color: var(--warn); }
-.sk-mtx-h.is-gap .sk-mtx-h-label { color: var(--bad); text-decoration: underline dotted; }
+.sk-mtx-h.is-required .sk-mtx-h-label { color: rgba(191, 219, 254, 1); font-weight: 600; }
+.sk-mtx-h.is-single   .sk-mtx-h-label { color: var(--warn); font-weight: 600; }
+.sk-mtx-h.is-gap {
+  background: linear-gradient(180deg, rgba(248, 113, 121, .06), transparent 40%);
+}
+.sk-mtx-h.is-gap .sk-mtx-h-label { color: var(--bad); font-weight: 700; }
 .sk-mtx-h.is-empty .sk-mtx-h-label { color: var(--text-faint); }
+
+.sk-mtx tbody tr { transition: background var(--transition); }
+.sk-mtx-row:hover td { background-color: rgba(255,255,255,.02); }
+.sk-mtx-row:hover th.sk-mtx-name { background: rgba(96, 165, 250, .10); }
+.sk-mtx-row:nth-child(even) th.sk-mtx-name,
+.sk-mtx-row:nth-child(even) td { background-color: rgba(255,255,255,.015); }
 .sk-mtx-name {
   width: 200px;
   min-width: 200px;
   text-align: left;
-  padding: 6px 8px;
+  padding: 8px 10px;
   border-right: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid rgba(148, 163, 184, .08);
   background: var(--bg-2);
   position: sticky;
   left: 0;
@@ -4401,63 +4449,75 @@ body.is-card-dragging * { cursor: grabbing !important; }
   cursor: pointer;
   font-weight: 500;
   color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.sk-mtx-name:hover { background: rgba(96, 165, 250, .12); }
+.sk-mtx-name-body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.2;
+}
+.sk-mtx-name-line {
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sk-mtx-name-role {
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .sk-mtx-name .avatar.xs {
   display: inline-flex;
-  width: 22px; height: 22px;
+  width: 24px; height: 24px;
   border-radius: 50%;
   align-items: center;
   justify-content: center;
   background: var(--bg-1);
   border: 1px solid var(--line);
   font-size: 10px;
-  margin-right: 8px;
-  vertical-align: middle;
+  font-weight: 600;
+  flex-shrink: 0;
 }
 .sk-mtx-cell {
-  width: 34px;
-  min-width: 34px;
-  max-width: 34px;
-  height: 30px;
-  text-align: center;
-  border-bottom: 1px solid var(--line);
-  border-right: 1px dashed rgba(148, 163, 184, .10);
-  cursor: pointer;
+  width: 28px;
+  min-width: 28px;
+  max-width: 28px;
+  height: 32px;
   padding: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, .08);
+  border-left: 1px solid rgba(148, 163, 184, .06);
+  cursor: pointer;
   position: relative;
   background: transparent;
 }
-.sk-mtx-cell.lvl-0 { color: var(--text-faint); }
-.sk-mtx-cell.lvl-1 { background: rgba(148, 163, 184, .18); }
-.sk-mtx-cell.lvl-2 { background: rgba(59, 130, 246, .22); }
-.sk-mtx-cell.lvl-3 { background: rgba(74, 222, 128, .28); }
+.sk-mtx-cell:first-of-type { border-left: 1px solid var(--line); }
+.sk-mtx-cell.lvl-1 { background: rgba(148, 163, 184, .22); }
+.sk-mtx-cell.lvl-2 { background: rgba(96, 165, 250, .48); }
+.sk-mtx-cell.lvl-3 { background: rgba(74, 222, 128, .62); }
 .sk-mtx-cell.developing::after {
-  content: '◇';
+  content: '';
   position: absolute;
-  top: 2px;
-  right: 3px;
-  font-size: 8px;
-  color: rgba(96, 165, 250, 1);
+  inset: 3px;
+  border-radius: 3px;
+  border: 1.5px solid rgba(96, 165, 250, .95);
+  pointer-events: none;
 }
-.sk-mtx-cell:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
-.sk-mtx-dots { font-size: 10px; letter-spacing: 1px; color: var(--text); }
-.sk-mtx-cell.lvl-2 .sk-mtx-dots { color: rgba(191, 219, 254, 1); }
-.sk-mtx-cell.lvl-3 .sk-mtx-dots { color: rgba(187, 247, 208, 1); }
-.sk-mtx-row:hover td, .sk-mtx-row:hover th.sk-mtx-name { background: rgba(255,255,255,.03); }
-
-/* Legend dots (small colored discs shown in the panel head) */
-.sk-dot {
-  display: inline-block;
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  margin-right: 4px;
-  vertical-align: baseline;
+.sk-mtx-cell.lvl-0.developing::after {
+  border-style: dashed;
+  opacity: .55;
 }
-.sk-dot.lvl-1 { background: rgba(148, 163, 184, .60); }
-.sk-dot.lvl-2 { background: rgba(59, 130, 246, .70); }
-.sk-dot.lvl-3 { background: rgba(74, 222, 128, .80); }
-.sk-grow-glyph { color: rgba(96, 165, 250, 1); margin-right: 4px; }
+.sk-mtx-cell:hover {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  z-index: 1;
+}
 
 /* Person dashboard — developing strip + stretch suggestions */
 .dash-skills-strip {

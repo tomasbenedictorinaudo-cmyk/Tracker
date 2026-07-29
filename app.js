@@ -13670,14 +13670,17 @@
         </div>
       </div>` : ''}
       <div class="panel" id="pnlSkillsMatrix">
-        <div class="panel-title">
-          Skills Matrix <span class="panel-sub">— competencies × people at a glance. Click a chip to jump to that person; hover a cell for details.</span>
-          <span class="legend">
-            <span class="legend-item"><span class="sk-dot lvl-1"></span>Learning</span>
-            <span class="legend-item"><span class="sk-dot lvl-2"></span>Competent</span>
-            <span class="legend-item"><span class="sk-dot lvl-3"></span>Expert</span>
-            <span class="legend-item"><span class="sk-grow-glyph">◇</span>developing</span>
-          </span>
+        <div class="panel-title panel-title-stack">
+          <span>Skills Matrix</span>
+          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). Click a name to open the person; click a cell to jump to their skills.</span>
+        </div>
+        <div class="sk-mtx-legend">
+          <span><span class="sk-swatch lvl-1"></span>Learning</span>
+          <span><span class="sk-swatch lvl-2"></span>Competent</span>
+          <span><span class="sk-swatch lvl-3"></span>Expert</span>
+          <span><span class="sk-swatch developing"></span>Developing</span>
+          <span class="sk-mtx-legend-warn"><span class="sk-swatch warn"></span>Single-point</span>
+          <span class="sk-mtx-legend-bad"><span class="sk-swatch bad"></span>Gap</span>
         </div>
         <div class="sk-mtx-toolbar">
           <label class="sk-mtx-lbl">Component
@@ -13784,45 +13787,48 @@
         if (summary) summary.textContent = '';
         return;
       }
-      // Angled header labels + fixed-width columns. Wide enough for the
-      // dots, narrow enough to fit ~10-15 skills without scroll.
+      // Vertical header labels + fixed narrow columns. Cells are pure
+      // color intensity (empty / L / C / E). "Developing" adds a small
+      // corner marker. Header text is truncated with ellipsis if it
+      // wraps too tall; full label lives in the title tooltip.
       const headerRow = `<tr>
-        <th class="sk-mtx-corner">Person \\ Skill</th>
+        <th class="sk-mtx-corner">Person</th>
         ${skills.map((s) => {
           const cov = skillCoverage(s);
           const isReq = projReq.has(skillKey(s));
-          const isSingle = cov.competentPlus <= 1;
+          const isSingle = cov.competentPlus === 1;
           const isGap = isReq && cov.holders === 0;
-          const cls = [
-            'sk-mtx-h',
-            isReq ? 'is-required' : '',
-            isSingle && cov.competentPlus === 1 ? 'is-single' : '',
-            isGap ? 'is-gap' : '',
-            cov.holders === 0 && !isGap ? 'is-empty' : '',
-          ].filter(Boolean).join(' ');
+          const flag = isGap ? 'is-gap' : isSingle ? 'is-single' : isReq ? 'is-required' : (cov.holders === 0 ? 'is-empty' : '');
           const tip = [
-            `${s}`,
-            `${cov.holders} holder${cov.holders === 1 ? '' : 's'} (${cov.expert}E · ${cov.competent}C · ${cov.learning}L)`,
+            s,
+            `${cov.holders} holder${cov.holders === 1 ? '' : 's'} — ${cov.expert} Expert · ${cov.competent} Competent · ${cov.learning} Learning`,
             isReq ? 'Required by an action in this project' : '',
-            isGap ? '⚠ Gap — required but nobody holds this' : '',
-            isSingle && cov.competentPlus === 1 ? '⚠ Single-point competency (bus-factor risk)' : '',
+            isGap ? '⚠ Gap — nobody holds this' : '',
+            isSingle ? '⚠ Single-point competency (bus-factor risk)' : '',
           ].filter(Boolean).join('\n');
-          return `<th class="${cls}" title="${escapeHTML(tip)}"><div class="sk-mtx-h-inner"><span class="sk-mtx-h-label">${escapeHTML(s)}</span></div></th>`;
+          return `<th class="sk-mtx-h ${flag}" title="${escapeHTML(tip)}">
+            <div class="sk-mtx-h-inner"><span class="sk-mtx-h-label">${escapeHTML(s)}</span></div>
+          </th>`;
         }).join('')}
       </tr>`;
       const rows = people.map((p) => {
         const cells = skills.map((s) => {
-          const lvl = personSkillLevel(p, s);
           const hit = personSkills(p).find((sk) => skillKey(sk.name) === skillKey(s));
+          const lvl = hit?.level || 0;
           const developing = !!hit?.developing;
           const cls = `sk-mtx-cell lvl-${lvl}${developing ? ' developing' : ''}`;
-          const tip = lvl ? `${p.name} — ${s} · ${SKILL_LEVELS[lvl - 1].label}${developing ? ' · developing' : ''}` : `${p.name} — ${s} · none`;
-          const inner = lvl
-            ? `<span class="sk-mtx-dots" aria-hidden="true">${'●'.repeat(lvl)}${'○'.repeat(3 - lvl)}</span>${developing ? '<span class="sk-mtx-grow" aria-hidden="true">◇</span>' : ''}`
-            : '';
-          return `<td class="${cls}" title="${escapeHTML(tip)}" data-person-id="${escapeHTML(p.id)}" data-skill="${escapeHTML(s)}">${inner}</td>`;
+          const tip = lvl ? `${p.name} — ${s} · ${SKILL_LEVELS[lvl - 1].label}${developing ? ' · developing' : ''}` : `${p.name} — ${s} · —`;
+          return `<td class="${cls}" title="${escapeHTML(tip)}" data-person-id="${escapeHTML(p.id)}" data-skill="${escapeHTML(s)}"></td>`;
         }).join('');
-        return `<tr class="sk-mtx-row" data-person-id="${escapeHTML(p.id)}"><th class="sk-mtx-name" title="Click to open ${escapeHTML(p.name)}"><span class="avatar xs">${initials(p.name)}</span> ${escapeHTML(p.name)}</th>${cells}</tr>`;
+        const totalLvl = personSkills(p).reduce((n, sk) => n + sk.level, 0);
+        return `<tr class="sk-mtx-row" data-person-id="${escapeHTML(p.id)}">
+          <th class="sk-mtx-name" title="Click to open ${escapeHTML(p.name)} — ${personSkills(p).length} skills, total ${totalLvl} pts">
+            <span class="avatar xs">${initials(p.name)}</span>
+            <span class="sk-mtx-name-body">
+              <span class="sk-mtx-name-line">${escapeHTML(p.name)}</span>
+              <span class="sk-mtx-name-role">${escapeHTML(p.role || '')}</span>
+            </span>
+          </th>${cells}</tr>`;
       }).join('');
       host.innerHTML = `
         <table class="sk-mtx">
