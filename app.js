@@ -384,6 +384,85 @@
     if (!id) return false;
     return (state.stakeholders || []).some((s) => s.id === id);
   }
+  // ── Skills helpers ─────────────────────────────────────────────
+  // Every consumer of the competency data goes through these so the
+  // matrix, chip editor, portfolio coverage, and owner-picker nudges
+  // all read from one source of truth. Skill name matching is
+  // case-insensitive (someone types "python", someone else "Python"
+  // — same skill).
+  const SKILL_LEVELS = [
+    { id: 1, label: 'Learning',  short: 'L' },
+    { id: 2, label: 'Competent', short: 'C' },
+    { id: 3, label: 'Expert',    short: 'E' },
+  ];
+  function skillKey(name) { return String(name || '').trim().toLowerCase(); }
+  function personSkills(p) { return Array.isArray(p?.skills) ? p.skills : []; }
+  function personSkillLevel(p, name) {
+    const k = skillKey(name);
+    if (!k) return 0;
+    const hit = personSkills(p).find((s) => skillKey(s.name) === k);
+    return hit ? hit.level : 0;
+  }
+  // Union of every skill anyone in state.people has claimed, keyed by
+  // lowercase name so casing drifts are merged. Preserves the display
+  // form (whichever spelling appeared first) for chip labels.
+  function allTeamSkills() {
+    const map = new Map();
+    (state.people || []).forEach((p) => personSkills(p).forEach((s) => {
+      const k = skillKey(s.name);
+      if (!k || map.has(k)) return;
+      map.set(k, s.name.trim());
+    }));
+    return map;
+  }
+  // Everyone (people only, externals excluded — no team-side skills)
+  // holding a given skill at level >= minLevel.
+  function skillHolders(name, minLevel = 1) {
+    const k = skillKey(name);
+    return (state.people || []).filter((p) => personSkills(p).some((s) => skillKey(s.name) === k && s.level >= minLevel));
+  }
+  // Compact summary block for one skill: total holders + per-level
+  // counts. Consumed by the matrix header + coverage tile.
+  function skillCoverage(name) {
+    const k = skillKey(name);
+    const by = { 1: 0, 2: 0, 3: 0 };
+    (state.people || []).forEach((p) => personSkills(p).forEach((s) => {
+      if (skillKey(s.name) === k) by[s.level] = (by[s.level] || 0) + 1;
+    }));
+    const holders = by[1] + by[2] + by[3];
+    const competentPlus = by[2] + by[3];
+    return { holders, learning: by[1], competent: by[2], expert: by[3], competentPlus };
+  }
+  // Skills a component depends on — pulled from the requiredSkills
+  // on that component's actions. Used by the matrix component filter
+  // and the portfolio coverage tile.
+  function componentRequiredSkills(projectId, componentId) {
+    const proj = (state.projects || []).find((p) => p.id === projectId);
+    if (!proj) return [];
+    const map = new Map();
+    (proj.actions || []).forEach((a) => {
+      if (componentId && a.component !== componentId) return;
+      (a.requiredSkills || []).forEach((s) => {
+        const k = skillKey(s);
+        if (!k || map.has(k)) return;
+        map.set(k, s.trim());
+      });
+    });
+    return [...map.values()];
+  }
+  // Same idea at the project level — every skill any action in this
+  // project asks for.
+  function projectRequiredSkills(projectId) {
+    return componentRequiredSkills(projectId, null);
+  }
+  // Everyone with any level of a matching skill for an action. Used
+  // by the owner-picker to nudge toward matching-skill owners.
+  function skillMatchScore(person, requiredSkills) {
+    if (!requiredSkills || !requiredSkills.length) return 0;
+    let score = 0;
+    requiredSkills.forEach((r) => { score += personSkillLevel(person, r); });
+    return score;
+  }
 
   // Mark the in-memory state as dirty — any code path that mutates state
   // before a debounced/async write should call this so the status pill
@@ -13040,6 +13119,47 @@
               <div class="kpi-sub">${total} actions • ${late} late • ${done} done${p.archived ? ' • <em>archived</em>' : ''}</div>
             </div>`;
         }).join('')}
+      </div>
+      <div class="panel" style="margin-top:14px;">
+        <div class="panel-title">Skills coverage <span class="panel-sub">— for each project, how many required skills are actually held by the team, plus single-point-of-knowledge warnings.</span></div>
+        <div class="skcov-grid">
+          ${state.projects
+            .filter((p) => state.settings.showArchivedProjects ? true : !p.archived)
+            .filter((p) => matchesSearch(p.name, p.description))
+            .map((p) => {
+              const req = projectRequiredSkills(p.id);
+              if (!req.length) return `
+                <div class="skcov-card" data-pid="${p.id}">
+                  <div class="skcov-name">${escapeHTML(p.name)}</div>
+                  <div class="skcov-empty">No required skills declared on this project's actions yet — add some in the action drawer to see coverage here.</div>
+                </div>`;
+              const cov = req.map((s) => ({ name: s, cov: skillCoverage(s) }));
+              const gaps = cov.filter((x) => x.cov.holders === 0);
+              const singles = cov.filter((x) => x.cov.competentPlus === 1);
+              const solid = cov.filter((x) => x.cov.competentPlus >= 2);
+              const pct = Math.round(((req.length - gaps.length) / req.length) * 100);
+              const cls = gaps.length ? 'bad' : singles.length ? 'warn' : 'ok';
+              return `
+                <div class="skcov-card clickable" data-pid="${p.id}" title="Click to open ${escapeHTML(p.name)}">
+                  <div class="skcov-head">
+                    <div class="skcov-name">${escapeHTML(p.name)}</div>
+                    <div class="skcov-num ${cls}">${pct}%</div>
+                  </div>
+                  <div class="skcov-bar-track"><div class="skcov-bar-fill ${cls}" style="width:${pct}%"></div></div>
+                  <div class="skcov-meta">
+                    <span title="Solid coverage — 2+ competent-or-expert holders"><b>${solid.length}</b> solid</span>
+                    <span class="${singles.length ? 'warn' : ''}" title="Single-point competencies — one competent-or-expert holder"><b>${singles.length}</b> single-point</span>
+                    <span class="${gaps.length ? 'bad' : ''}" title="Required skills nobody holds"><b>${gaps.length}</b> gap${gaps.length === 1 ? '' : 's'}</span>
+                  </div>
+                  ${(gaps.length || singles.length) ? `
+                  <div class="skcov-list">
+                    ${gaps.slice(0, 3).map((x) => `<span class="skcov-chip gap" title="Gap — nobody holds ${escapeHTML(x.name)}">${escapeHTML(x.name)}</span>`).join('')}
+                    ${singles.slice(0, 3).map((x) => `<span class="skcov-chip single" title="Single-point — only one competent-or-expert holder">${escapeHTML(x.name)}</span>`).join('')}
+                    ${(gaps.length + singles.length) > 6 ? `<span class="skcov-more">+${(gaps.length + singles.length) - 6}</span>` : ''}
+                  </div>` : ''}
+                </div>`;
+            }).join('')}
+        </div>
       </div>`;
     root.appendChild(view);
     wireListReorder(view.querySelector('#portfolioGrid'), {
@@ -13110,6 +13230,13 @@
       });
     });
     $('#btnNewProj2').addEventListener('click', () => openQuickAdd('project'));
+    $$('.skcov-card.clickable', view).forEach((el) => {
+      el.addEventListener('click', () => {
+        state.currentProjectId = el.dataset.pid;
+        state.currentView = 'people';
+        saveState(); render();
+      });
+    });
   }
 
   /* --------------------- Phase J: project templates -------------------- */
@@ -13385,6 +13512,7 @@
                   <span class="who">
                     <b>${escapeHTML(p.name)}</b>
                     <span>${escapeHTML(p.role || '')}${curHol ? ` <span class="p-onleave" title="${escapeHTML(holTip)}">⛱ back ${escapeHTML(backLabel)}</span>` : ''}</span>
+                    ${(() => { const sk = personSkills(p).slice().sort((a, b) => b.level - a.level).slice(0, 3); const rest = Math.max(0, personSkills(p).length - sk.length); if (!sk.length) return ''; return `<span class="row-skills">${sk.map((s) => `<span class="sk-chip xs level-${s.level}${s.developing ? ' developing' : ''}" title="${escapeHTML(s.name)} — ${SKILL_LEVELS[s.level-1]?.label || ''}${s.developing ? ' · developing' : ''}"><span class="sk-chip-name">${escapeHTML(s.name)}</span><span class="sk-chip-dots" aria-hidden="true">${'●'.repeat(s.level)}${'○'.repeat(3-s.level)}</span></span>`).join('')}${rest ? `<span class="row-skills-more">+${rest}</span>` : ''}</span>`; })()}
                   </span>
                 </div>
                 <div class="now-load">
@@ -13424,7 +13552,41 @@
               </div>
             </div>`).join('')}
         </div>
-      </div>` : ''}`;
+      </div>` : ''}
+      <div class="panel" id="pnlSkillsMatrix">
+        <div class="panel-title">
+          Skills Matrix <span class="panel-sub">— competencies × people at a glance. Click a chip to jump to that person; hover a cell for details.</span>
+          <span class="legend">
+            <span class="legend-item"><span class="sk-dot lvl-1"></span>Learning</span>
+            <span class="legend-item"><span class="sk-dot lvl-2"></span>Competent</span>
+            <span class="legend-item"><span class="sk-dot lvl-3"></span>Expert</span>
+            <span class="legend-item"><span class="sk-grow-glyph">◇</span>developing</span>
+          </span>
+        </div>
+        <div class="sk-mtx-toolbar">
+          <label class="sk-mtx-lbl">Component
+            <select id="skMtxComp">
+              <option value="">All</option>
+              ${(curProject()?.components || []).map((c) => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="sk-mtx-lbl">Min level
+            <select id="skMtxMin">
+              <option value="1">Any</option>
+              <option value="2">Competent+</option>
+              <option value="3">Expert only</option>
+            </select>
+          </label>
+          <label class="sk-mtx-lbl sk-mtx-flag">
+            <input type="checkbox" id="skMtxSingle" /> <span>Single-point only <span class="muted" title="Skills with 0-1 Competent-or-Expert holders — bus-factor risks">(bus factor)</span></span>
+          </label>
+          <label class="sk-mtx-lbl sk-mtx-flag">
+            <input type="checkbox" id="skMtxGaps" /> <span>Gaps only <span class="muted" title="Skills required by actions in the current project that no one on the team holds">(project needs, unheld)</span></span>
+          </label>
+          <span class="sk-mtx-summary" id="skMtxSummary"></span>
+        </div>
+        <div id="skMtx" class="sk-mtx-scroll"></div>
+      </div>`;
     root.appendChild(view);
     $('#btnNewPerson').addEventListener('click', () => openQuickAdd('person'));
     // External-stakeholder rows: click to filter the Register to that
@@ -13452,6 +13614,134 @@
         ]);
       });
     });
+    // Skills Matrix rendering + filter wiring. Filter state lives on
+    // state.ui.skMtx so changes survive a re-render.
+    state.ui = state.ui || {};
+    state.ui.skMtx = state.ui.skMtx || { comp: '', min: 1, single: false, gaps: false };
+    function renderSkillsMatrix() {
+      const host = $('#skMtx');
+      const summary = $('#skMtxSummary');
+      if (!host) return;
+      const proj = curProject();
+      const filt = state.ui.skMtx;
+      const people = state.people || [];
+      // Column set: every skill anyone holds, plus every requiredSkill
+      // in the current project so uncovered demands show up too.
+      const skillSet = new Map(allTeamSkills());
+      if (proj) projectRequiredSkills(proj.id).forEach((s) => {
+        const k = skillKey(s); if (!skillSet.has(k)) skillSet.set(k, s);
+      });
+      let skills = [...skillSet.values()];
+      // Component filter — restrict to skills required by that
+      // component's actions OR held by anyone with actions in it.
+      if (filt.comp && proj) {
+        const req = new Set(componentRequiredSkills(proj.id, filt.comp).map(skillKey));
+        const ownersInComp = new Set((proj.actions || []).filter((a) => a.component === filt.comp).map((a) => a.owner).filter(Boolean));
+        const heldByOwners = new Set();
+        ownersInComp.forEach((id) => {
+          const p = people.find((pp) => pp.id === id);
+          if (p) personSkills(p).forEach((s) => heldByOwners.add(skillKey(s.name)));
+        });
+        skills = skills.filter((s) => req.has(skillKey(s)) || heldByOwners.has(skillKey(s)));
+      }
+      // Sort by scarcity (fewest competent+ holders first) so bus-factor
+      // risks land in the leftmost columns.
+      skills.sort((a, b) => {
+        const ca = skillCoverage(a).competentPlus;
+        const cb = skillCoverage(b).competentPlus;
+        if (ca !== cb) return ca - cb;
+        return skillKey(a).localeCompare(skillKey(b));
+      });
+      // Row-level min-level + single-point + gap filters (applied to
+      // columns, not rows — a matrix filter drops columns, not people).
+      const projReq = new Set((proj ? projectRequiredSkills(proj.id) : []).map(skillKey));
+      skills = skills.filter((s) => {
+        const cov = skillCoverage(s);
+        const holders = filt.min === 1 ? cov.holders : filt.min === 2 ? cov.competentPlus : cov.expert;
+        if (filt.min > 1 && holders === 0 && !projReq.has(skillKey(s))) return false;
+        if (filt.single && cov.competentPlus > 1) return false;
+        if (filt.gaps && !(projReq.has(skillKey(s)) && cov.holders === 0)) return false;
+        return true;
+      });
+      if (!skills.length) {
+        host.innerHTML = '<div class="empty" style="padding:24px; text-align:center;">No skills match the current filters. Clear filters or add a skill in a person\'s drawer.</div>';
+        if (summary) summary.textContent = '';
+        return;
+      }
+      // Angled header labels + fixed-width columns. Wide enough for the
+      // dots, narrow enough to fit ~10-15 skills without scroll.
+      const headerRow = `<tr>
+        <th class="sk-mtx-corner">Person \\ Skill</th>
+        ${skills.map((s) => {
+          const cov = skillCoverage(s);
+          const isReq = projReq.has(skillKey(s));
+          const isSingle = cov.competentPlus <= 1;
+          const isGap = isReq && cov.holders === 0;
+          const cls = [
+            'sk-mtx-h',
+            isReq ? 'is-required' : '',
+            isSingle && cov.competentPlus === 1 ? 'is-single' : '',
+            isGap ? 'is-gap' : '',
+            cov.holders === 0 && !isGap ? 'is-empty' : '',
+          ].filter(Boolean).join(' ');
+          const tip = [
+            `${s}`,
+            `${cov.holders} holder${cov.holders === 1 ? '' : 's'} (${cov.expert}E · ${cov.competent}C · ${cov.learning}L)`,
+            isReq ? 'Required by an action in this project' : '',
+            isGap ? '⚠ Gap — required but nobody holds this' : '',
+            isSingle && cov.competentPlus === 1 ? '⚠ Single-point competency (bus-factor risk)' : '',
+          ].filter(Boolean).join('\n');
+          return `<th class="${cls}" title="${escapeHTML(tip)}"><div class="sk-mtx-h-inner"><span class="sk-mtx-h-label">${escapeHTML(s)}</span></div></th>`;
+        }).join('')}
+      </tr>`;
+      const rows = people.map((p) => {
+        const cells = skills.map((s) => {
+          const lvl = personSkillLevel(p, s);
+          const hit = personSkills(p).find((sk) => skillKey(sk.name) === skillKey(s));
+          const developing = !!hit?.developing;
+          const cls = `sk-mtx-cell lvl-${lvl}${developing ? ' developing' : ''}`;
+          const tip = lvl ? `${p.name} — ${s} · ${SKILL_LEVELS[lvl - 1].label}${developing ? ' · developing' : ''}` : `${p.name} — ${s} · none`;
+          const inner = lvl
+            ? `<span class="sk-mtx-dots" aria-hidden="true">${'●'.repeat(lvl)}${'○'.repeat(3 - lvl)}</span>${developing ? '<span class="sk-mtx-grow" aria-hidden="true">◇</span>' : ''}`
+            : '';
+          return `<td class="${cls}" title="${escapeHTML(tip)}" data-person-id="${escapeHTML(p.id)}" data-skill="${escapeHTML(s)}">${inner}</td>`;
+        }).join('');
+        return `<tr class="sk-mtx-row" data-person-id="${escapeHTML(p.id)}"><th class="sk-mtx-name" title="Click to open ${escapeHTML(p.name)}"><span class="avatar xs">${initials(p.name)}</span> ${escapeHTML(p.name)}</th>${cells}</tr>`;
+      }).join('');
+      host.innerHTML = `
+        <table class="sk-mtx">
+          <thead>${headerRow}</thead>
+          <tbody>${rows}</tbody>
+        </table>`;
+      // Summary strip — quick counts to make the state readable at a glance.
+      if (summary) {
+        const singleCount = skills.filter((s) => skillCoverage(s).competentPlus === 1).length;
+        const gapCount = skills.filter((s) => projReq.has(skillKey(s)) && skillCoverage(s).holders === 0).length;
+        const parts = [`${skills.length} skill${skills.length === 1 ? '' : 's'} shown`];
+        if (singleCount) parts.push(`<span class="sk-warn">${singleCount} single-point</span>`);
+        if (gapCount) parts.push(`<span class="sk-warn">${gapCount} gap${gapCount === 1 ? '' : 's'}</span>`);
+        summary.innerHTML = parts.join(' · ');
+      }
+      // Click a name header → open person editor.
+      host.querySelectorAll('.sk-mtx-name').forEach((th) => th.addEventListener('click', () => {
+        const id = th.closest('tr')?.dataset?.personId;
+        if (id) openPersonEditor(id);
+      }));
+      // Click a cell → open person editor and jump to that skill.
+      host.querySelectorAll('.sk-mtx-cell').forEach((td) => td.addEventListener('click', () => {
+        openPersonEditor(td.dataset.personId);
+      }));
+    }
+    // Wire filter controls
+    const compSel = $('#skMtxComp'); if (compSel) compSel.value = state.ui.skMtx.comp || '';
+    const minSel  = $('#skMtxMin');  if (minSel)  minSel.value  = String(state.ui.skMtx.min || 1);
+    const singleChk = $('#skMtxSingle'); if (singleChk) singleChk.checked = !!state.ui.skMtx.single;
+    const gapsChk = $('#skMtxGaps'); if (gapsChk) gapsChk.checked = !!state.ui.skMtx.gaps;
+    compSel?.addEventListener('change', () => { state.ui.skMtx.comp = compSel.value; renderSkillsMatrix(); });
+    minSel?.addEventListener('change', () => { state.ui.skMtx.min = Number(minSel.value); renderSkillsMatrix(); });
+    singleChk?.addEventListener('change', () => { state.ui.skMtx.single = singleChk.checked; renderSkillsMatrix(); });
+    gapsChk?.addEventListener('change', () => { state.ui.skMtx.gaps = gapsChk.checked; renderSkillsMatrix(); });
+    renderSkillsMatrix();
     wireListReorder(view.querySelector('#peopleWl'), {
       rowSelector: '.person-row[data-owner-id]',
       idAttr: 'ownerId',
@@ -13553,6 +13843,42 @@
         <div class="dash-section-title">Workload — next 12 weeks<span class="dash-section-count">peak ${peakWeek.count}%</span></div>
         ${workloadSparkSVG(p, series)}
       </div>
+      ${(() => {
+        const sk = personSkills(p);
+        if (!sk.length) return '';
+        const held = sk.slice().sort((a, b) => b.level - a.level);
+        const developing = held.filter((s) => s.developing);
+        // Suggest a few actions across all projects that require any
+        // of this person's developing skills — the stretch-assignment
+        // hint. Limit to 6 so the section stays scannable.
+        const suggestions = [];
+        if (developing.length) {
+          const wantSet = new Set(developing.map((s) => skillKey(s.name)));
+          state.projects.forEach((pr) => (pr.actions || []).forEach((a) => {
+            if (a.status === 'done' || a.archivedAt) return;
+            if (a.owner === p.id) return;
+            const matches = (a.requiredSkills || []).filter((r) => wantSet.has(skillKey(r)));
+            if (matches.length) suggestions.push({ a, pr, matches });
+          }));
+          suggestions.sort((a, b) => b.matches.length - a.matches.length);
+        }
+        return `
+        <div class="dash-section">
+          <div class="dash-section-title">Skills<span class="dash-section-count">${held.length} claimed${developing.length ? ` · ${developing.length} developing` : ''}</span></div>
+          <div class="dash-skills-strip">
+            ${held.map((s) => `<span class="sk-chip level-${s.level}${s.developing ? ' developing' : ''}" title="${escapeHTML(s.name)} — ${SKILL_LEVELS[s.level - 1].label}${s.developing ? ' · developing' : ''}"><span class="sk-chip-name">${escapeHTML(s.name)}</span><span class="sk-chip-dots">${'●'.repeat(s.level)}${'○'.repeat(3 - s.level)}</span>${s.developing ? '<span class="sk-chip-grow">◇</span>' : ''}</span>`).join('')}
+          </div>
+          ${developing.length ? `
+          <div class="dash-grow-callout">
+            <div class="dash-grow-title">Stretch assignments <span class="muted">— actions requiring the ${developing.length} skill${developing.length === 1 ? '' : 's'} ${escapeHTML(p.name)} is developing</span></div>
+            ${suggestions.length ? suggestions.slice(0, 6).map(({ a, pr, matches }) => `
+              <div class="dash-row clickable" data-action-id="${a.id}">
+                <div class="dash-row-title">${escapeHTML(a.title)}</div>
+                <div class="dash-row-sub">${escapeHTML(pr.name)} · ${escapeHTML(a.status)}${a.due ? ' · due ' + a.due : ''} · matches ${matches.map((m) => `<span class="sk-inline-chip">${escapeHTML(m)}</span>`).join(' ')}</div>
+              </div>`).join('') : '<div class="muted" style="font-size:12px;">No open actions currently require these skills. Consider tagging some upcoming actions in the drawer.</div>'}
+          </div>` : ''}
+        </div>`;
+      })()}
       ${listOrEmpty('Late actions', late.length,
         late.slice(0, 12).map(({ a, pr }) => `
           <div class="dash-row clickable" data-action-id="${a.id}">
@@ -13700,6 +14026,14 @@
       </div>
       <div class="field"><label>Tags</label>
         <div class="tags-input" id="dTagsWrap"></div>
+      </div>
+      <div class="field">
+        <label>Required skills <span class="muted">— nudges the owner picker toward matching people; leave empty if there's no specific competency needed.</span></label>
+        <div class="sk-req-editor" id="dReqSkills"></div>
+        <div class="sk-req-inputrow">
+          <input type="text" id="dReqSkillNew" placeholder="Add a required skill — type to search or create…" autocomplete="off" />
+          <div class="sk-suggest" id="dReqSkillSuggest" hidden></div>
+        </div>
       </div>
       <div class="field">
         <label>Effort tracking <span class="muted">— actuals feed CPI / EAC on the Dashboard</span></label>
@@ -13935,6 +14269,109 @@
       inp.addEventListener('blur', () => setTimeout(() => { results.hidden = true; }, 120));
     }
     renderTagsUI();
+
+    // Required-skills editor — chip list + type-to-search input. The
+    // working copy `drawerReqSkills` gets flushed onto `a.requiredSkills`
+    // when Save is clicked. Owner picker re-render (below) reads from
+    // this on every change so the nudge stays live.
+    const drawerReqSkills = Array.isArray(a.requiredSkills) ? a.requiredSkills.slice() : [];
+    function renderReqSkillsUI() {
+      const chips = $('#dReqSkills');
+      if (!chips) return;
+      chips.innerHTML = drawerReqSkills.length
+        ? drawerReqSkills.map((s, i) => `<span class="sk-chip req" data-idx="${i}" title="Remove"><span class="sk-chip-name">${escapeHTML(s)}</span><span class="sk-chip-x">×</span></span>`).join('')
+        : '<span class="muted" style="font-size:11px;">No required skills — any owner can take this.</span>';
+      // Refresh owner picker to reflect the new match set.
+      refreshOwnerNudge();
+    }
+    $('#dReqSkills')?.addEventListener('click', (e) => {
+      const chip = e.target.closest?.('.sk-chip.req');
+      if (!chip) return;
+      const idx = Number(chip.dataset.idx);
+      drawerReqSkills.splice(idx, 1);
+      renderReqSkillsUI();
+    });
+    const reqInp = $('#dReqSkillNew');
+    const reqSug = $('#dReqSkillSuggest');
+    function reqRefreshSuggest() {
+      if (!reqInp || !reqSug) return;
+      const q = reqInp.value.trim();
+      if (!q) { reqSug.hidden = true; reqSug.innerHTML = ''; return; }
+      const held = new Set(drawerReqSkills.map(skillKey));
+      const qk = skillKey(q);
+      const matches = [];
+      allTeamSkills().forEach((label, key) => {
+        if (held.has(key)) return;
+        if (key.includes(qk)) matches.push({ label, key, count: skillCoverage(label).holders });
+      });
+      matches.sort((a, b) => b.count - a.count);
+      const top = matches.slice(0, 6);
+      const exact = top.some((m) => m.key === qk) || held.has(qk);
+      const rows = top.map((m) => `<div class="sk-sug-row" data-skill="${escapeHTML(m.label)}">${escapeHTML(m.label)} <span class="muted">— ${m.count} holder${m.count === 1 ? '' : 's'}</span></div>`);
+      if (!exact) rows.unshift(`<div class="sk-sug-row sk-sug-create" data-skill="${escapeHTML(q)}">+ Add <b>${escapeHTML(q)}</b></div>`);
+      reqSug.innerHTML = rows.join('');
+      reqSug.hidden = !rows.length;
+    }
+    function reqCommit(name) {
+      const clean = String(name || '').trim();
+      if (!clean) return;
+      const k = skillKey(clean);
+      if (drawerReqSkills.some((s) => skillKey(s) === k)) return;
+      drawerReqSkills.push(clean);
+      reqInp.value = '';
+      reqSug.hidden = true; reqSug.innerHTML = '';
+      renderReqSkillsUI();
+    }
+    reqInp?.addEventListener('input', reqRefreshSuggest);
+    reqInp?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const first = reqSug.querySelector('.sk-sug-row');
+        reqCommit(first ? first.dataset.skill : reqInp.value);
+      } else if (e.key === 'Escape') { reqSug.hidden = true; }
+    });
+    reqSug?.addEventListener('mousedown', (e) => {
+      const row = e.target.closest?.('.sk-sug-row');
+      if (!row) return;
+      e.preventDefault();
+      reqCommit(row.dataset.skill);
+    });
+    // Owner-picker nudge — rebuilds the select so people whose skills
+    // cover the required set carry a star + total-level count in the
+    // option label. Runs on drawer open + on each required-skills mutation.
+    function refreshOwnerNudge() {
+      const sel = $('#dOwner');
+      if (!sel) return;
+      const currentValue = sel.value;
+      if (!drawerReqSkills.length) {
+        sel.innerHTML = actorOptionsHTML(a.owner);
+        sel.value = currentValue;
+        return;
+      }
+      // Build a fresh options set with match scores decorated.
+      const opts = [];
+      opts.push('<option value="">— Unassigned —</option>');
+      const scored = (state.people || []).map((p) => ({ p, score: skillMatchScore(p, drawerReqSkills) }));
+      scored.sort((a, b) => b.score - a.score);
+      const teamHeader = scored.length ? '<option value="" disabled>── Team ──</option>' : '';
+      opts.push(teamHeader);
+      scored.forEach(({ p, score }) => {
+        const badge = score > 0 ? ` · ★ ${score}` : '';
+        const isSel = p.id === a.owner ? ' selected' : '';
+        opts.push(`<option value="${escapeHTML(p.id)}"${isSel}>${escapeHTML(p.name)}${badge}</option>`);
+      });
+      const ext = state.stakeholders || [];
+      if (ext.length) {
+        opts.push('<option value="" disabled>── External stakeholders ──</option>');
+        ext.forEach((sh) => {
+          const isSel = sh.id === a.owner ? ' selected' : '';
+          opts.push(`<option value="${escapeHTML(sh.id)}"${isSel}>${escapeHTML(sh.name)}</option>`);
+        });
+      }
+      sel.innerHTML = opts.join('');
+      sel.value = currentValue;
+    }
+    renderReqSkillsUI();
 
     // Tasks (sub-actions) — simple decomposition of an action into
     // 5-status items. Mutations commit immediately (like op-steps) so
@@ -14596,6 +15033,10 @@
       a.tags = drawerTags.slice();
       const tagsChanged = oldTags.length !== a.tags.length || oldTags.some((t, i) => t !== a.tags[i]);
       if (tagsChanged) a.history.push({ at: todayISO(), what: `Tags: ${oldTags.length} → ${a.tags.length}` });
+      const oldReq = Array.isArray(a.requiredSkills) ? a.requiredSkills.slice() : [];
+      a.requiredSkills = drawerReqSkills.slice();
+      const reqChanged = oldReq.length !== a.requiredSkills.length || oldReq.some((r, i) => r !== a.requiredSkills[i]);
+      if (reqChanged) a.history.push({ at: todayISO(), what: `Required skills: ${oldReq.length} → ${a.requiredSkills.length}` });
       a.notes = serializeChipsToText($('#dNotes'));
       a.updatedAt = todayISO();
       if (oldStatus !== a.status) {
@@ -15850,7 +16291,15 @@
     $('#drawerBody').innerHTML = `
       <div class="field"><label>Name</label><input id="pEdName" value="${escapeHTML(p.name)}" /></div>
       <div class="field"><label>Role</label><input id="pEdRole" value="${escapeHTML(p.role || '')}" placeholder="Job title" /></div>
-      <div class="field"><label>Expertise / skills</label><textarea id="pEdSkills" placeholder="e.g. Avionics design, EMC testing">${escapeHTML(p.expertise || '')}</textarea></div>
+      <div class="field">
+        <label>Skills <span class="muted">— click a chip to cycle level (Learning → Competent → Expert → remove). Shift-click to mark as developing.</span></label>
+        <div class="sk-chip-editor" id="pEdSkillChips" data-person-id="${escapeHTML(p.id)}"></div>
+        <div class="sk-chip-inputrow">
+          <input id="pEdSkillNew" type="text" autocomplete="off" placeholder="Add a skill — type to search or create…" />
+          <div class="sk-suggest" id="pEdSkillSuggest" hidden></div>
+        </div>
+      </div>
+      ${p.expertise ? `<div class="field"><label>Legacy expertise notes <span class="muted">(kept for reference; edit above instead)</span></label><div class="sk-legacy-note">${escapeHTML(p.expertise)}</div></div>` : ''}
       <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <div class="field"><label>Capacity (% of FTE)</label><input id="pEdCap" type="number" min="0" max="200" value="${p.capacity || 100}" title="100% = full-time. 1 FTE = 8h/day × 5 days/week, 212 working days/year." /></div>
         <div class="field"><label>Hourly rate (€/h)</label><input id="pEdRate" type="number" min="0" step="5" value="${p.hourlyRate || 100}" /></div>
@@ -15891,6 +16340,86 @@
     document.querySelectorAll('#drawerBody .assign-input').forEach((inp) => inp.addEventListener('input', refreshSum));
     $('#pEdCap').addEventListener('input', refreshSum);
     refreshSum();
+    // Skill chip editor — working copy that Save flushes onto the
+    // person. Working copy so cancel-by-close is non-destructive.
+    const drawerSkills = personSkills(p).map((s) => ({ name: s.name, level: s.level, developing: !!s.developing }));
+    const chipsEl = $('#pEdSkillChips');
+    const inputEl = $('#pEdSkillNew');
+    const suggestEl = $('#pEdSkillSuggest');
+    function renderSkillChips() {
+      if (!chipsEl) return;
+      if (!drawerSkills.length) {
+        chipsEl.innerHTML = '<div class="sk-empty muted">No skills yet — type below to add.</div>';
+        return;
+      }
+      chipsEl.innerHTML = drawerSkills.map((s, i) => `
+        <span class="sk-chip level-${s.level}${s.developing ? ' developing' : ''}" data-idx="${i}" title="Level ${s.level} — ${SKILL_LEVELS[s.level - 1]?.label || ''}${s.developing ? ' · developing' : ''} — click to cycle, shift-click to toggle developing, Alt-click to remove">
+          <span class="sk-chip-name">${escapeHTML(s.name)}</span>
+          <span class="sk-chip-dots" aria-hidden="true">${'●'.repeat(s.level)}${'○'.repeat(3 - s.level)}</span>
+          ${s.developing ? '<span class="sk-chip-grow" title="Wants to develop this">◇</span>' : ''}
+        </span>`).join('');
+    }
+    renderSkillChips();
+    chipsEl?.addEventListener('click', (e) => {
+      const chip = e.target.closest?.('.sk-chip');
+      if (!chip) return;
+      const idx = Number(chip.dataset.idx);
+      const s = drawerSkills[idx];
+      if (!s) return;
+      if (e.altKey) { drawerSkills.splice(idx, 1); }
+      else if (e.shiftKey) { s.developing = !s.developing; }
+      else {
+        s.level = s.level + 1;
+        if (s.level > 3) { drawerSkills.splice(idx, 1); }
+      }
+      renderSkillChips();
+    });
+    // Autocomplete against the union of every team skill (case-insensitive).
+    function refreshSuggest() {
+      if (!inputEl || !suggestEl) return;
+      const q = inputEl.value.trim();
+      if (!q) { suggestEl.hidden = true; suggestEl.innerHTML = ''; return; }
+      const held = new Set(drawerSkills.map((s) => skillKey(s.name)));
+      const qk = skillKey(q);
+      const matches = [];
+      allTeamSkills().forEach((label, key) => {
+        if (held.has(key)) return;
+        if (key.includes(qk)) matches.push({ label, key, count: skillCoverage(label).holders });
+      });
+      matches.sort((a, b) => b.count - a.count);
+      const top = matches.slice(0, 6);
+      const exact = top.some((m) => m.key === qk);
+      const rows = top.map((m) => `<div class="sk-sug-row" data-skill="${escapeHTML(m.label)}">${escapeHTML(m.label)} <span class="muted">— ${m.count} holder${m.count === 1 ? '' : 's'}</span></div>`);
+      if (!exact) rows.unshift(`<div class="sk-sug-row sk-sug-create" data-skill="${escapeHTML(q)}">+ Create <b>${escapeHTML(q)}</b></div>`);
+      suggestEl.innerHTML = rows.join('');
+      suggestEl.hidden = !rows.length;
+    }
+    function commitSkill(name) {
+      const clean = String(name || '').trim();
+      if (!clean) return;
+      const k = skillKey(clean);
+      if (drawerSkills.some((s) => skillKey(s.name) === k)) return;
+      drawerSkills.push({ name: clean, level: 1, developing: false });
+      inputEl.value = '';
+      suggestEl.hidden = true; suggestEl.innerHTML = '';
+      renderSkillChips();
+    }
+    inputEl?.addEventListener('input', refreshSuggest);
+    inputEl?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const first = suggestEl.querySelector('.sk-sug-row');
+        commitSkill(first ? first.dataset.skill : inputEl.value);
+      } else if (e.key === 'Escape') {
+        suggestEl.hidden = true;
+      }
+    });
+    suggestEl?.addEventListener('mousedown', (e) => {
+      const row = e.target.closest?.('.sk-sug-row');
+      if (!row) return;
+      e.preventDefault();
+      commitSkill(row.dataset.skill);
+    });
     // Holiday editor — add row + remove row, wired with delegation so
     // freshly-added rows behave without re-wiring.
     const holList = $('#pEdHolidays');
@@ -15931,7 +16460,7 @@
       const oldName = p.name;
       p.name = $('#pEdName').value.trim() || p.name;
       p.role = $('#pEdRole').value.trim();
-      p.expertise = $('#pEdSkills').value.trim();
+      p.skills = drawerSkills.map((s) => ({ name: s.name, level: s.level, developing: !!s.developing }));
       p.capacity = clamp(parseInt($('#pEdCap').value, 10) || 100, 0, 200);
       p.hourlyRate = Math.max(0, parseFloat($('#pEdRate').value) || 100);
       const newAssignments = [];
@@ -17260,6 +17789,25 @@
         if (h.end < h.start) { const s0 = h.start; h.start = h.end; h.end = s0; }
         if (typeof h.label !== 'string') h.label = '';
       });
+      // Competency chips — see the Skills Matrix. Shape:
+      // [{ name, level: 1|2|3, developing: bool }]. Free-form names,
+      // three levels (Learning / Competent / Expert), plus a soft
+      // "developing" flag for growth interest. Legacy expertise text
+      // is preserved side-by-side; the field is read-only in the UI
+      // once someone starts using chips.
+      if (!Array.isArray(p.skills)) p.skills = [];
+      const seenSkill = new Set();
+      p.skills = p.skills.filter((s) => {
+        if (!s || typeof s.name !== 'string') return false;
+        const key = s.name.trim().toLowerCase();
+        if (!key || seenSkill.has(key)) return false;
+        seenSkill.add(key);
+        s.name = s.name.trim();
+        const lvl = Math.round(Number(s.level));
+        s.level = (lvl >= 1 && lvl <= 3) ? lvl : 1;
+        s.developing = !!s.developing;
+        return true;
+      });
     });
     // Stakeholders — external contacts (customer POCs, regulators, sister
     // projects). No capacity, no hourly rate. Still ownable so we can
@@ -17468,6 +18016,11 @@
         a.dependsOn = Array.isArray(a.dependsOn) ? a.dependsOn : [];
         a.tags      = Array.isArray(a.tags) ? a.tags : [];
         a.comments  = Array.isArray(a.comments) ? a.comments : [];
+        // Optional skill hints — informs the owner picker on the action
+        // drawer and drives the "Skills Coverage" tile on the portfolio.
+        a.requiredSkills = Array.isArray(a.requiredSkills)
+          ? a.requiredSkills.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim())
+          : [];
         // Planner anchor — total workload in hours for this action. Null
         // by default; the Planner view initialises it from the current
         // commitment × window on first drag, then preserves it while

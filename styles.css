@@ -4160,6 +4160,388 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .person-row.ext-row .ext-count b { color: var(--text); font-size: 14px; }
 .person-row.ext-row .ext-count-sub { font-size: 11px; }
+
+/* ── Skills chips + matrix + dashboard strip ────────────────────
+   Shared chip style; size + emphasis vary by context.
+   .sk-chip is used in the person drawer editor, the People-row
+   preview, the Skills Matrix cells, and the dashboard developing
+   strip. Level colors: 1 = neutral / 2 = accent / 3 = success. */
+.sk-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition), transform .1s ease;
+  user-select: none;
+  vertical-align: baseline;
+}
+.sk-chip:hover { transform: translateY(-1px); }
+.sk-chip-name { white-space: nowrap; }
+.sk-chip-dots { font-size: 8px; letter-spacing: 1px; opacity: .8; }
+.sk-chip-grow { color: rgba(96, 165, 250, 1); font-size: 10px; }
+.sk-chip.level-1 { background: rgba(148, 163, 184, .12); border-color: rgba(148, 163, 184, .40); }
+.sk-chip.level-2 { background: rgba(59,  130, 246, .12); border-color: rgba(59,  130, 246, .45); color: rgba(191, 219, 254, 1); }
+.sk-chip.level-3 { background: rgba(74,  222, 128, .12); border-color: rgba(74,  222, 128, .55); color: rgba(187, 247, 208, 1); }
+.sk-chip.developing { box-shadow: inset 0 0 0 1px rgba(96, 165, 250, .55); }
+.sk-chip.xs { padding: 2px 6px; font-size: 10.5px; gap: 4px; }
+.sk-chip.xs .sk-chip-dots { font-size: 7px; }
+.sk-chip.req { background: rgba(96, 165, 250, .10); border-color: rgba(96, 165, 250, .35); color: rgba(191, 219, 254, 1); font-size: 11px; }
+.sk-chip.req .sk-chip-x { margin-left: 2px; color: rgba(147, 197, 253, 1); opacity: .6; }
+.sk-chip.req:hover .sk-chip-x { opacity: 1; }
+
+.row-skills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+  align-items: center;
+}
+.row-skills-more {
+  font-size: 10px;
+  color: var(--text-faint);
+  padding: 2px 6px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
+/* Chip editor in the person drawer */
+.sk-chip-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.sk-chip-editor .sk-empty { padding: 6px 8px; font-size: 12px; }
+.sk-chip-inputrow {
+  position: relative;
+  margin-top: 8px;
+}
+.sk-chip-inputrow input, .sk-req-inputrow input {
+  width: 100%;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  color: var(--text);
+  font-size: 13px;
+  outline: none;
+}
+.sk-chip-inputrow input:focus, .sk-req-inputrow input:focus { border-color: var(--accent); }
+.sk-suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1200;
+  margin-top: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  max-height: 240px;
+  overflow: auto;
+}
+.sk-sug-row {
+  padding: 6px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+  border-top: 1px solid var(--line);
+}
+.sk-sug-row:first-child { border-top: 0; }
+.sk-sug-row:hover, .sk-sug-row.active { background: rgba(96, 165, 250, .10); }
+.sk-sug-create { color: var(--accent); }
+
+.sk-legacy-note {
+  font-size: 12px;
+  color: var(--text-faint);
+  padding: 6px 8px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(0,0,0,.15);
+}
+
+/* Required-skills editor on the action drawer */
+.sk-req-editor {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px;
+}
+.sk-req-inputrow { position: relative; margin-top: 8px; }
+
+/* ── Skills Matrix ─────────────────────────────────────────────
+   Table with angled header labels + fixed-width dot cells. Rows
+   are people; first column is a sticky name label. */
+.sk-mtx-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.sk-mtx-lbl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-faint);
+}
+.sk-mtx-lbl select {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 3px 8px;
+  font-size: 12px;
+}
+.sk-mtx-flag input { accent-color: var(--accent); }
+.sk-mtx-summary { margin-left: auto; font-size: 11.5px; color: var(--text-faint); }
+.sk-mtx-summary .sk-warn { color: var(--warn); font-weight: 600; }
+.sk-mtx-scroll {
+  overflow: auto;
+  max-height: 60vh;
+  padding: 4px;
+}
+.sk-mtx {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 11px;
+  min-width: 100%;
+}
+.sk-mtx thead th {
+  height: 130px;
+  vertical-align: bottom;
+  padding: 0 2px 6px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 3;
+}
+.sk-mtx-corner {
+  width: 200px;
+  min-width: 200px;
+  text-align: left !important;
+  padding: 0 8px 6px !important;
+  font-weight: 600;
+  color: var(--text-faint);
+  z-index: 4 !important;
+  background: var(--bg-2) !important;
+  border-right: 1px solid var(--line);
+}
+.sk-mtx-h {
+  width: 34px;
+  min-width: 34px;
+  max-width: 34px;
+}
+.sk-mtx-h-inner {
+  display: block;
+  transform: rotate(-55deg);
+  transform-origin: bottom left;
+  width: 30px;
+  height: 110px;
+  position: relative;
+  left: 22px;
+}
+.sk-mtx-h-label {
+  display: inline-block;
+  white-space: nowrap;
+  padding: 0 4px;
+  font-weight: 600;
+  color: var(--text);
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.sk-mtx-h.is-required .sk-mtx-h-label { color: rgba(147, 197, 253, 1); }
+.sk-mtx-h.is-single .sk-mtx-h-label { color: var(--warn); }
+.sk-mtx-h.is-gap .sk-mtx-h-label { color: var(--bad); text-decoration: underline dotted; }
+.sk-mtx-h.is-empty .sk-mtx-h-label { color: var(--text-faint); }
+.sk-mtx-name {
+  width: 200px;
+  min-width: 200px;
+  text-align: left;
+  padding: 6px 8px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text);
+}
+.sk-mtx-name:hover { background: rgba(96, 165, 250, .12); }
+.sk-mtx-name .avatar.xs {
+  display: inline-flex;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  font-size: 10px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+.sk-mtx-cell {
+  width: 34px;
+  min-width: 34px;
+  max-width: 34px;
+  height: 30px;
+  text-align: center;
+  border-bottom: 1px solid var(--line);
+  border-right: 1px dashed rgba(148, 163, 184, .10);
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  background: transparent;
+}
+.sk-mtx-cell.lvl-0 { color: var(--text-faint); }
+.sk-mtx-cell.lvl-1 { background: rgba(148, 163, 184, .18); }
+.sk-mtx-cell.lvl-2 { background: rgba(59, 130, 246, .22); }
+.sk-mtx-cell.lvl-3 { background: rgba(74, 222, 128, .28); }
+.sk-mtx-cell.developing::after {
+  content: '◇';
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  font-size: 8px;
+  color: rgba(96, 165, 250, 1);
+}
+.sk-mtx-cell:hover { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sk-mtx-dots { font-size: 10px; letter-spacing: 1px; color: var(--text); }
+.sk-mtx-cell.lvl-2 .sk-mtx-dots { color: rgba(191, 219, 254, 1); }
+.sk-mtx-cell.lvl-3 .sk-mtx-dots { color: rgba(187, 247, 208, 1); }
+.sk-mtx-row:hover td, .sk-mtx-row:hover th.sk-mtx-name { background: rgba(255,255,255,.03); }
+
+/* Legend dots (small colored discs shown in the panel head) */
+.sk-dot {
+  display: inline-block;
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+  vertical-align: baseline;
+}
+.sk-dot.lvl-1 { background: rgba(148, 163, 184, .60); }
+.sk-dot.lvl-2 { background: rgba(59, 130, 246, .70); }
+.sk-dot.lvl-3 { background: rgba(74, 222, 128, .80); }
+.sk-grow-glyph { color: rgba(96, 165, 250, 1); margin-right: 4px; }
+
+/* Person dashboard — developing strip + stretch suggestions */
+.dash-skills-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0 4px;
+}
+.dash-grow-callout {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid rgba(96, 165, 250, .35);
+  background: rgba(96, 165, 250, .06);
+  border-radius: var(--radius-sm);
+}
+.dash-grow-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(191, 219, 254, 1);
+  margin-bottom: 6px;
+}
+.sk-inline-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(96, 165, 250, .18);
+  border: 1px solid rgba(96, 165, 250, .35);
+  font-size: 10px;
+  color: rgba(191, 219, 254, 1);
+  margin-right: 3px;
+}
+
+/* Portfolio skills coverage tile */
+.skcov-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+  padding: 8px 0;
+}
+.skcov-card {
+  padding: 12px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  transition: background var(--transition), border-color var(--transition);
+}
+.skcov-card.clickable { cursor: pointer; }
+.skcov-card.clickable:hover { border-color: var(--accent); background: rgba(96, 165, 250, .05); }
+.skcov-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.skcov-name { font-weight: 600; color: var(--text); }
+.skcov-num { font-size: 20px; font-weight: 700; }
+.skcov-num.ok { color: var(--ok); }
+.skcov-num.warn { color: var(--warn); }
+.skcov-num.bad { color: var(--bad); }
+.skcov-bar-track {
+  height: 4px;
+  background: rgba(148, 163, 184, .18);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.skcov-bar-fill.ok { background: var(--ok); height: 100%; }
+.skcov-bar-fill.warn { background: var(--warn); height: 100%; }
+.skcov-bar-fill.bad { background: var(--bad); height: 100%; }
+.skcov-meta {
+  display: flex;
+  gap: 12px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.skcov-meta .warn { color: var(--warn); }
+.skcov-meta .bad { color: var(--bad); }
+.skcov-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.skcov-chip {
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 10.5px;
+}
+.skcov-chip.gap {
+  background: rgba(248, 113, 121, .14);
+  border: 1px solid rgba(248, 113, 121, .40);
+  color: rgba(254, 202, 202, 1);
+}
+.skcov-chip.single {
+  background: rgba(251, 191, 36, .12);
+  border: 1px solid rgba(251, 191, 36, .40);
+  color: rgba(254, 240, 138, 1);
+}
+.skcov-more { font-size: 10px; color: var(--text-faint); align-self: center; }
+.skcov-empty { font-size: 12px; color: var(--text-faint); margin-top: 6px; }
 /* On-leave visual cue — the row itself gets a light amber wash and a
    left accent bar so an at-a-glance scan of the People list flags
    who's out. The avatar carries a warm amber ring (primary signal,
