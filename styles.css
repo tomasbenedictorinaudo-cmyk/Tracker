@@ -4084,6 +4084,22 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-weight: 600; margin-bottom: 10px;
   display: flex; justify-content: space-between; align-items: center;
 }
+/* Long-description variant — for panels whose sub-text is a full
+   sentence rather than a short badge. Stacks title on top of the
+   description so the two don't get pushed apart by space-between. */
+.panel-title.panel-title-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+}
+.panel-title .panel-desc {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
 
 .bar-row {
   display: grid;
@@ -4519,16 +4535,55 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .skcov-meta .warn { color: var(--warn); }
 .skcov-meta .bad { color: var(--bad); }
-.skcov-list {
+/* Grouped chip rows — gaps and single-point risks live in labelled
+   sub-rows so the reader can tell at a glance which class of skill
+   is missing vs thinly held. Row label anchors left with a fixed
+   width; chips wrap in a flex container next to it. */
+.skcov-lists {
   margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skcov-row {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  align-items: start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, .18);
+}
+.skcov-row-gap    { border-left: 2px solid rgba(248, 113, 121, .55); }
+.skcov-row-single { border-left: 2px solid rgba(251, 191, 36, .55); }
+.skcov-row-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding-top: 3px;
+  white-space: nowrap;
+}
+.skcov-row-gap    .skcov-row-lbl { color: rgba(254, 202, 202, 1); }
+.skcov-row-single .skcov-row-lbl { color: rgba(254, 240, 138, 1); }
+.skcov-row-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  min-width: 0;
 }
 .skcov-chip {
-  padding: 2px 6px;
-  border-radius: 8px;
-  font-size: 10.5px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .skcov-chip.gap {
   background: rgba(248, 113, 121, .14);

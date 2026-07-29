@@ -13121,7 +13121,10 @@
         }).join('')}
       </div>
       <div class="panel" style="margin-top:14px;">
-        <div class="panel-title">Skills coverage <span class="panel-sub">— for each project, how many required skills are actually held by the team, plus single-point-of-knowledge warnings.</span></div>
+        <div class="panel-title panel-title-stack">
+          <span>Skills coverage</span>
+          <span class="panel-desc">For each project — how many required skills the team actually holds, plus single-point-of-knowledge warnings.</span>
+        </div>
         <div class="skcov-grid">
           ${state.projects
             .filter((p) => state.settings.showArchivedProjects ? true : !p.archived)
@@ -13152,10 +13155,23 @@
                     <span class="${gaps.length ? 'bad' : ''}" title="Required skills nobody holds"><b>${gaps.length}</b> gap${gaps.length === 1 ? '' : 's'}</span>
                   </div>
                   ${(gaps.length || singles.length) ? `
-                  <div class="skcov-list">
-                    ${gaps.slice(0, 3).map((x) => `<span class="skcov-chip gap" title="Gap — nobody holds ${escapeHTML(x.name)}">${escapeHTML(x.name)}</span>`).join('')}
-                    ${singles.slice(0, 3).map((x) => `<span class="skcov-chip single" title="Single-point — only one competent-or-expert holder">${escapeHTML(x.name)}</span>`).join('')}
-                    ${(gaps.length + singles.length) > 6 ? `<span class="skcov-more">+${(gaps.length + singles.length) - 6}</span>` : ''}
+                  <div class="skcov-lists">
+                    ${gaps.length ? `
+                    <div class="skcov-row skcov-row-gap">
+                      <span class="skcov-row-lbl">Gaps</span>
+                      <div class="skcov-row-chips">
+                        ${gaps.slice(0, 4).map((x) => `<span class="skcov-chip gap" title="Gap — nobody on the team holds ${escapeHTML(x.name)}">${escapeHTML(x.name)}</span>`).join('')}
+                        ${gaps.length > 4 ? `<span class="skcov-more" title="${gaps.length - 4} more gap${gaps.length - 4 === 1 ? '' : 's'}">+${gaps.length - 4}</span>` : ''}
+                      </div>
+                    </div>` : ''}
+                    ${singles.length ? `
+                    <div class="skcov-row skcov-row-single">
+                      <span class="skcov-row-lbl">Single-point</span>
+                      <div class="skcov-row-chips">
+                        ${singles.slice(0, 4).map((x) => `<span class="skcov-chip single" title="Single-point — only one competent-or-expert holder">${escapeHTML(x.name)}</span>`).join('')}
+                        ${singles.length > 4 ? `<span class="skcov-more" title="${singles.length - 4} more single-point">+${singles.length - 4}</span>` : ''}
+                      </div>
+                    </div>` : ''}
                   </div>` : ''}
                 </div>`;
             }).join('')}

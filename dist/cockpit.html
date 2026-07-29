@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-29T17:06:57.597Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-29T20:05:53.558Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -4093,6 +4093,22 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-weight: 600; margin-bottom: 10px;
   display: flex; justify-content: space-between; align-items: center;
 }
+/* Long-description variant — for panels whose sub-text is a full
+   sentence rather than a short badge. Stacks title on top of the
+   description so the two don't get pushed apart by space-between. */
+.panel-title.panel-title-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 4px;
+}
+.panel-title .panel-desc {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
 
 .bar-row {
   display: grid;
@@ -4528,16 +4544,55 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .skcov-meta .warn { color: var(--warn); }
 .skcov-meta .bad { color: var(--bad); }
-.skcov-list {
+/* Grouped chip rows — gaps and single-point risks live in labelled
+   sub-rows so the reader can tell at a glance which class of skill
+   is missing vs thinly held. Row label anchors left with a fixed
+   width; chips wrap in a flex container next to it. */
+.skcov-lists {
   margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.skcov-row {
+  display: grid;
+  grid-template-columns: 82px 1fr;
+  align-items: start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, .18);
+}
+.skcov-row-gap    { border-left: 2px solid rgba(248, 113, 121, .55); }
+.skcov-row-single { border-left: 2px solid rgba(251, 191, 36, .55); }
+.skcov-row-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding-top: 3px;
+  white-space: nowrap;
+}
+.skcov-row-gap    .skcov-row-lbl { color: rgba(254, 202, 202, 1); }
+.skcov-row-single .skcov-row-lbl { color: rgba(254, 240, 138, 1); }
+.skcov-row-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+  min-width: 0;
 }
 .skcov-chip {
-  padding: 2px 6px;
-  border-radius: 8px;
-  font-size: 10.5px;
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  line-height: 1.4;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .skcov-chip.gap {
   background: rgba(248, 113, 121, .14);
@@ -23042,7 +23097,10 @@ body.notes-fullscreen { overflow: hidden; }
         }).join('')}
       </div>
       <div class="panel" style="margin-top:14px;">
-        <div class="panel-title">Skills coverage <span class="panel-sub">— for each project, how many required skills are actually held by the team, plus single-point-of-knowledge warnings.</span></div>
+        <div class="panel-title panel-title-stack">
+          <span>Skills coverage</span>
+          <span class="panel-desc">For each project — how many required skills the team actually holds, plus single-point-of-knowledge warnings.</span>
+        </div>
         <div class="skcov-grid">
           ${state.projects
             .filter((p) => state.settings.showArchivedProjects ? true : !p.archived)
@@ -23073,10 +23131,23 @@ body.notes-fullscreen { overflow: hidden; }
                     <span class="${gaps.length ? 'bad' : ''}" title="Required skills nobody holds"><b>${gaps.length}</b> gap${gaps.length === 1 ? '' : 's'}</span>
                   </div>
                   ${(gaps.length || singles.length) ? `
-                  <div class="skcov-list">
-                    ${gaps.slice(0, 3).map((x) => `<span class="skcov-chip gap" title="Gap — nobody holds ${escapeHTML(x.name)}">${escapeHTML(x.name)}</span>`).join('')}
-                    ${singles.slice(0, 3).map((x) => `<span class="skcov-chip single" title="Single-point — only one competent-or-expert holder">${escapeHTML(x.name)}</span>`).join('')}
-                    ${(gaps.length + singles.length) > 6 ? `<span class="skcov-more">+${(gaps.length + singles.length) - 6}</span>` : ''}
+                  <div class="skcov-lists">
+                    ${gaps.length ? `
+                    <div class="skcov-row skcov-row-gap">
+                      <span class="skcov-row-lbl">Gaps</span>
+                      <div class="skcov-row-chips">
+                        ${gaps.slice(0, 4).map((x) => `<span class="skcov-chip gap" title="Gap — nobody on the team holds ${escapeHTML(x.name)}">${escapeHTML(x.name)}</span>`).join('')}
+                        ${gaps.length > 4 ? `<span class="skcov-more" title="${gaps.length - 4} more gap${gaps.length - 4 === 1 ? '' : 's'}">+${gaps.length - 4}</span>` : ''}
+                      </div>
+                    </div>` : ''}
+                    ${singles.length ? `
+                    <div class="skcov-row skcov-row-single">
+                      <span class="skcov-row-lbl">Single-point</span>
+                      <div class="skcov-row-chips">
+                        ${singles.slice(0, 4).map((x) => `<span class="skcov-chip single" title="Single-point — only one competent-or-expert holder">${escapeHTML(x.name)}</span>`).join('')}
+                        ${singles.length > 4 ? `<span class="skcov-more" title="${singles.length - 4} more single-point">+${singles.length - 4}</span>` : ''}
+                      </div>
+                    </div>` : ''}
                   </div>` : ''}
                 </div>`;
             }).join('')}
