@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-07-29T20:28:53.107Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-07-29T22:31:40.204Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -4374,7 +4374,11 @@ body.is-card-dragging * { cursor: grabbing !important; }
   background: var(--bg-1);
 }
 .sk-mtx {
-  border-collapse: collapse;
+  /* Must be `separate` for `position: sticky` on <th> cells to
+     render opaquely — `collapse` merges borders and leaks the
+     scrolling content through the sticky column in Chrome/Safari. */
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 11px;
   min-width: 100%;
 }
@@ -4398,11 +4402,13 @@ body.is-card-dragging * { cursor: grabbing !important; }
   font-size: 10.5px;
   letter-spacing: .06em;
   text-transform: uppercase;
-  z-index: 4 !important;
+  z-index: 5 !important;
   background: var(--bg-2) !important;
   border-right: 1px solid var(--line);
   position: sticky;
   left: 0;
+  top: 0;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, .35);
 }
 .sk-mtx-h {
   width: 28px;
@@ -4440,10 +4446,15 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .sk-mtx-h.is-empty .sk-mtx-h-label { color: var(--text-faint); }
 
 .sk-mtx tbody tr { transition: background var(--transition); }
-.sk-mtx-row:hover td { background-color: rgba(255,255,255,.02); }
-.sk-mtx-row:hover th.sk-mtx-name { background: rgba(96, 165, 250, .10); }
-.sk-mtx-row:nth-child(even) th.sk-mtx-name,
+/* Sticky-column backgrounds MUST stay fully opaque so scrolling
+   content doesn't leak through. Use two opaque tones for odd/even
+   rows on the name cell; the transparent alternation tint applies
+   only to the data cells behind the sticky column. */
 .sk-mtx-row:nth-child(even) td { background-color: rgba(255,255,255,.015); }
+.sk-mtx-row:nth-child(odd)  th.sk-mtx-name { background: var(--bg-2); }
+.sk-mtx-row:nth-child(even) th.sk-mtx-name { background: var(--bg-1); }
+.sk-mtx-row:hover td { background-color: rgba(96, 165, 250, .06); }
+.sk-mtx-row:hover th.sk-mtx-name { background: rgba(96, 165, 250, .18) !important; }
 .sk-mtx-name {
   width: 200px;
   min-width: 200px;
@@ -4458,9 +4469,19 @@ body.is-card-dragging * { cursor: grabbing !important; }
   cursor: pointer;
   font-weight: 500;
   color: var(--text);
-  display: flex;
-  align-items: center;
   gap: 8px;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, .30);
+}
+.sk-mtx-name > .avatar {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-right: 8px;
+}
+.sk-mtx-name > .sk-mtx-name-body {
+  display: inline-flex;
+  flex-direction: column;
+  vertical-align: middle;
+  max-width: calc(100% - 40px);
 }
 .sk-mtx-name-body {
   display: flex;
@@ -23708,7 +23729,7 @@ body.notes-fullscreen { overflow: hidden; }
       <div class="panel" id="pnlSkillsMatrix">
         <div class="panel-title panel-title-stack">
           <span>Skills Matrix</span>
-          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). Click a name to open the person; click a cell to jump to their skills.</span>
+          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click a cell</b> to cycle its level (Learning → Competent → Expert → empty). <b>Shift-click</b> to toggle "developing". Click a name to open the full person editor.</span>
         </div>
         <div class="sk-mtx-legend">
           <span><span class="sk-swatch lvl-1"></span>Learning</span>
@@ -23885,9 +23906,38 @@ body.notes-fullscreen { overflow: hidden; }
         const id = th.closest('tr')?.dataset?.personId;
         if (id) openPersonEditor(id);
       }));
-      // Click a cell → open person editor and jump to that skill.
-      host.querySelectorAll('.sk-mtx-cell').forEach((td) => td.addEventListener('click', () => {
-        openPersonEditor(td.dataset.personId);
+      // Click a cell → cycle skill level (0 → 1 → 2 → 3 → 0). Shift-
+      // click toggles the developing flag. Cmd/Ctrl-click still opens
+      // the full editor for larger edits. Preserves scroll position
+      // so the user can rapidly edit many cells without the viewport
+      // jumping back to the top.
+      host.querySelectorAll('.sk-mtx-cell').forEach((td) => td.addEventListener('click', (ev) => {
+        const personId = td.dataset.personId;
+        const skillName = td.dataset.skill;
+        if (!personId || !skillName) return;
+        if (ev.metaKey || ev.ctrlKey) { openPersonEditor(personId); return; }
+        const p = (state.people || []).find((x) => x.id === personId);
+        if (!p) return;
+        p.skills = Array.isArray(p.skills) ? p.skills : [];
+        const idx = p.skills.findIndex((s) => skillKey(s.name) === skillKey(skillName));
+        const hit = idx >= 0 ? p.skills[idx] : null;
+        if (ev.shiftKey) {
+          // Toggle developing. If cell was empty, seed a Learning-level
+          // developing entry so the flag has something to mark.
+          if (hit) hit.developing = !hit.developing;
+          else p.skills.push({ name: skillName, level: 1, developing: true });
+        } else {
+          // Cycle level. Empty → 1 → 2 → 3 → empty (dropped from array).
+          if (!hit) p.skills.push({ name: skillName, level: 1, developing: false });
+          else if (hit.level < 3) hit.level += 1;
+          else p.skills.splice(idx, 1);
+        }
+        const scroller = $('#skMtx');
+        const sx = scroller?.scrollLeft || 0;
+        const sy = scroller?.scrollTop  || 0;
+        commit('skill-matrix-edit');
+        renderSkillsMatrix();
+        if (scroller) { scroller.scrollLeft = sx; scroller.scrollTop = sy; }
       }));
     }
     // Wire filter controls

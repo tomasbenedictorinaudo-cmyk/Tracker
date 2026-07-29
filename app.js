@@ -13672,7 +13672,7 @@
       <div class="panel" id="pnlSkillsMatrix">
         <div class="panel-title panel-title-stack">
           <span>Skills Matrix</span>
-          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). Click a name to open the person; click a cell to jump to their skills.</span>
+          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click a cell</b> to cycle its level (Learning → Competent → Expert → empty). <b>Shift-click</b> to toggle "developing". Click a name to open the full person editor.</span>
         </div>
         <div class="sk-mtx-legend">
           <span><span class="sk-swatch lvl-1"></span>Learning</span>
@@ -13849,9 +13849,38 @@
         const id = th.closest('tr')?.dataset?.personId;
         if (id) openPersonEditor(id);
       }));
-      // Click a cell → open person editor and jump to that skill.
-      host.querySelectorAll('.sk-mtx-cell').forEach((td) => td.addEventListener('click', () => {
-        openPersonEditor(td.dataset.personId);
+      // Click a cell → cycle skill level (0 → 1 → 2 → 3 → 0). Shift-
+      // click toggles the developing flag. Cmd/Ctrl-click still opens
+      // the full editor for larger edits. Preserves scroll position
+      // so the user can rapidly edit many cells without the viewport
+      // jumping back to the top.
+      host.querySelectorAll('.sk-mtx-cell').forEach((td) => td.addEventListener('click', (ev) => {
+        const personId = td.dataset.personId;
+        const skillName = td.dataset.skill;
+        if (!personId || !skillName) return;
+        if (ev.metaKey || ev.ctrlKey) { openPersonEditor(personId); return; }
+        const p = (state.people || []).find((x) => x.id === personId);
+        if (!p) return;
+        p.skills = Array.isArray(p.skills) ? p.skills : [];
+        const idx = p.skills.findIndex((s) => skillKey(s.name) === skillKey(skillName));
+        const hit = idx >= 0 ? p.skills[idx] : null;
+        if (ev.shiftKey) {
+          // Toggle developing. If cell was empty, seed a Learning-level
+          // developing entry so the flag has something to mark.
+          if (hit) hit.developing = !hit.developing;
+          else p.skills.push({ name: skillName, level: 1, developing: true });
+        } else {
+          // Cycle level. Empty → 1 → 2 → 3 → empty (dropped from array).
+          if (!hit) p.skills.push({ name: skillName, level: 1, developing: false });
+          else if (hit.level < 3) hit.level += 1;
+          else p.skills.splice(idx, 1);
+        }
+        const scroller = $('#skMtx');
+        const sx = scroller?.scrollLeft || 0;
+        const sy = scroller?.scrollTop  || 0;
+        commit('skill-matrix-edit');
+        renderSkillsMatrix();
+        if (scroller) { scroller.scrollLeft = sx; scroller.scrollTop = sy; }
       }));
     }
     // Wire filter controls
