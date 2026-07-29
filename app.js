@@ -706,16 +706,83 @@
     // capacity is in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year)
     // assignments split each person's FTE across the three demo projects.
     const people = [
-      { id: 'p_sofia', name: 'Sofia Reyes',     role: 'Project Manager',     capacity: 100, hourlyRate: 140, assignments: [{ projectId: 'pr_orbit', commitment: 60 }, { projectId: 'pr_helios', commitment: 40 }] },
-      { id: 'p_marie', name: 'Marie Laurent',   role: 'Systems Engineer',    capacity: 100, hourlyRate: 130, assignments: [{ projectId: 'pr_orbit', commitment: 80 }, { projectId: 'pr_falcon', commitment: 20 }] },
-      { id: 'p_arjun', name: 'Arjun Patel',     role: 'Avionics Lead',       capacity: 100, hourlyRate: 145, assignments: [{ projectId: 'pr_orbit', commitment: 100 }] },
-      { id: 'p_jonas', name: 'Jonas Becker',    role: 'Mechanical',          capacity:  80, hourlyRate: 120, assignments: [{ projectId: 'pr_orbit', commitment: 60 }, { projectId: 'pr_falcon', commitment: 20 }] },
-      { id: 'p_kira',  name: 'Kira Nakamura',   role: 'Software Architect',  capacity: 100, hourlyRate: 150, assignments: [{ projectId: 'pr_orbit', commitment: 50 }, { projectId: 'pr_helios', commitment: 50 }] },
-      { id: 'p_omar',  name: 'Omar El-Sayed',   role: 'Power Systems',       capacity:  80, hourlyRate: 125, assignments: [{ projectId: 'pr_orbit', commitment: 80 }] },
-      { id: 'p_lena',  name: 'Lena Holmberg',   role: 'Thermal Engineer',    capacity:  80, hourlyRate: 125, assignments: [{ projectId: 'pr_orbit', commitment: 60 }, { projectId: 'pr_falcon', commitment: 20 }] },
-      { id: 'p_diego', name: 'Diego Ferreira',  role: 'AOCS',                capacity: 100, hourlyRate: 135, assignments: [{ projectId: 'pr_orbit', commitment: 70 }, { projectId: 'pr_falcon', commitment: 30 }] },
-      { id: 'p_yuki',  name: 'Yuki Tanaka',     role: 'Software Developer',  capacity: 100, hourlyRate: 110, assignments: [{ projectId: 'pr_helios', commitment: 100 }] },
-      { id: 'p_nadia', name: 'Nadia Rahman',    role: 'Test Engineer',       capacity: 100, hourlyRate: 115, assignments: [{ projectId: 'pr_orbit', commitment: 100 }] },
+      { id: 'p_sofia', name: 'Sofia Reyes',     role: 'Project Manager',     capacity: 100, hourlyRate: 140, assignments: [{ projectId: 'pr_orbit', commitment: 60 }, { projectId: 'pr_helios', commitment: 40 }],
+        skills: [
+          { name: 'Project management',           level: 3, developing: false },
+          { name: 'Risk management',              level: 3, developing: false },
+          { name: 'Customer engagement',          level: 3, developing: false },
+          { name: 'Earned value management',      level: 2, developing: true  },
+          { name: 'Scrum',                        level: 2, developing: false },
+        ] },
+      { id: 'p_marie', name: 'Marie Laurent',   role: 'Systems Engineer',    capacity: 100, hourlyRate: 130, assignments: [{ projectId: 'pr_orbit', commitment: 80 }, { projectId: 'pr_falcon', commitment: 20 }],
+        skills: [
+          { name: 'Systems engineering',          level: 3, developing: false },
+          { name: 'Requirements engineering',     level: 3, developing: false },
+          { name: 'SysML',                        level: 2, developing: false },
+          { name: 'FMEA',                         level: 2, developing: false },
+          { name: 'Payload optics',               level: 1, developing: true  },
+        ] },
+      { id: 'p_arjun', name: 'Arjun Patel',     role: 'Avionics Lead',       capacity: 100, hourlyRate: 145, assignments: [{ projectId: 'pr_orbit', commitment: 100 }],
+        skills: [
+          { name: 'Avionics architecture',        level: 3, developing: false },
+          { name: 'EMC',                          level: 3, developing: false },
+          { name: 'Harness design',               level: 2, developing: false },
+          { name: 'CAN bus',                      level: 2, developing: false },
+          { name: 'Neutron radiation testing',    level: 1, developing: true  },
+        ] },
+      { id: 'p_jonas', name: 'Jonas Becker',    role: 'Mechanical',          capacity:  80, hourlyRate: 120, assignments: [{ projectId: 'pr_orbit', commitment: 60 }, { projectId: 'pr_falcon', commitment: 20 }],
+        skills: [
+          { name: 'Structural analysis (FEA)',    level: 3, developing: false },
+          { name: 'CFRP composites',              level: 3, developing: false },
+          { name: 'Vibration testing',            level: 2, developing: false },
+          { name: 'CAD (CATIA)',                  level: 2, developing: false },
+        ] },
+      { id: 'p_kira',  name: 'Kira Nakamura',   role: 'Software Architect',  capacity: 100, hourlyRate: 150, assignments: [{ projectId: 'pr_orbit', commitment: 50 }, { projectId: 'pr_helios', commitment: 50 }],
+        skills: [
+          { name: 'Flight software (FSW)',        level: 3, developing: false },
+          { name: 'C++',                          level: 3, developing: false },
+          { name: 'Python',                       level: 2, developing: false },
+          { name: 'Real-time systems',            level: 3, developing: false },
+          { name: 'Rust',                         level: 1, developing: true  },
+        ] },
+      { id: 'p_omar',  name: 'Omar El-Sayed',   role: 'Power Systems',       capacity:  80, hourlyRate: 125, assignments: [{ projectId: 'pr_orbit', commitment: 80 }],
+        skills: [
+          { name: 'Power systems (EPS)',          level: 3, developing: false },
+          { name: 'Battery cell qualification',   level: 3, developing: false },
+          { name: 'Solar arrays',                 level: 2, developing: false },
+          { name: 'PCDU design',                  level: 2, developing: false },
+        ] },
+      { id: 'p_lena',  name: 'Lena Holmberg',   role: 'Thermal Engineer',    capacity:  80, hourlyRate: 125, assignments: [{ projectId: 'pr_orbit', commitment: 60 }, { projectId: 'pr_falcon', commitment: 20 }],
+        skills: [
+          { name: 'Thermal modelling',            level: 3, developing: false },
+          { name: 'Radiator sizing',              level: 3, developing: false },
+          { name: 'MLI design',                   level: 2, developing: false },
+          { name: 'TVAC testing',                 level: 2, developing: true  },
+        ] },
+      { id: 'p_diego', name: 'Diego Ferreira',  role: 'AOCS',                capacity: 100, hourlyRate: 135, assignments: [{ projectId: 'pr_orbit', commitment: 70 }, { projectId: 'pr_falcon', commitment: 30 }],
+        skills: [
+          { name: 'AOCS',                         level: 3, developing: false },
+          { name: 'Kalman filter',                level: 3, developing: false },
+          { name: 'Star tracker integration',     level: 2, developing: false },
+          { name: 'MATLAB / Simulink',            level: 2, developing: false },
+          { name: 'Reaction wheel sizing',        level: 2, developing: false },
+        ] },
+      { id: 'p_yuki',  name: 'Yuki Tanaka',     role: 'Software Developer',  capacity: 100, hourlyRate: 110, assignments: [{ projectId: 'pr_helios', commitment: 100 }],
+        skills: [
+          { name: 'TypeScript',                   level: 3, developing: false },
+          { name: 'React',                        level: 3, developing: false },
+          { name: 'Node.js',                      level: 2, developing: false },
+          { name: 'PostgreSQL',                   level: 2, developing: false },
+          { name: 'Flight software (FSW)',        level: 1, developing: true  },
+        ] },
+      { id: 'p_nadia', name: 'Nadia Rahman',    role: 'Test Engineer',       capacity: 100, hourlyRate: 115, assignments: [{ projectId: 'pr_orbit', commitment: 100 }],
+        skills: [
+          { name: 'Test planning',                level: 3, developing: false },
+          { name: 'EMC',                          level: 2, developing: false },
+          { name: 'Vibration testing',            level: 3, developing: false },
+          { name: 'TVAC testing',                 level: 2, developing: false },
+          { name: 'Acceptance test procedures',   level: 3, developing: false },
+        ] },
     ];
     // External stakeholders — customer POCs, regulators, sister-project
     // liaisons. No capacity; still ownable / originatable so we can
@@ -759,6 +826,27 @@
     /* Generate one project's actions and history.
        phases: array of { startOff, endOff, density, statusBias }.
        statusBias: 'past' (mostly done), 'present' (mix), 'future' (mostly todo). */
+    // Skill demand map — which competencies each component's actions
+    // typically require. Includes a couple of scarce skills ("Neutron
+    // radiation testing", "Advanced antenna design") that no one on
+    // the team holds at Competent+, so the Portfolio coverage tile
+    // and matrix light up out of the box.
+    const COMPONENT_SKILLS = {
+      power:    ['Power systems (EPS)', 'Battery cell qualification', 'Solar arrays', 'PCDU design'],
+      aocs:     ['AOCS', 'Kalman filter', 'Star tracker integration', 'MATLAB / Simulink', 'Reaction wheel sizing'],
+      struct:   ['Structural analysis (FEA)', 'CFRP composites', 'CAD (CATIA)', 'Vibration testing'],
+      thermal:  ['Thermal modelling', 'Radiator sizing', 'MLI design', 'TVAC testing'],
+      sw:       ['Flight software (FSW)', 'C++', 'Real-time systems', 'Python'],
+      payload:  ['Payload optics', 'Advanced antenna design', 'Calibration'],
+      avionics: ['Avionics architecture', 'EMC', 'Harness design', 'CAN bus', 'Neutron radiation testing'],
+      pm:       ['Project management', 'Risk management', 'Customer engagement'],
+      test:     ['Test planning', 'Vibration testing', 'TVAC testing', 'EMC', 'Acceptance test procedures'],
+      be:       ['TypeScript', 'Node.js', 'PostgreSQL', 'Distributed systems'],
+      fe:       ['TypeScript', 'React', 'UX design'],
+      ops:      ['Site reliability', 'On-call practices', 'Incident management'],
+      mech:     ['Structural analysis (FEA)', 'CAD (CATIA)', 'Aerodynamics'],
+      flight:   ['Flight software (FSW)', 'PID tuning', 'Real-time systems'],
+    };
     function genActions(spec) {
       const out = [];
       let counter = 0;
@@ -846,6 +934,17 @@
           // Commitment % — most actions are full-time (100%), some are part-time
           const commitment = pickW([[100, 60], [75, 12], [50, 18], [25, 10]]);
 
+          // Attach 0-3 required skills drawn from the component's
+          // demand pool. Roughly half of actions carry at least one,
+          // so the coverage tile and owner-picker nudge have signal
+          // without every action feeling annotated.
+          const skillPool = COMPONENT_SKILLS[cmp.key] || [];
+          let requiredSkills = [];
+          if (skillPool.length && chance(0.55)) {
+            const n = pickW([[1, 60], [2, 30], [3, 10]]);
+            const shuffled = skillPool.slice().sort(() => rnd() - 0.5);
+            requiredSkills = shuffled.slice(0, n);
+          }
           out.push({
             id: uid('a'),
             title,
@@ -863,6 +962,7 @@
             updatedAt: updatedISO,
             originatorDate: createdISO,
             history,
+            requiredSkills,
           });
         }
       }
