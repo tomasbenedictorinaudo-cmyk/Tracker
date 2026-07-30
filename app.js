@@ -13672,7 +13672,7 @@
       <div class="panel" id="pnlSkillsMatrix">
         <div class="panel-title panel-title-stack">
           <span>Skills Matrix</span>
-          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click</b> a cell to raise the level by one (empty → Learning → Competent → Expert, stops at Expert). <b>Right-click</b> to lower it (Expert → Competent → Learning → empty). <b>Shift-click</b> toggles "developing". Click a name to open the full person editor.</span>
+          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click</b> a cell to raise the level by one (empty → Learning → Competent → Expert, stops at Expert). <b>Right-click</b> to lower it. <b>Shift-click</b> toggles "developing". Double-click a name to open the person editor.</span>
         </div>
         <div class="sk-mtx-legend">
           <span><span class="sk-swatch lvl-1"></span>Learning</span>
@@ -13822,7 +13822,7 @@
         }).join('');
         const totalLvl = personSkills(p).reduce((n, sk) => n + sk.level, 0);
         return `<tr class="sk-mtx-row" data-person-id="${escapeHTML(p.id)}">
-          <th class="sk-mtx-name" title="Click to open ${escapeHTML(p.name)} — ${personSkills(p).length} skills, total ${totalLvl} pts">
+          <th class="sk-mtx-name" title="${escapeHTML(p.name)} — ${personSkills(p).length} skills, total ${totalLvl} pts · Double-click to open the person editor">
             <span class="avatar xs">${initials(p.name)}</span>
             <span class="sk-mtx-name-body">
               <span class="sk-mtx-name-line">${escapeHTML(p.name)}</span>
@@ -13844,11 +13844,27 @@
         if (gapCount) parts.push(`<span class="sk-warn">${gapCount} gap${gapCount === 1 ? '' : 's'}</span>`);
         summary.innerHTML = parts.join(' · ');
       }
-      // Click a name header → open person editor.
-      host.querySelectorAll('.sk-mtx-name').forEach((th) => th.addEventListener('click', () => {
-        const id = th.closest('tr')?.dataset?.personId;
-        if (id) openPersonEditor(id);
-      }));
+      // Name column is intentionally NOT click-to-open — the column
+      // is sticky (position:sticky, left:0) so it overlays cells that
+      // scroll under it. A single click there would misfire the
+      // person editor on what the user perceives as "click the cell".
+      // Instead: double-click to open, right-click for a context menu.
+      host.querySelectorAll('.sk-mtx-name').forEach((th) => {
+        th.addEventListener('dblclick', (ev) => {
+          ev.preventDefault();
+          const id = th.closest('tr')?.dataset?.personId;
+          if (id) openPersonEditor(id);
+        });
+        th.addEventListener('contextmenu', (ev) => {
+          ev.preventDefault();
+          const id = th.closest('tr')?.dataset?.personId;
+          if (!id) return;
+          showContextMenu(ev.clientX, ev.clientY, [
+            { icon: '✎', label: 'Edit person…',    onClick: () => openPersonEditor(id) },
+            { icon: '◰', label: 'Open dashboard',  onClick: () => openPersonDashboard(id) },
+          ]);
+        });
+      });
       // Cell edit — left-click increments the skill level by one
       // (empty → Learning → Competent → Expert; stops at Expert so a
       // stray click never wipes an entry). Right-click decrements by
