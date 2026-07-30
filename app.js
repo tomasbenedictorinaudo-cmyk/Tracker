@@ -13672,7 +13672,7 @@
       <div class="panel" id="pnlSkillsMatrix">
         <div class="panel-title panel-title-stack">
           <span>Skills Matrix</span>
-          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click a cell</b> to cycle its level (Learning → Competent → Expert → empty). <b>Shift-click</b> to toggle "developing". Click a name to open the full person editor.</span>
+          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click</b> a cell to raise the level by one (empty → Learning → Competent → Expert, stops at Expert). <b>Right-click</b> to lower it (Expert → Competent → Learning → empty). <b>Shift-click</b> toggles "developing". Click a name to open the full person editor.</span>
         </div>
         <div class="sk-mtx-legend">
           <span><span class="sk-swatch lvl-1"></span>Learning</span>
@@ -13849,31 +13849,33 @@
         const id = th.closest('tr')?.dataset?.personId;
         if (id) openPersonEditor(id);
       }));
-      // Click a cell → cycle skill level (0 → 1 → 2 → 3 → 0). Shift-
-      // click toggles the developing flag. Cmd/Ctrl-click still opens
-      // the full editor for larger edits. Preserves scroll position
-      // so the user can rapidly edit many cells without the viewport
-      // jumping back to the top.
-      host.querySelectorAll('.sk-mtx-cell').forEach((td) => td.addEventListener('click', (ev) => {
+      // Cell edit — left-click increments the skill level by one
+      // (empty → Learning → Competent → Expert; stops at Expert so a
+      // stray click never wipes an entry). Right-click decrements by
+      // one, dropping the entry once it hits empty. Shift-click
+      // toggles the developing flag; Cmd/Ctrl-click opens the full
+      // person editor for larger edits. Scroll position is preserved
+      // across re-renders so the viewport doesn't lurch during rapid
+      // batch edits.
+      function editCellLevel(td, delta, opts = {}) {
         const personId = td.dataset.personId;
         const skillName = td.dataset.skill;
         if (!personId || !skillName) return;
-        if (ev.metaKey || ev.ctrlKey) { openPersonEditor(personId); return; }
         const p = (state.people || []).find((x) => x.id === personId);
         if (!p) return;
         p.skills = Array.isArray(p.skills) ? p.skills : [];
         const idx = p.skills.findIndex((s) => skillKey(s.name) === skillKey(skillName));
         const hit = idx >= 0 ? p.skills[idx] : null;
-        if (ev.shiftKey) {
-          // Toggle developing. If cell was empty, seed a Learning-level
-          // developing entry so the flag has something to mark.
+        if (opts.toggleDeveloping) {
           if (hit) hit.developing = !hit.developing;
           else p.skills.push({ name: skillName, level: 1, developing: true });
-        } else {
-          // Cycle level. Empty → 1 → 2 → 3 → empty (dropped from array).
+        } else if (delta > 0) {
           if (!hit) p.skills.push({ name: skillName, level: 1, developing: false });
           else if (hit.level < 3) hit.level += 1;
-          else p.skills.splice(idx, 1);
+          // else: already Expert, no-op
+        } else if (delta < 0) {
+          if (hit && hit.level > 1) hit.level -= 1;
+          else if (hit) p.skills.splice(idx, 1);
         }
         const scroller = $('#skMtx');
         const sx = scroller?.scrollLeft || 0;
@@ -13881,7 +13883,18 @@
         commit('skill-matrix-edit');
         renderSkillsMatrix();
         if (scroller) { scroller.scrollLeft = sx; scroller.scrollTop = sy; }
-      }));
+      }
+      host.querySelectorAll('.sk-mtx-cell').forEach((td) => {
+        td.addEventListener('click', (ev) => {
+          if (ev.metaKey || ev.ctrlKey) { openPersonEditor(td.dataset.personId); return; }
+          if (ev.shiftKey) { editCellLevel(td, 0, { toggleDeveloping: true }); return; }
+          editCellLevel(td, +1);
+        });
+        td.addEventListener('contextmenu', (ev) => {
+          ev.preventDefault();
+          editCellLevel(td, -1);
+        });
+      });
     }
     // Wire filter controls
     const compSel = $('#skMtxComp'); if (compSel) compSel.value = state.ui.skMtx.comp || '';
