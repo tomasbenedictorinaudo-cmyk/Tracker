@@ -14533,19 +14533,54 @@
         ${people.map((p, i) => {
           const y = laneY(i);
           const bg = i % 2 === 0 ? 'rgba(255,255,255,.02)' : 'transparent';
-          const rowBars = (byPerson.get(p.id) || []).map(({ act, al }) => {
+          // Pack overlapping allocations into stacked lanes: greedy
+          // interval-scheduling — each bar is placed on the lowest lane
+          // whose last-ended bar finishes before this one starts.
+          // laneCount = max concurrent overlap (>=1). Every bar in the
+          // row gets thickness rowH_avail / laneCount so overlaps read
+          // as neatly stacked ribbons, never as visually merged blobs.
+          const items = (byPerson.get(p.id) || [])
+            .slice()
+            .sort((A, B) => (A.al.startDate < B.al.startDate ? -1
+                             : A.al.startDate > B.al.startDate ? 1
+                             : A.al.endDate < B.al.endDate ? -1 : 1));
+          const laneEnds = []; // per-lane endDate ISO (exclusive by day)
+          const laneOf = items.map(({ al }) => {
+            for (let li = 0; li < laneEnds.length; li++) {
+              // Lane free if its previous bar ends STRICTLY before
+              // this one starts. Equal dates count as overlap.
+              if (laneEnds[li] < al.startDate) {
+                laneEnds[li] = al.endDate;
+                return li;
+              }
+            }
+            laneEnds.push(al.endDate);
+            return laneEnds.length - 1;
+          });
+          const laneCount = Math.max(1, laneEnds.length);
+          const availH = rowH - 12;                    // 6 top + 6 bottom
+          const laneH  = availH / laneCount;
+          const barH   = Math.max(3, laneH - (laneCount > 1 ? 1.5 : 0));
+          const showLabel = laneH >= 14;
+          const rowBars = items.map(({ act, al }, idx) => {
             const x = dateX(al.startDate);
             const w = Math.max(4, dateX(al.endDate) + dayW - x);
             const color = actColor(act.id);
             const opacity = al.tentative ? 0.35 : 0.90;
             const stroke = al.tentative ? 'stroke="rgba(148,163,184,.60)" stroke-dasharray="4 3"' : `stroke="${color}"`;
             const label = `${act.title}${al.hours ? ' · ' + al.hours + 'h' : ''}`;
+            const laneIdx = laneOf[idx];
+            const by = y + 6 + laneIdx * laneH;
+            const textY = by + barH / 2 + 4;
+            const labelHTML = showLabel
+              ? `<text x="${x + 6}" y="${textY}" fill="#fff" font-size="11" font-family="sans-serif" pointer-events="none">${escapeHTML(label.length > Math.floor(w / 6) ? label.slice(0, Math.floor(w / 6) - 1) + '…' : label)}</text>`
+              : '';
             return `
               <g class="act-bar" data-act-id="${escapeHTML(act.id)}">
-                <title>${escapeHTML(label + (al.tentative ? ' (tentative)' : ''))}</title>
-                <rect x="${x}" y="${y + 6}" width="${w}" height="${rowH - 14}" rx="4" ry="4"
+                <title>${escapeHTML(label + (al.tentative ? ' (tentative)' : '') + (laneCount > 1 ? ` · lane ${laneIdx + 1}/${laneCount}` : ''))}</title>
+                <rect x="${x}" y="${by}" width="${w}" height="${barH}" rx="${Math.min(4, barH / 2)}" ry="${Math.min(4, barH / 2)}"
                       fill="${color}" fill-opacity="${opacity}" ${stroke} stroke-width="1" />
-                <text x="${x + 6}" y="${y + rowH / 2 + 4}" fill="#fff" font-size="11" font-family="sans-serif" pointer-events="none">${escapeHTML(label.length > Math.floor(w / 6) ? label.slice(0, Math.floor(w / 6) - 1) + '…' : label)}</text>
+                ${labelHTML}
               </g>`;
           }).join('');
           const milestones = acts.flatMap((a) => (a.milestones || []).filter((mm) => mm.date)
