@@ -14791,7 +14791,7 @@
             <button class="ghost" id="dashEdit">Edit person…</button>
             <button class="ghost" id="dashFilter">Filter Register to ${escapeHTML(p.name)}</button>
             <button class="ghost" id="dashSwot" title="Generate SWOT view from the current development review">⊞ SWOT</button>
-            <button class="ghost" id="dashFullscreen" title="Toggle full-screen (Esc to exit)">⛶ Fullscreen</button>
+            <button class="ghost" id="dashFullscreen" title="Toggle full-screen">↙ Exit fullscreen</button>
           </div>
         </div>
       </div>
@@ -14891,6 +14891,11 @@
             <div class="dash-row-sub">${escapeHTML(pr.name)} · residual ${_score}</div>
           </div>`).join(''))}`;
     $('#drawer').hidden = false;
+    // Person dashboard opens fullscreen by default — the section
+    // stack (KPIs, workload, skills, reviews, planner) reads far
+    // better with the extra width. The sidebar stays visible so
+    // the user can still navigate away without closing first.
+    $('#drawer').classList.add('is-fullscreen');
     $('#dashEdit').addEventListener('click', () => openPersonEditor(personId));
     $('#dashFilter').addEventListener('click', () => {
       closeDrawer();
@@ -16448,7 +16453,15 @@
       toast('Moved to Archive');
     });
   }
-  function closeDrawer() { $('#drawer').hidden = true; }
+  function closeDrawer() {
+    const d = $('#drawer');
+    if (!d) return;
+    d.hidden = true;
+    // Strip the fullscreen class so the next drawer (action / risk /
+    // change-request) opens at its normal 460 px width instead of
+    // inheriting the dashboard's full-viewport mode.
+    d.classList.remove('is-fullscreen');
+  }
 
   /* --------------------------- Quick add ----------------------------- */
 

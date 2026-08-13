@@ -8359,10 +8359,16 @@ kbd {
   box-shadow: var(--shadow);
   transition: width var(--transition);
 }
-/* Full-screen dashboard — widens the drawer to the entire viewport
-   so the reviews section has room to breathe. Toggled by
-   #dashFullscreen; Esc / × still closes as normal. */
-#drawer.is-fullscreen .drawer { width: 100vw; max-width: 100vw; }
+/* Full-screen dashboard — widens the drawer to the full remaining
+   viewport WHILE leaving the sidebar visible. The overlay itself
+   shifts right by the sidebar width, so both the backdrop and the
+   drawer live to the right of the nav. Sidebar-collapsed reverts
+   the offset. Toggled by #dashFullscreen; the dashboard opens with
+   this class on by default so operators land straight in the
+   readable layout. */
+#drawer.is-fullscreen { left: 220px; }
+.app.sidebar-collapsed #drawer.is-fullscreen { left: 0; }
+#drawer.is-fullscreen .drawer { width: 100%; max-width: 100%; }
 #drawer.is-fullscreen .drawer-body { padding: 20px 32px; }
 .drawer-head {
   display: flex; align-items: center;
@@ -9932,15 +9938,13 @@ body.notes-fullscreen { overflow: hidden; }
    layout wide. */
 .view.pln-embedded { padding: 0; max-width: 100%; overflow: hidden; }
 #dashPlannerHost { max-width: 100%; overflow: hidden; }
-.view.pln-embedded .pln-scroll,
-.view.pln-embedded .pln-scroll-wrap,
-.view.pln-embedded .pln-frame {
-  max-width: 100%;
-}
-/* The Planner's Gantt renders as a wide SVG inside .pln-scroll —
-   keep horizontal scroll ownership on that container instead of on
-   the whole page. */
-.view.pln-embedded .pln-scroll { overflow-x: auto; }
+/* The Planner's Gantt renders as a wide SVG inside .planner-scroll
+   — keep horizontal scroll ownership on that container instead of
+   pushing the drawer wider than its viewport. Applies whether the
+   drawer is fullscreen or not; the embedded variant just forwards
+   the constraint through every wrapper layer. */
+.view.pln-embedded, .view.pln-embedded > * { max-width: 100%; min-width: 0; }
+.view.pln-embedded .planner-scroll { max-width: 100%; overflow-x: auto; }
 .pln-embed-toolbar {
   display: flex; align-items: center; gap: 10px;
   padding: 6px 0 10px;
