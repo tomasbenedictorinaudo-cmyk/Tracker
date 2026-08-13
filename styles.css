@@ -9794,6 +9794,106 @@ body.notes-fullscreen { overflow: hidden; }
   box-shadow: var(--shadow);
 }
 
+/* ── Activities view ────────────────────────────────────────────
+   Three-panel workflow (requests · gantt · workload). Stacked
+   vertically; each panel is autonomous. */
+.act-layout { display: flex; flex-direction: column; gap: 14px; }
+.act-panel { padding: 14px 16px; }
+
+/* Requests table */
+.act-list-wrap { overflow: auto; }
+.act-list { width: 100%; border-collapse: collapse; font-size: 12px; }
+.act-list thead th {
+  text-align: left; padding: 8px 10px;
+  font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.act-list thead th.num { text-align: right; }
+.act-list tbody td { padding: 10px; vertical-align: top; border-bottom: 1px solid rgba(148, 163, 184, .10); }
+.act-list tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.act-row { cursor: pointer; transition: background var(--transition); }
+.act-row:hover { background: rgba(96, 165, 250, .08); }
+.act-row-title { font-weight: 600; color: var(--text); }
+.act-row-sub { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+.act-status-chip {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  border: 1px solid var(--line); font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.act-alloc-cell { min-width: 160px; }
+.act-alloc-bar {
+  height: 8px; border-radius: 4px; overflow: hidden;
+  background: rgba(148, 163, 184, .18);
+  display: flex;
+}
+.act-alloc-bar > span { display: block; height: 100%; }
+.alloc-firm { background: rgba(74, 222, 128, .85); }
+.alloc-tent { background: rgba(96, 165, 250, .70); }
+.alloc-gap  { background: rgba(148, 163, 184, .18); border-left: 1px dashed rgba(251, 191, 36, .70); }
+
+/* Gantt */
+.act-gantt-wrap { overflow-x: auto; }
+.act-gantt-scroll { overflow-x: auto; overflow-y: hidden; }
+.act-gantt { display: block; background: var(--bg-1); }
+.act-bar { cursor: pointer; }
+.act-bar:hover rect { fill-opacity: 1; }
+.act-mile, .act-deliv { cursor: pointer; }
+.act-mile:hover polygon, .act-deliv:hover polygon { transform: translateY(-1px); filter: brightness(1.2); }
+
+/* Workload */
+.act-wl-wrap { padding-top: 8px; }
+.act-wl { display: block; max-width: 100%; }
+.act-wl-toolbar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 8px 12px; background: var(--bg-2); border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+/* Activity editor drawer */
+.ac-stk-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.ac-stk-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 10px;
+  background: rgba(96, 165, 250, .12);
+  border: 1px solid rgba(96, 165, 250, .40);
+  color: rgba(191, 219, 254, 1);
+  font-size: 11px; cursor: pointer;
+}
+.ac-stk-chip .ac-stk-x { color: rgba(147, 197, 253, .8); }
+.ac-split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .ac-split { grid-template-columns: 1fr; } }
+.ac-mile { display: flex; flex-direction: column; gap: 6px; }
+.ac-mile-list { display: flex; flex-direction: column; gap: 4px; }
+.ac-mile-row {
+  display: grid; grid-template-columns: 20px 1fr 140px 28px; gap: 6px; align-items: center;
+  padding: 4px 6px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
+}
+.ac-mile-glyph { color: var(--warn); font-size: 14px; text-align: center; }
+.ac-mile-glyph.deliv { color: var(--ok); }
+.ac-mile-row input {
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--text); padding: 3px 6px; font-size: 12px;
+}
+.ac-mile-add { display: grid; grid-template-columns: 1fr 140px auto; gap: 6px; margin-top: 4px; }
+.ac-mile-add input {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
+  color: var(--text); padding: 4px 8px; font-size: 12px;
+}
+.ac-alloc-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.ac-alloc-row {
+  display: grid; grid-template-columns: 1fr 130px 130px 80px auto 28px;
+  gap: 6px; align-items: center;
+  padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
+}
+.ac-alloc-row select, .ac-alloc-row input {
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--text); padding: 4px 6px; font-size: 12px;
+}
+.ac-al-tent { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); }
+.ac-alloc-summary { font-size: 11.5px; margin-top: 4px; }
+
 /* Embedded Planner — dashboard variant. Drops the page-head and
    uses a compact toolbar row instead of the full picker. */
 .view.pln-embedded { padding: 0; }

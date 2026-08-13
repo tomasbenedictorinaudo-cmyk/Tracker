@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T12:34:46.497Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T12:55:05.281Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -9803,6 +9803,106 @@ body.notes-fullscreen { overflow: hidden; }
   box-shadow: var(--shadow);
 }
 
+/* ── Activities view ────────────────────────────────────────────
+   Three-panel workflow (requests · gantt · workload). Stacked
+   vertically; each panel is autonomous. */
+.act-layout { display: flex; flex-direction: column; gap: 14px; }
+.act-panel { padding: 14px 16px; }
+
+/* Requests table */
+.act-list-wrap { overflow: auto; }
+.act-list { width: 100%; border-collapse: collapse; font-size: 12px; }
+.act-list thead th {
+  text-align: left; padding: 8px 10px;
+  font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.act-list thead th.num { text-align: right; }
+.act-list tbody td { padding: 10px; vertical-align: top; border-bottom: 1px solid rgba(148, 163, 184, .10); }
+.act-list tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.act-row { cursor: pointer; transition: background var(--transition); }
+.act-row:hover { background: rgba(96, 165, 250, .08); }
+.act-row-title { font-weight: 600; color: var(--text); }
+.act-row-sub { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+.act-status-chip {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  border: 1px solid var(--line); font-size: 10.5px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: .04em;
+}
+.act-alloc-cell { min-width: 160px; }
+.act-alloc-bar {
+  height: 8px; border-radius: 4px; overflow: hidden;
+  background: rgba(148, 163, 184, .18);
+  display: flex;
+}
+.act-alloc-bar > span { display: block; height: 100%; }
+.alloc-firm { background: rgba(74, 222, 128, .85); }
+.alloc-tent { background: rgba(96, 165, 250, .70); }
+.alloc-gap  { background: rgba(148, 163, 184, .18); border-left: 1px dashed rgba(251, 191, 36, .70); }
+
+/* Gantt */
+.act-gantt-wrap { overflow-x: auto; }
+.act-gantt-scroll { overflow-x: auto; overflow-y: hidden; }
+.act-gantt { display: block; background: var(--bg-1); }
+.act-bar { cursor: pointer; }
+.act-bar:hover rect { fill-opacity: 1; }
+.act-mile, .act-deliv { cursor: pointer; }
+.act-mile:hover polygon, .act-deliv:hover polygon { transform: translateY(-1px); filter: brightness(1.2); }
+
+/* Workload */
+.act-wl-wrap { padding-top: 8px; }
+.act-wl { display: block; max-width: 100%; }
+.act-wl-toolbar {
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 8px 12px; background: var(--bg-2); border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+/* Activity editor drawer */
+.ac-stk-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 6px; }
+.ac-stk-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 10px;
+  background: rgba(96, 165, 250, .12);
+  border: 1px solid rgba(96, 165, 250, .40);
+  color: rgba(191, 219, 254, 1);
+  font-size: 11px; cursor: pointer;
+}
+.ac-stk-chip .ac-stk-x { color: rgba(147, 197, 253, .8); }
+.ac-split { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 720px) { .ac-split { grid-template-columns: 1fr; } }
+.ac-mile { display: flex; flex-direction: column; gap: 6px; }
+.ac-mile-list { display: flex; flex-direction: column; gap: 4px; }
+.ac-mile-row {
+  display: grid; grid-template-columns: 20px 1fr 140px 28px; gap: 6px; align-items: center;
+  padding: 4px 6px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
+}
+.ac-mile-glyph { color: var(--warn); font-size: 14px; text-align: center; }
+.ac-mile-glyph.deliv { color: var(--ok); }
+.ac-mile-row input {
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--text); padding: 3px 6px; font-size: 12px;
+}
+.ac-mile-add { display: grid; grid-template-columns: 1fr 140px auto; gap: 6px; margin-top: 4px; }
+.ac-mile-add input {
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
+  color: var(--text); padding: 4px 8px; font-size: 12px;
+}
+.ac-alloc-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.ac-alloc-row {
+  display: grid; grid-template-columns: 1fr 130px 130px 80px auto 28px;
+  gap: 6px; align-items: center;
+  padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
+}
+.ac-alloc-row select, .ac-alloc-row input {
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--text); padding: 4px 6px; font-size: 12px;
+}
+.ac-al-tent { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); }
+.ac-alloc-summary { font-size: 11.5px; margin-top: 4px; }
+
 /* Embedded Planner — dashboard variant. Drops the page-head and
    uses a compact toolbar row instead of the full picker. */
 .view.pln-embedded { padding: 0; }
@@ -10041,6 +10141,9 @@ body.notes-fullscreen { overflow: hidden; }
           </button>
           <button class="nav-item" data-view="team">
             <span class="nav-icon">◍</span><span>Team</span>
+          </button>
+          <button class="nav-item" data-view="activities">
+            <span class="nav-icon">⟟</span><span>Activities</span>
           </button>
         </div>
 
@@ -12817,6 +12920,7 @@ body.notes-fullscreen { overflow: hidden; }
       portfolio: renderPortfolio,
       people: renderPeople,
       team: renderTeam,
+      activities: renderActivities,
       board: renderBoard,
       register: renderRegister,
       actioncloud: renderActionCloud,
@@ -24275,6 +24379,670 @@ body.notes-fullscreen { overflow: hidden; }
     renderSkillsMatrix();
   }
 
+  // ── Activities view — request → plan → allocate → track ─────
+  // A three-panel workflow: (1) request list with editor drawer,
+  // (2) People × Time gantt of every allocation, and (3) grouped
+  // workload chart. Activities are distinct from actions: an
+  // activity is the PLANNING envelope (project ask, milestones,
+  // deliverables, load estimate, tentative allocation), while
+  // actions are the atomic work items owners execute against.
+  const ACT_STATUSES = [
+    { id: 'requested',   label: 'Requested',   color: 'rgba(148, 163, 184, .70)' },
+    { id: 'planning',    label: 'Planning',    color: 'rgba(96, 165, 250, .70)' },
+    { id: 'allocated',   label: 'Allocated',   color: 'rgba(74, 222, 128, .70)' },
+    { id: 'in-progress', label: 'In progress', color: 'rgba(251, 191, 36, .70)' },
+    { id: 'done',        label: 'Done',        color: 'rgba(148, 163, 184, .35)' },
+  ];
+  function actStatusMeta(id) { return ACT_STATUSES.find((s) => s.id === id) || ACT_STATUSES[0]; }
+  // Deterministic hue per activity so the gantt gets a stable
+  // rainbow instead of a random one per render.
+  function actColor(id) {
+    let h = 0;
+    for (let i = 0; i < String(id).length; i++) h = ((h << 5) - h + String(id).charCodeAt(i)) | 0;
+    return `hsl(${Math.abs(h) % 360}, 62%, 52%)`;
+  }
+  function totalAllocatedHours(a) { return (a.allocations || []).reduce((n, al) => n + (Number(al.hours) || 0), 0); }
+  function firmAllocatedHours(a)  { return (a.allocations || []).filter((al) => !al.tentative).reduce((n, al) => n + (Number(al.hours) || 0), 0); }
+  function tentAllocatedHours(a)  { return (a.allocations || []).filter((al) =>  al.tentative).reduce((n, al) => n + (Number(al.hours) || 0), 0); }
+  function actorLabel(id) {
+    if (!id) return '—';
+    const p = (state.people || []).find((x) => x.id === id);
+    if (p) return p.name;
+    const s = (state.stakeholders || []).find((x) => x.id === id);
+    return s ? s.name : id;
+  }
+
+  function renderActivities(root) {
+    state.ui = state.ui || {};
+    state.ui.act = state.ui.act || { groupBy: 'status', projectFilter: '', statusFilter: '', personFilter: '' };
+    const acts = state.activities || [];
+    const view = document.createElement('div');
+    view.className = 'view';
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Activities</div>
+          <div class="page-sub">Plan chunks of work end-to-end — request, allocate (tentative → firm), track load. ${acts.length} activit${acts.length === 1 ? 'y' : 'ies'} on file.</div>
+        </div>
+        <div class="page-actions">
+          <button class="ghost" id="actNew">+ New activity</button>
+        </div>
+      </div>
+      <div class="act-layout">
+        <div class="panel act-panel">
+          <div class="panel-title panel-title-stack">
+            <span>Requests</span>
+            <span class="panel-desc">Click a row to open the editor. Requests carry description, milestones, deliverables, and the tentative allocation split.</span>
+          </div>
+          <div id="actList" class="act-list-wrap"></div>
+        </div>
+        <div class="panel act-panel">
+          <div class="panel-title panel-title-stack">
+            <span>People × time</span>
+            <span class="panel-desc">Rows are people; each bar is an allocation. Grey = tentative. Milestones ▲ and deliverables ◆ pin to their dates on the owning person's row. Click a marker to move it.</span>
+          </div>
+          <div id="actGantt" class="act-gantt-wrap"></div>
+        </div>
+        <div class="panel act-panel">
+          <div class="panel-title panel-title-stack">
+            <span>Workload</span>
+            <span class="panel-desc">Weekly hours over the next 12 weeks. Layers: allocated (solid) · tentative (mid) · requested-not-yet-allocated (hatched).</span>
+          </div>
+          <div class="act-wl-toolbar">
+            <label class="sk-mtx-lbl">Group by
+              <select id="actGroup">
+                <option value="status">Status</option>
+                <option value="person">Person</option>
+                <option value="project">Project</option>
+              </select>
+            </label>
+            <label class="sk-mtx-lbl">Project
+              <select id="actFiltProj">
+                <option value="">All</option>
+                ${(state.projects || []).map((p) => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}
+              </select>
+            </label>
+            <label class="sk-mtx-lbl">Status
+              <select id="actFiltStatus">
+                <option value="">All</option>
+                ${ACT_STATUSES.map((s) => `<option value="${s.id}">${escapeHTML(s.label)}</option>`).join('')}
+              </select>
+            </label>
+            <label class="sk-mtx-lbl">Person
+              <select id="actFiltPerson">
+                <option value="">All</option>
+                ${(state.people || []).map((p) => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}
+              </select>
+            </label>
+          </div>
+          <div id="actWorkload" class="act-wl-wrap"></div>
+        </div>
+      </div>`;
+    root.appendChild(view);
+    $('#actNew')?.addEventListener('click', () => openActivityEditor(null));
+    renderActivityList();
+    renderActivityGantt();
+    renderActivityWorkload();
+    // Filter wiring
+    const g  = $('#actGroup');    if (g)  { g.value  = state.ui.act.groupBy;      g.addEventListener('change',  () => { state.ui.act.groupBy      = g.value;  renderActivityWorkload(); }); }
+    const fp = $('#actFiltProj'); if (fp) { fp.value = state.ui.act.projectFilter; fp.addEventListener('change', () => { state.ui.act.projectFilter = fp.value; renderActivityWorkload(); }); }
+    const fs = $('#actFiltStatus');if (fs){ fs.value = state.ui.act.statusFilter;  fs.addEventListener('change', () => { state.ui.act.statusFilter  = fs.value; renderActivityWorkload(); }); }
+    const fpr= $('#actFiltPerson');if (fpr){fpr.value = state.ui.act.personFilter; fpr.addEventListener('change', () => { state.ui.act.personFilter  = fpr.value; renderActivityWorkload(); }); }
+  }
+
+  function renderActivityList() {
+    const host = $('#actList'); if (!host) return;
+    const acts = state.activities || [];
+    if (!acts.length) {
+      host.innerHTML = '<div class="empty" style="padding:24px; text-align:center;">No activities yet — click <b>+ New activity</b> to create one.</div>';
+      return;
+    }
+    const projName = (id) => (state.projects || []).find((p) => p.id === id)?.name || '—';
+    host.innerHTML = `
+      <table class="act-list">
+        <thead>
+          <tr>
+            <th>Activity</th>
+            <th>Originator</th>
+            <th>Project</th>
+            <th class="num">Hours</th>
+            <th>Allocation</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${acts.map((a) => {
+            const total = totalAllocatedHours(a);
+            const firm  = firmAllocatedHours(a);
+            const tent  = tentAllocatedHours(a);
+            const need  = Math.max(0, a.totalHours - firm - tent);
+            const barW = a.totalHours ? {
+              firm: Math.round((firm / a.totalHours) * 100),
+              tent: Math.round((tent / a.totalHours) * 100),
+              gap:  Math.round((need / a.totalHours) * 100),
+            } : { firm: 0, tent: 0, gap: 100 };
+            const st = actStatusMeta(a.status);
+            const owners = [...new Set((a.allocations || []).map((al) => al.personId).filter(Boolean))].map(actorLabel).join(', ') || '—';
+            return `
+              <tr class="act-row" data-act-id="${escapeHTML(a.id)}">
+                <td>
+                  <div class="act-row-title">${escapeHTML(a.title)}</div>
+                  <div class="act-row-sub">${owners !== '—' ? '→ ' + escapeHTML(owners) : '<span class="muted">unassigned</span>'}${(a.milestones || []).length ? ' · ' + (a.milestones || []).length + '▲' : ''}${(a.deliverables || []).length ? ' · ' + (a.deliverables || []).length + '◆' : ''}</div>
+                </td>
+                <td>${escapeHTML(actorLabel(a.originator))}<div class="muted" style="font-size:10.5px;">${escapeHTML(a.originatedAt || '')}</div></td>
+                <td>${escapeHTML(projName(a.projectId))}</td>
+                <td class="num"><b>${a.totalHours}</b><div class="muted" style="font-size:10.5px;">${firm}f · ${tent}t${need ? ' · '+need+' gap' : ''}</div></td>
+                <td class="act-alloc-cell">
+                  <div class="act-alloc-bar" title="${firm}h firm · ${tent}h tentative · ${need}h to allocate">
+                    ${barW.firm ? `<span class="alloc-firm" style="width:${barW.firm}%"></span>` : ''}
+                    ${barW.tent ? `<span class="alloc-tent" style="width:${barW.tent}%"></span>` : ''}
+                    ${barW.gap  ? `<span class="alloc-gap"  style="width:${barW.gap}%"></span>` : ''}
+                  </div>
+                </td>
+                <td><span class="act-status-chip" style="background:${st.color}20; border-color:${st.color}80; color:${st.color}">${escapeHTML(st.label)}</span></td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+    host.querySelectorAll('.act-row').forEach((r) => r.addEventListener('click', () => openActivityEditor(r.dataset.actId)));
+  }
+
+  // ── Activity editor drawer ────────────────────────────────────
+  function openActivityEditor(id) {
+    let a = (state.activities || []).find((x) => x.id === id) || null;
+    if (!a) {
+      a = { id: uid('act'), title: 'New activity', description: '', originator: null,
+        originatedAt: todayISO(), projectId: (curProject()?.id || null), stakeholderIds: [],
+        totalHours: 0, status: 'requested', allocations: [], milestones: [], deliverables: [],
+        createdAt: todayISO(), updatedAt: todayISO() };
+      state.activities = state.activities || [];
+      state.activities.push(a);
+    }
+    $('#drawerTitle').textContent = 'Activity';
+    $('#drawerBody').innerHTML = renderActivityEditorHTML(a);
+    $('#drawer').hidden = false;
+    wireActivityEditor(a);
+  }
+  function renderActivityEditorHTML(a) {
+    const persons = state.people || [];
+    const externals = state.stakeholders || [];
+    const projects = state.projects || [];
+    const originatorOpts = `<option value="">— Unassigned —</option>` +
+      persons.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === a.originator ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('') +
+      (externals.length ? `<option value="" disabled>── External ──</option>` +
+        externals.map((s) => `<option value="${escapeHTML(s.id)}" ${s.id === a.originator ? 'selected' : ''}>${escapeHTML(s.name)}</option>`).join('') : '');
+    return `
+      <div class="field"><label>Title</label><input id="acTitle" type="text" value="${escapeHTML(a.title)}" /></div>
+      <div class="field-row" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <div class="field"><label>Originator</label><select id="acOrig">${originatorOpts}</select></div>
+        <div class="field"><label>Received on</label><input id="acReceived" type="date" value="${escapeHTML(a.originatedAt || '')}" /></div>
+      </div>
+      <div class="field-row" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+        <div class="field"><label>Project</label><select id="acProj"><option value="">— None</option>${projects.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === a.projectId ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select></div>
+        <div class="field"><label>Status</label><select id="acStatus">${ACT_STATUSES.map((s) => `<option value="${s.id}" ${s.id === a.status ? 'selected' : ''}>${escapeHTML(s.label)}</option>`).join('')}</select></div>
+        <div class="field"><label>Total load (h)</label><input id="acHours" type="number" min="0" step="1" value="${a.totalHours}" /></div>
+      </div>
+      <div class="field">
+        <label>Description <span class="muted">— rich text; paste Gmail thread URLs to attach</span></label>
+        ${ceComposeHTML({ id: 'acDesc', value: a.description, placeholder: 'Context, scope, why it matters — Gmail links welcome', style: 'min-height:80px;' })}
+      </div>
+      <div class="field">
+        <label>Interested stakeholders <span class="muted">— get kept in the loop</span></label>
+        <div id="acStkChips" class="ac-stk-chips"></div>
+        <select id="acStkAdd">
+          <option value="">+ Add stakeholder…</option>
+          ${persons.map((p) => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}
+          ${externals.length ? `<option value="" disabled>── External ──</option>` +
+            externals.map((s) => `<option value="${escapeHTML(s.id)}">${escapeHTML(s.name)}</option>`).join('') : ''}
+        </select>
+      </div>
+      <div class="ac-split">
+        <div class="field ac-mile">
+          <label>Milestones ▲</label>
+          <div id="acMilestones" class="ac-mile-list"></div>
+          <div class="ac-mile-add">
+            <input id="acMileName" type="text" placeholder="Name…" />
+            <input id="acMileDate" type="date" />
+            <button type="button" class="ghost" id="acMileAdd">+ Add</button>
+          </div>
+        </div>
+        <div class="field ac-mile">
+          <label>Deliverables ◆</label>
+          <div id="acDeliverables" class="ac-mile-list"></div>
+          <div class="ac-mile-add">
+            <input id="acDelName" type="text" placeholder="Name…" />
+            <input id="acDelDate" type="date" />
+            <button type="button" class="ghost" id="acDelAdd">+ Add</button>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label>Allocations <span class="muted">— split the work across people; tentative = grey ghost bar on the gantt</span></label>
+        <div id="acAllocList" class="ac-alloc-list"></div>
+        <button type="button" class="ghost" id="acAllocAdd">+ Add allocation</button>
+        <div class="ac-alloc-summary muted" id="acAllocSum"></div>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:6px;">
+        <button class="primary" id="acSave">Save</button>
+        <button class="ghost" id="acDelete" style="margin-left:auto; color:var(--bad);">Delete activity</button>
+      </div>`;
+  }
+  function wireActivityEditor(a) {
+    function renderStk() {
+      const host = $('#acStkChips'); if (!host) return;
+      host.innerHTML = a.stakeholderIds.length
+        ? a.stakeholderIds.map((sid) => `<span class="ac-stk-chip" data-sid="${escapeHTML(sid)}">${escapeHTML(actorLabel(sid))}<span class="ac-stk-x">×</span></span>`).join('')
+        : '<span class="muted" style="font-size:11px;">None</span>';
+      host.querySelectorAll('.ac-stk-chip').forEach((c) => c.addEventListener('click', () => {
+        a.stakeholderIds = a.stakeholderIds.filter((x) => x !== c.dataset.sid);
+        renderStk();
+      }));
+    }
+    function renderMilestones() {
+      const host = $('#acMilestones'); if (!host) return;
+      host.innerHTML = (a.milestones || []).map((m) => `
+        <div class="ac-mile-row" data-mid="${escapeHTML(m.id)}">
+          <span class="ac-mile-glyph">▲</span>
+          <input type="text" class="ac-mile-name" value="${escapeHTML(m.name)}" />
+          <input type="date" class="ac-mile-date" value="${escapeHTML(m.date || '')}" />
+          <button type="button" class="icon-btn ac-mile-del" title="Remove">×</button>
+        </div>`).join('') || '<div class="muted" style="font-size:11px;">No milestones yet.</div>';
+      host.querySelectorAll('.ac-mile-row').forEach((row) => {
+        const mid = row.dataset.mid;
+        const m = (a.milestones || []).find((x) => x.id === mid);
+        if (!m) return;
+        row.querySelector('.ac-mile-name').addEventListener('input', (e) => { m.name = e.target.value; });
+        row.querySelector('.ac-mile-date').addEventListener('change', (e) => { m.date = e.target.value; });
+        row.querySelector('.ac-mile-del').addEventListener('click', () => {
+          a.milestones = a.milestones.filter((x) => x.id !== mid);
+          renderMilestones();
+        });
+      });
+    }
+    function renderDeliverables() {
+      const host = $('#acDeliverables'); if (!host) return;
+      host.innerHTML = (a.deliverables || []).map((d) => `
+        <div class="ac-mile-row" data-did="${escapeHTML(d.id)}">
+          <span class="ac-mile-glyph deliv">◆</span>
+          <input type="text" class="ac-del-name" value="${escapeHTML(d.name)}" />
+          <input type="date" class="ac-del-date" value="${escapeHTML(d.date || '')}" />
+          <button type="button" class="icon-btn ac-del-del" title="Remove">×</button>
+        </div>`).join('') || '<div class="muted" style="font-size:11px;">No deliverables yet.</div>';
+      host.querySelectorAll('.ac-mile-row').forEach((row) => {
+        const did = row.dataset.did;
+        const d = (a.deliverables || []).find((x) => x.id === did);
+        if (!d) return;
+        row.querySelector('.ac-del-name').addEventListener('input', (e) => { d.name = e.target.value; });
+        row.querySelector('.ac-del-date').addEventListener('change', (e) => { d.date = e.target.value; });
+        row.querySelector('.ac-del-del').addEventListener('click', () => {
+          a.deliverables = a.deliverables.filter((x) => x.id !== did);
+          renderDeliverables();
+        });
+      });
+    }
+    function renderAllocations() {
+      const host = $('#acAllocList'); if (!host) return;
+      const persons = state.people || [];
+      const opts = persons.map((p) => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('');
+      host.innerHTML = (a.allocations || []).map((al) => `
+        <div class="ac-alloc-row" data-alid="${escapeHTML(al.id)}">
+          <select class="ac-al-person"><option value="">— Person —</option>${opts.replace(new RegExp(`value="${al.personId}"`), `value="${al.personId}" selected`)}</select>
+          <input type="date" class="ac-al-start" value="${escapeHTML(al.startDate || '')}" title="Start" />
+          <input type="date" class="ac-al-end"   value="${escapeHTML(al.endDate || '')}"   title="End" />
+          <input type="number" class="ac-al-hours" min="0" step="1" value="${al.hours}" title="Hours" />
+          <label class="ac-al-tent"><input type="checkbox" class="ac-al-tent-chk" ${al.tentative ? 'checked' : ''}/> tentative</label>
+          <button type="button" class="icon-btn ac-al-del" title="Remove">×</button>
+        </div>`).join('') || '<div class="muted" style="font-size:11px;">No allocations yet — add one to plan the split.</div>';
+      const sumEl = $('#acAllocSum');
+      if (sumEl) {
+        const total = totalAllocatedHours(a);
+        const firm  = firmAllocatedHours(a);
+        const tent  = tentAllocatedHours(a);
+        const gap   = Math.max(0, a.totalHours - firm - tent);
+        sumEl.innerHTML = `<b>${total}h</b> allocated of ${a.totalHours}h (${firm}h firm · ${tent}h tentative${gap ? ` · <span style="color:var(--warn)">${gap}h gap</span>` : ''})`;
+      }
+      host.querySelectorAll('.ac-alloc-row').forEach((row) => {
+        const alid = row.dataset.alid;
+        const al = (a.allocations || []).find((x) => x.id === alid);
+        if (!al) return;
+        row.querySelector('.ac-al-person').addEventListener('change', (e) => { al.personId = e.target.value; });
+        row.querySelector('.ac-al-start').addEventListener('change', (e) => { al.startDate = e.target.value; });
+        row.querySelector('.ac-al-end').addEventListener('change', (e) => { al.endDate = e.target.value; });
+        row.querySelector('.ac-al-hours').addEventListener('input', (e) => { al.hours = Math.max(0, Number(e.target.value) || 0); renderAllocations(); });
+        row.querySelector('.ac-al-tent-chk').addEventListener('change', (e) => { al.tentative = e.target.checked; });
+        row.querySelector('.ac-al-del').addEventListener('click', () => {
+          a.allocations = a.allocations.filter((x) => x.id !== alid);
+          renderAllocations();
+        });
+      });
+    }
+    renderStk();
+    renderMilestones();
+    renderDeliverables();
+    renderAllocations();
+    $('#acStkAdd')?.addEventListener('change', (e) => {
+      const v = e.target.value; if (!v) return;
+      if (!a.stakeholderIds.includes(v)) a.stakeholderIds.push(v);
+      e.target.value = ''; renderStk();
+    });
+    $('#acMileAdd')?.addEventListener('click', () => {
+      const name = ($('#acMileName').value || '').trim();
+      const date = $('#acMileDate').value || null;
+      if (!name) return;
+      a.milestones = a.milestones || [];
+      a.milestones.push({ id: uid('am'), name, date });
+      $('#acMileName').value = ''; $('#acMileDate').value = '';
+      renderMilestones();
+    });
+    $('#acDelAdd')?.addEventListener('click', () => {
+      const name = ($('#acDelName').value || '').trim();
+      const date = $('#acDelDate').value || null;
+      if (!name) return;
+      a.deliverables = a.deliverables || [];
+      a.deliverables.push({ id: uid('ad'), name, date, status: 'todo' });
+      $('#acDelName').value = ''; $('#acDelDate').value = '';
+      renderDeliverables();
+    });
+    $('#acAllocAdd')?.addEventListener('click', () => {
+      a.allocations = a.allocations || [];
+      const today = todayISO();
+      const end = fmtISO(new Date(new Date(today).getTime() + 14 * dayMs));
+      a.allocations.push({ id: uid('al'), personId: null, startDate: today, endDate: end, hours: 0, tentative: true });
+      renderAllocations();
+    });
+    $('#acSave')?.addEventListener('click', () => {
+      a.title = ($('#acTitle').value || '').trim() || a.title;
+      a.originator = $('#acOrig').value || null;
+      a.originatedAt = $('#acReceived').value || a.originatedAt;
+      a.projectId = $('#acProj').value || null;
+      a.status = $('#acStatus').value || a.status;
+      a.totalHours = Math.max(0, Number($('#acHours').value) || 0);
+      a.description = serializeChipsToText($('#acDesc'));
+      a.updatedAt = todayISO();
+      commit('activity-save');
+      closeDrawer();
+      renderActivityList(); renderActivityGantt(); renderActivityWorkload();
+    });
+    $('#acDelete')?.addEventListener('click', () => {
+      if (!confirm(`Delete activity "${a.title}"?`)) return;
+      state.activities = (state.activities || []).filter((x) => x.id !== a.id);
+      commit('activity-delete');
+      closeDrawer();
+      renderActivityList(); renderActivityGantt(); renderActivityWorkload();
+    });
+  }
+
+  // ── Gantt: rows = people, columns = time ────────────────────
+  function renderActivityGantt() {
+    const host = $('#actGantt'); if (!host) return;
+    const acts = state.activities || [];
+    const people = state.people || [];
+    if (!acts.length || !people.length) {
+      host.innerHTML = '<div class="empty" style="padding:24px; text-align:center;">Create an activity and add allocations to populate the gantt.</div>';
+      return;
+    }
+    // Time window: earliest allocation/milestone/deliverable date → 4 weeks after latest
+    const alls = acts.flatMap((a) => [
+      ...(a.allocations || []).map((al) => [al.startDate, al.endDate]).flat().filter(Boolean),
+      ...(a.milestones || []).map((m) => m.date).filter(Boolean),
+      ...(a.deliverables || []).map((d) => d.date).filter(Boolean),
+    ]);
+    const today = todayISO();
+    let winStart = alls.length ? alls.sort()[0] : today;
+    let winEnd   = alls.length ? alls.sort().slice(-1)[0] : today;
+    // Pad and clamp to at least a 12-week span
+    winStart = fmtISO(new Date(Math.min(new Date(winStart).getTime(), new Date(today).getTime() - 7 * dayMs)));
+    winEnd   = fmtISO(new Date(Math.max(new Date(winEnd).getTime(),   new Date(today).getTime() + 84 * dayMs)));
+    const spanDays = Math.max(1, Math.round((new Date(winEnd) - new Date(winStart)) / dayMs) + 1);
+    const dayW = Math.max(4, Math.min(14, Math.round(1600 / spanDays)));
+    const rowH = 44;
+    const laneY = (i) => 40 + i * rowH;
+    const totalW = spanDays * dayW;
+    const totalH = 40 + people.length * rowH + 20;
+    const dateX = (iso) => {
+      if (!iso) return 0;
+      return ((new Date(iso) - new Date(winStart)) / dayMs) * dayW;
+    };
+    // Group allocations by person
+    const byPerson = new Map();
+    people.forEach((p) => byPerson.set(p.id, []));
+    acts.forEach((a) => {
+      (a.allocations || []).forEach((al) => {
+        if (!al.personId || !al.startDate || !al.endDate) return;
+        const bucket = byPerson.get(al.personId);
+        if (bucket) bucket.push({ act: a, al });
+      });
+    });
+    // Week grid lines
+    const weekLines = [];
+    let d = new Date(winStart);
+    while (d <= new Date(winEnd)) {
+      weekLines.push(dateX(fmtISO(d)));
+      d = new Date(d.getTime() + 7 * dayMs);
+    }
+    // Month labels
+    const monthMarks = [];
+    let m = new Date(winStart); m.setDate(1);
+    while (m <= new Date(winEnd)) {
+      monthMarks.push({ x: dateX(fmtISO(m)), label: m.toLocaleDateString(undefined, { month: 'short', year: '2-digit' }) });
+      m = new Date(m.getFullYear(), m.getMonth() + 1, 1);
+    }
+    const todayX = dateX(today);
+    const svg = `
+      <svg class="act-gantt" viewBox="0 0 ${totalW} ${totalH}" width="${totalW}" height="${totalH}" xmlns="http://www.w3.org/2000/svg">
+        ${weekLines.map((x) => `<line x1="${x}" y1="30" x2="${x}" y2="${totalH - 10}" stroke="rgba(148,163,184,.12)" stroke-width="1" />`).join('')}
+        ${monthMarks.map((mk) => `<text x="${mk.x + 4}" y="20" fill="var(--text-faint)" font-size="10.5" font-family="sans-serif">${escapeHTML(mk.label)}</text>`).join('')}
+        <line x1="${todayX}" y1="24" x2="${todayX}" y2="${totalH - 10}" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="3 3" />
+        <text x="${todayX + 4}" y="34" fill="var(--warn)" font-size="10">today</text>
+        ${people.map((p, i) => {
+          const y = laneY(i);
+          const bg = i % 2 === 0 ? 'rgba(255,255,255,.02)' : 'transparent';
+          const rowBars = (byPerson.get(p.id) || []).map(({ act, al }) => {
+            const x = dateX(al.startDate);
+            const w = Math.max(4, dateX(al.endDate) + dayW - x);
+            const color = actColor(act.id);
+            const opacity = al.tentative ? 0.35 : 0.90;
+            const stroke = al.tentative ? 'stroke="rgba(148,163,184,.60)" stroke-dasharray="4 3"' : `stroke="${color}"`;
+            const label = `${act.title}${al.hours ? ' · ' + al.hours + 'h' : ''}`;
+            return `
+              <g class="act-bar" data-act-id="${escapeHTML(act.id)}">
+                <title>${escapeHTML(label + (al.tentative ? ' (tentative)' : ''))}</title>
+                <rect x="${x}" y="${y + 6}" width="${w}" height="${rowH - 14}" rx="4" ry="4"
+                      fill="${color}" fill-opacity="${opacity}" ${stroke} stroke-width="1" />
+                <text x="${x + 6}" y="${y + rowH / 2 + 4}" fill="#fff" font-size="11" font-family="sans-serif" pointer-events="none">${escapeHTML(label.length > Math.floor(w / 6) ? label.slice(0, Math.floor(w / 6) - 1) + '…' : label)}</text>
+              </g>`;
+          }).join('');
+          const milestones = acts.flatMap((a) => (a.milestones || []).filter((mm) => mm.date)
+            .filter((mm) => (a.allocations || []).some((al) => al.personId === p.id))
+            .map((mm) => ({ a, mm })));
+          const mileMarks = milestones.map(({ a, mm }) => {
+            const x = dateX(mm.date);
+            return `<g class="act-mile" data-act-id="${escapeHTML(a.id)}" data-kind="milestone" data-mid="${escapeHTML(mm.id)}">
+              <title>▲ ${escapeHTML(mm.name)} · ${escapeHTML(mm.date)} · ${escapeHTML(a.title)}</title>
+              <polygon points="${x},${y + 4} ${x - 6},${y + 14} ${x + 6},${y + 14}" fill="var(--warn)" stroke="#000" stroke-opacity=".35" />
+            </g>`;
+          }).join('');
+          const delivs = acts.flatMap((a) => (a.deliverables || []).filter((dd) => dd.date)
+            .filter((dd) => (a.allocations || []).some((al) => al.personId === p.id))
+            .map((dd) => ({ a, dd })));
+          const delivMarks = delivs.map(({ a, dd }) => {
+            const x = dateX(dd.date);
+            const y2 = y + rowH - 12;
+            return `<g class="act-deliv" data-act-id="${escapeHTML(a.id)}" data-kind="deliverable" data-did="${escapeHTML(dd.id)}">
+              <title>◆ ${escapeHTML(dd.name)} · ${escapeHTML(dd.date)} · ${escapeHTML(a.title)}</title>
+              <polygon points="${x},${y2} ${x - 6},${y2 + 6} ${x},${y2 + 12} ${x + 6},${y2 + 6}" fill="var(--ok)" stroke="#000" stroke-opacity=".35" />
+            </g>`;
+          }).join('');
+          return `
+            <rect x="0" y="${y}" width="${totalW}" height="${rowH}" fill="${bg}" />
+            <text x="6" y="${y + rowH / 2 + 4}" fill="var(--text-faint)" font-size="11" font-family="sans-serif">${escapeHTML(p.name)}</text>
+            ${rowBars}
+            ${mileMarks}
+            ${delivMarks}`;
+        }).join('')}
+      </svg>`;
+    host.innerHTML = `<div class="act-gantt-scroll">${svg}</div>`;
+    // Click activity bar → open editor
+    host.querySelectorAll('.act-bar').forEach((g) => g.addEventListener('click', () => openActivityEditor(g.dataset.actId)));
+    // Click milestone / deliverable → prompt for new date
+    host.querySelectorAll('.act-mile').forEach((g) => g.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const a = state.activities.find((x) => x.id === g.dataset.actId); if (!a) return;
+      const m = (a.milestones || []).find((x) => x.id === g.dataset.mid); if (!m) return;
+      const next = prompt(`Move milestone "${m.name}" — new date (YYYY-MM-DD):`, m.date || '');
+      if (next && /^\d{4}-\d{2}-\d{2}$/.test(next.trim())) {
+        m.date = next.trim(); a.updatedAt = todayISO();
+        commit('activity-mile-move'); renderActivityGantt();
+      }
+    }));
+    host.querySelectorAll('.act-deliv').forEach((g) => g.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const a = state.activities.find((x) => x.id === g.dataset.actId); if (!a) return;
+      const d = (a.deliverables || []).find((x) => x.id === g.dataset.did); if (!d) return;
+      const next = prompt(`Move deliverable "${d.name}" — new date (YYYY-MM-DD):`, d.date || '');
+      if (next && /^\d{4}-\d{2}-\d{2}$/.test(next.trim())) {
+        d.date = next.trim(); a.updatedAt = todayISO();
+        commit('activity-deliv-move'); renderActivityGantt();
+      }
+    }));
+  }
+
+  // ── Workload chart — 12 weeks stacked hours ─────────────────
+  function renderActivityWorkload() {
+    const host = $('#actWorkload'); if (!host) return;
+    const acts = state.activities || [];
+    if (!acts.length) {
+      host.innerHTML = '<div class="empty" style="padding:24px; text-align:center;">Add allocations to see the weekly workload.</div>';
+      return;
+    }
+    const filt = state.ui.act;
+    const weeks = 12;
+    const today = todayISO();
+    const monday = (() => { const d = new Date(today); const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); d.setHours(0,0,0,0); return d; })();
+    const weekStarts = Array.from({ length: weeks }, (_, i) => new Date(monday.getTime() + i * 7 * dayMs));
+    // Compute hours per week per bucket (firm / tentative / requested-not-allocated)
+    const filtered = acts.filter((a) => {
+      if (filt.projectFilter && a.projectId !== filt.projectFilter) return false;
+      if (filt.statusFilter && a.status !== filt.statusFilter) return false;
+      if (filt.personFilter && !(a.allocations || []).some((al) => al.personId === filt.personFilter)) return false;
+      return true;
+    });
+    // Bucketing key by grouping choice
+    function groupKey(a, al) {
+      if (filt.groupBy === 'person') return al?.personId || '__unassigned__';
+      if (filt.groupBy === 'project') return a.projectId || '__none__';
+      return a.status;
+    }
+    function groupLabel(k) {
+      if (filt.groupBy === 'person') {
+        if (k === '__unassigned__') return 'Unassigned';
+        const p = (state.people || []).find((x) => x.id === k);
+        return p ? p.name : k;
+      }
+      if (filt.groupBy === 'project') {
+        if (k === '__none__') return 'No project';
+        return (state.projects || []).find((x) => x.id === k)?.name || k;
+      }
+      return actStatusMeta(k).label;
+    }
+    function groupColor(k) {
+      if (filt.groupBy === 'status') return actStatusMeta(k).color;
+      // Person / project — deterministic hue
+      let h = 0; for (let i = 0; i < String(k).length; i++) h = ((h << 5) - h + String(k).charCodeAt(i)) | 0;
+      return `hsl(${Math.abs(h) % 360}, 58%, 55%)`;
+    }
+    // Build weekly buckets: { weekIdx: { groupKey: {firm, tent, unalloc} } }
+    const buckets = Array.from({ length: weeks }, () => ({}));
+    const allGroups = new Set();
+    filtered.forEach((a) => {
+      const firm = firmAllocatedHours(a);
+      const tent = tentAllocatedHours(a);
+      const unalloc = Math.max(0, a.totalHours - firm - tent);
+      // Distribute allocations to their weeks
+      (a.allocations || []).forEach((al) => {
+        if (!al.startDate || !al.endDate || !al.hours) return;
+        const alStart = new Date(al.startDate);
+        const alEnd   = new Date(al.endDate);
+        const alDays  = Math.max(1, Math.round((alEnd - alStart) / dayMs) + 1);
+        const perDay = al.hours / alDays;
+        weekStarts.forEach((ws, wi) => {
+          const we = new Date(ws.getTime() + 7 * dayMs);
+          const start = Math.max(ws.getTime(), alStart.getTime());
+          const end   = Math.min(we.getTime(), alEnd.getTime() + dayMs);
+          if (end <= start) return;
+          const days = (end - start) / dayMs;
+          const h = perDay * days;
+          const k = groupKey(a, al);
+          allGroups.add(k);
+          buckets[wi][k] = buckets[wi][k] || { firm: 0, tent: 0, unalloc: 0 };
+          if (al.tentative) buckets[wi][k].tent += h;
+          else buckets[wi][k].firm += h;
+        });
+      });
+      // Distribute the un-allocated remainder across the FIRST week (a "backlog" signal)
+      if (unalloc > 0) {
+        const k = groupKey(a, null);
+        allGroups.add(k);
+        buckets[0][k] = buckets[0][k] || { firm: 0, tent: 0, unalloc: 0 };
+        buckets[0][k].unalloc += unalloc;
+      }
+    });
+    const groups = [...allGroups];
+    // Chart dims
+    const W = 720, H = 240, padL = 40, padR = 20, padT = 14, padB = 40;
+    const innerW = W - padL - padR;
+    const innerH = H - padT - padB;
+    const barW = innerW / weeks;
+    // Max hours in any single week (stacked)
+    const weekTotals = buckets.map((b) => Object.values(b).reduce((s, v) => s + v.firm + v.tent + v.unalloc, 0));
+    const maxH = Math.max(1, ...weekTotals);
+    // Draw
+    const svg = [];
+    svg.push(`<svg class="act-wl" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg">`);
+    // Y grid
+    const yTicks = 4;
+    for (let i = 0; i <= yTicks; i++) {
+      const y = padT + (innerH / yTicks) * i;
+      const v = Math.round((maxH * (yTicks - i)) / yTicks);
+      svg.push(`<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(148,163,184,.10)" />`);
+      svg.push(`<text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="10" fill="var(--text-faint)">${v}h</text>`);
+    }
+    // Bars
+    buckets.forEach((b, wi) => {
+      let yCursor = padT + innerH;
+      const x = padL + wi * barW;
+      groups.forEach((k) => {
+        const cell = b[k]; if (!cell) return;
+        const color = groupColor(k);
+        const stacks = [
+          { h: cell.firm,    op: 0.85, pattern: '' },
+          { h: cell.tent,    op: 0.55, pattern: '' },
+          { h: cell.unalloc, op: 0.40, pattern: 'hatch' },
+        ];
+        stacks.forEach((s) => {
+          if (!s.h) return;
+          const hpx = (s.h / maxH) * innerH;
+          yCursor -= hpx;
+          svg.push(`<rect x="${x + 2}" y="${yCursor}" width="${barW - 4}" height="${hpx}" fill="${color}" fill-opacity="${s.op}" ${s.pattern ? 'stroke="' + color + '" stroke-dasharray="3 2" stroke-width=".8"' : ''} />`);
+        });
+      });
+      // Week label
+      const label = weekStarts[wi].toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      svg.push(`<text x="${x + barW / 2}" y="${H - 20}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${escapeHTML(label)}</text>`);
+    });
+    // Legend
+    const legendY = H - 6;
+    let lx = padL;
+    groups.forEach((k) => {
+      const c = groupColor(k);
+      svg.push(`<rect x="${lx}" y="${legendY - 8}" width="10" height="10" fill="${c}" fill-opacity=".85" />`);
+      svg.push(`<text x="${lx + 14}" y="${legendY}" font-size="10" fill="var(--text)">${escapeHTML(groupLabel(k))}</text>`);
+      lx += 14 + groupLabel(k).length * 6 + 12;
+    });
+    svg.push('</svg>');
+    host.innerHTML = svg.join('');
+  }
+
   /* ---------------------- Phase I: Person dashboard -------------------- */
   // Opens the existing drawer with an aggregated read-only view of one
   // person: open / late actions, weekly load + spark, originated CRs,
@@ -28670,6 +29438,56 @@ body.notes-fullscreen { overflow: hidden; }
     s.people = Array.isArray(s.people) ? s.people : [];
     s.stakeholders = Array.isArray(s.stakeholders) ? s.stakeholders : [];
     s.projects = Array.isArray(s.projects) ? s.projects : [];
+    // Activities — high-level chunks of planned work with an
+    // originator, a project, one or more allocations (person +
+    // window + hours + tentative), plus milestone + deliverable
+    // sub-lists. Distinct from actions: actions are the atomic
+    // to-do; an activity is the planning envelope.
+    s.activities = Array.isArray(s.activities) ? s.activities : [];
+    s.activities = s.activities.filter((a) => a && typeof a === 'object' && a.title);
+    s.activities.forEach((a) => {
+      a.id = a.id || uid('act');
+      a.title = String(a.title || '');
+      a.description = typeof a.description === 'string' ? a.description : '';
+      a.originator = a.originator || null;
+      a.originatedAt = a.originatedAt || todayISO();
+      a.projectId = a.projectId || null;
+      a.stakeholderIds = Array.isArray(a.stakeholderIds) ? a.stakeholderIds.filter((x) => typeof x === 'string') : [];
+      a.totalHours = Math.max(0, Number(a.totalHours) || 0);
+      const validStatus = ['requested', 'planning', 'allocated', 'in-progress', 'done'];
+      a.status = validStatus.includes(a.status) ? a.status : 'requested';
+      a.allocations = Array.isArray(a.allocations) ? a.allocations : [];
+      a.allocations = a.allocations.filter((al) => al && typeof al === 'object');
+      a.allocations.forEach((al) => {
+        al.id = al.id || uid('al');
+        al.personId = al.personId || null;
+        al.startDate = typeof al.startDate === 'string' ? al.startDate : null;
+        al.endDate = typeof al.endDate === 'string' ? al.endDate : null;
+        // Swap if reversed
+        if (al.startDate && al.endDate && al.endDate < al.startDate) {
+          const t = al.startDate; al.startDate = al.endDate; al.endDate = t;
+        }
+        al.hours = Math.max(0, Number(al.hours) || 0);
+        al.tentative = !!al.tentative;
+      });
+      a.milestones = Array.isArray(a.milestones) ? a.milestones : [];
+      a.milestones = a.milestones.filter((m) => m && typeof m === 'object' && m.name);
+      a.milestones.forEach((m) => {
+        m.id = m.id || uid('am');
+        m.name = String(m.name);
+        m.date = typeof m.date === 'string' ? m.date : null;
+      });
+      a.deliverables = Array.isArray(a.deliverables) ? a.deliverables : [];
+      a.deliverables = a.deliverables.filter((d) => d && typeof d === 'object' && d.name);
+      a.deliverables.forEach((d) => {
+        d.id = d.id || uid('ad');
+        d.name = String(d.name);
+        d.date = typeof d.date === 'string' ? d.date : null;
+        d.status = ['todo', 'doing', 'done'].includes(d.status) ? d.status : 'todo';
+      });
+      a.createdAt = a.createdAt || todayISO();
+      a.updatedAt = a.updatedAt || a.createdAt;
+    });
     // People carry per-project assignments — see the People panel editor.
     // Shape: [{ projectId, commitment }] where commitment is % of THIS
     // person's FTE. Sum should be ≤ capacity. Missing = not on project.
