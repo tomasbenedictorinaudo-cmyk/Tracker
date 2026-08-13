@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T14:14:56.414Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T14:24:48.824Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -8303,6 +8303,13 @@ body.is-folder-dragging .folder-grip { cursor: grabbing !important; }
   padding-top: 80px;
 }
 .overlay[hidden] { display: none; }
+/* Quick Add + desc modals must land above the drawer overlay so
+   they stay accessible when triggered from inside the person
+   dashboard (or any other drawer). Both share the .overlay base
+   at z-index 100 but appear earlier in the DOM than #drawer, so
+   the drawer wins on tie without an explicit bump. */
+#quickAdd { z-index: 200; }
+.desc-overlay { z-index: 200; }
 .qa-panel {
   background: var(--bg-1);
   border: 1px solid var(--line);
