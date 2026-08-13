@@ -15175,13 +15175,32 @@
       </div>
       <div class="dev-rv-grid">${fields}</div>
       <div class="dev-rv-field dev-rv-actions-field">
-        <label class="dev-rv-lbl">Development actions <span class="muted">— linked to the actions register</span></label>
-        <div class="dev-rv-act-list" id="devRvActList">${linkedHtml}</div>
-        <div class="dev-rv-act-controls">
-          <button type="button" class="ghost" id="devRvActLink">+ Link existing action…</button>
-          <button type="button" class="primary" id="devRvActNew">+ New action for ${escapeHTML(p.name)}</button>
-        </div>
+        <label class="dev-rv-lbl">Development actions <span class="muted">— type <b>@</b> to link an existing action or create a new one</span></label>
+        <div id="devRvActFld" class="ce-compose rich dev-rv-act-fld" contenteditable="true" data-placeholder="Type @ to link or create actions for ${escapeHTML(p.name)}…" style="min-height:60px;">${renderDevActionsHTML(rv)}</div>
+        <div class="dev-rv-act-hint muted" style="font-size:11px;">Existing actions render as chips. Click a chip to open the action drawer; ← to remove.</div>
       </div>`;
+  }
+  // Rich content for the actions field on load: leading chips for
+  // every already-linked action, then a trailing space caret target.
+  function renderDevActionsHTML(rv) {
+    const linked = collectLinkedActions(rv);
+    if (!linked.length) return '';
+    return linked.map(({ a, pr }) => devActionChipHTML(a, pr)).join(' ') + '&nbsp;';
+  }
+  function devActionChipHTML(a, pr) {
+    const projName = pr?.name || '';
+    const meta = [projName, a.status || '', a.due ? 'due ' + a.due : ''].filter(Boolean).join(' · ');
+    return `<a class="dev-mn-chip status-${escapeHTML(a.status || 'todo')}" data-action-id="${escapeHTML(a.id)}" contenteditable="false" title="Open ${escapeHTML(a.title)} — ${escapeHTML(meta)}">
+      <span class="dev-mn-dot"></span>
+      <span class="dev-mn-title">${escapeHTML(a.title)}</span>
+      <span class="dev-mn-meta">${escapeHTML(meta)}</span>
+    </a>`;
+  }
+  // Read the linked action IDs out of the rich field by scanning
+  // the chips (in DOM order).
+  function extractActionIdsFromField(el) {
+    if (!el) return [];
+    return [...el.querySelectorAll('.dev-mn-chip[data-action-id]')].map((c) => c.dataset.actionId);
   }
   function collectLinkedActions(rv) {
     const out = [];
@@ -15263,19 +15282,195 @@
         openDrawer(row.dataset.actionId);
       });
     });
-    host.querySelector('#devRvActLink')?.addEventListener('click', () => openDevActionLinkPicker(p, rv));
-    host.querySelector('#devRvActNew')?.addEventListener('click', () => {
-      // Pre-fill Quick Add with owner = p.id, then link the created
-      // action to this review via the onSave callback.
-      openQuickAdd('action', { owner: p.id }, (createdAction) => {
-        if (!createdAction?.id) return;
-        rv.actionIds = rv.actionIds || [];
-        if (!rv.actionIds.includes(createdAction.id)) rv.actionIds.push(createdAction.id);
-        rv.updatedAt = todayISO();
-        commit('review-link-new');
-        openPersonDashboard(p.id);
+    // Rich actions field — @-mention autocomplete. Click on a chip
+    // opens the action drawer; backspace / delete swallow the whole
+    // chip. On input we sync rv.actionIds from the chips in the DOM.
+    const actField = host.querySelector('#devRvActFld');
+    if (actField) {
+      actField.addEventListener('click', (e) => {
+        const chip = e.target.closest?.('.dev-mn-chip');
+        if (!chip) return;
+        e.preventDefault();
+        openDrawer(chip.dataset.actionId);
+      });
+      actField.addEventListener('input', () => {
+        rv.actionIds = extractActionIdsFromField(actField);
+        autosave();
+      });
+      actField.addEventListener('blur', () => {
+        rv.actionIds = extractActionIdsFromField(actField);
+        devRvCommit(host, p, rv, true);
+      });
+      wireDevMentionAutocomplete(actField, p, rv);
+    }
+  }
+  // ── @-mention popup for the dev-actions rich field ────────────
+  // Type @ (at start or after whitespace) to open a small popup:
+  //   • the person's own open actions (top)
+  //   • other open actions matching the query
+  //   • "+ Create new action" — opens Quick Add pre-filled with owner
+  //     = this person and title = the query, then inserts the chip.
+  // ↑/↓ to move, Enter/Tab to select, Esc to dismiss.
+  let devMnState = null;
+  function wireDevMentionAutocomplete(field, p, rv) {
+    field.addEventListener('input', (ev) => {
+      // Only react to real user typing — programmatic setInnerHTML
+      // fires input events too and we don't want to re-open on load.
+      if (!ev.isTrusted && !devMnState) return;
+      const ctx = getMentionAtCaret(field, '@');
+      if (!ctx) { hideDevMentionPopup(); return; }
+      showDevMentionPopup(ctx, field, p, rv);
+    });
+    field.addEventListener('keydown', (ev) => {
+      if (!devMnState) return;
+      if (ev.key === 'ArrowDown') { ev.preventDefault(); devMnState.idx = (devMnState.idx + 1) % devMnState.items.length; renderDevMentionPopup(); }
+      else if (ev.key === 'ArrowUp')   { ev.preventDefault(); devMnState.idx = (devMnState.idx - 1 + devMnState.items.length) % devMnState.items.length; renderDevMentionPopup(); }
+      else if (ev.key === 'Enter' || ev.key === 'Tab') {
+        ev.preventDefault();
+        commitDevMention(devMnState.items[devMnState.idx], field, p, rv, devMnState);
+      } else if (ev.key === 'Escape') {
+        ev.preventDefault();
+        hideDevMentionPopup();
+      }
+    });
+    field.addEventListener('blur', () => setTimeout(hideDevMentionPopup, 120));
+  }
+  // Small helper — @ context at the current caret. Similar shape to
+  // notes' getMentionContext but self-contained.
+  function getMentionAtCaret(field, trigger) {
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return null;
+    const range = sel.getRangeAt(0);
+    if (!range.collapsed) return null;
+    if (!field.contains(range.startContainer)) return null;
+    const node = range.startContainer;
+    if (node.nodeType !== 3) return null;
+    const text = node.textContent.slice(0, range.startOffset);
+    const re = new RegExp(`(?:^|\\s)(\\${trigger})([\\w\\-]*(?: [\\w\\-]*)?)$`);
+    const m = text.match(re);
+    if (!m) return null;
+    const query = m[2];
+    const triggerStart = range.startOffset - query.length - 1;
+    if (triggerStart < 0) return null;
+    const triggerRange = document.createRange();
+    triggerRange.setStart(node, triggerStart);
+    triggerRange.setEnd(node, range.startOffset);
+    return { query, triggerRange };
+  }
+  function showDevMentionPopup(ctx, field, p, rv) {
+    const q = (ctx.query || '').toLowerCase();
+    const openIds = new Set(rv.actionIds || []);
+    const all = state.projects.flatMap((pr) => (pr.actions || []).filter((a) => !a.archivedAt && !openIds.has(a.id)).map((a) => ({ a, pr })));
+    // Filter by title + prioritise this person's own
+    const matches = all
+      .filter(({ a }) => a.title.toLowerCase().includes(q))
+      .sort((x, y) => {
+        const xo = x.a.owner === p.id ? 0 : 1;
+        const yo = y.a.owner === p.id ? 0 : 1;
+        if (xo !== yo) return xo - yo;
+        return (x.a.title || '').localeCompare(y.a.title || '');
+      })
+      .slice(0, 8);
+    const items = matches.map(({ a, pr }) => ({ kind: 'link', a, pr }));
+    if (q.trim().length) items.push({ kind: 'new', query: q.trim() });
+    if (!items.length) { hideDevMentionPopup(); return; }
+    devMnState = { items, idx: 0, triggerRange: ctx.triggerRange, field, p, rv };
+    renderDevMentionPopup();
+    positionDevMentionPopup(ctx.triggerRange);
+  }
+  function ensureDevMentionPopup() {
+    let el = document.getElementById('devMnPopup');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'devMnPopup';
+      el.className = 'dev-mn-popup';
+      el.hidden = true;
+      document.body.appendChild(el);
+    }
+    return el;
+  }
+  function renderDevMentionPopup() {
+    const el = ensureDevMentionPopup();
+    if (!devMnState) return;
+    const { items, idx } = devMnState;
+    el.innerHTML = items.map((it, i) => {
+      const cls = i === idx ? 'active' : '';
+      if (it.kind === 'new') {
+        return `<button type="button" class="dev-mn-row dev-mn-new ${cls}" data-i="${i}">
+          <span class="dev-mn-plus">+</span>
+          <span class="dev-mn-text">
+            <span class="dev-mn-name">Create new action: <b>${escapeHTML(it.query)}</b></span>
+            <span class="dev-mn-hint">Opens Quick Add with owner already set</span>
+          </span>
+        </button>`;
+      }
+      const a = it.a; const pr = it.pr;
+      const own = a.owner === devMnState.p.id ? ' <span class="dev-mn-own">own</span>' : '';
+      return `<button type="button" class="dev-mn-row ${cls}" data-i="${i}">
+        <span class="dev-mn-dot status-${escapeHTML(a.status || 'todo')}"></span>
+        <span class="dev-mn-text">
+          <span class="dev-mn-name">${escapeHTML(a.title)}${own}</span>
+          <span class="dev-mn-hint">${escapeHTML(pr?.name || '—')}${a.due ? ' · due ' + escapeHTML(a.due) : ''}</span>
+        </span>
+      </button>`;
+    }).join('');
+    el.hidden = false;
+    el.querySelectorAll('.dev-mn-row').forEach((row) => {
+      row.addEventListener('mousedown', (e) => e.preventDefault()); // keep field focus
+      row.addEventListener('click', () => {
+        const i = Number(row.dataset.i);
+        commitDevMention(devMnState.items[i], devMnState.field, devMnState.p, devMnState.rv, devMnState);
       });
     });
+  }
+  function positionDevMentionPopup(triggerRange) {
+    const el = ensureDevMentionPopup();
+    const rect = triggerRange.getBoundingClientRect();
+    const w = el.offsetWidth || 320;
+    const h = el.offsetHeight || 200;
+    let left = rect.left + window.scrollX;
+    let top  = rect.bottom + window.scrollY + 4;
+    if (left + w + 12 > window.innerWidth) left = window.innerWidth - w - 12;
+    if (top + h + 12 > window.innerHeight + window.scrollY) top = rect.top + window.scrollY - h - 4;
+    el.style.left = Math.max(8, left) + 'px';
+    el.style.top  = Math.max(8, top)  + 'px';
+  }
+  function hideDevMentionPopup() {
+    const el = document.getElementById('devMnPopup');
+    if (el) el.hidden = true;
+    devMnState = null;
+  }
+  function commitDevMention(item, field, p, rv, s) {
+    if (!item) return;
+    if (item.kind === 'new') {
+      const query = item.query;
+      hideDevMentionPopup();
+      // Delete the "@query" text so the chip lands in its place.
+      const range = s.triggerRange;
+      range.deleteContents();
+      // Open Quick Add pre-filled; on save, insert the chip.
+      openQuickAdd('action', { owner: p.id, title: query }, (createdAction) => {
+        if (!createdAction?.id) return;
+        insertDevChipAtCaret(field, createdAction);
+        rv.actionIds = extractActionIdsFromField(field);
+        rv.updatedAt = todayISO();
+        commit('review-mention-new');
+      });
+      return;
+    }
+    // Link existing
+    hideDevMentionPopup();
+    const range = s.triggerRange;
+    range.deleteContents();
+    insertDevChipAtCaret(field, item.a, item.pr);
+    rv.actionIds = extractActionIdsFromField(field);
+    rv.updatedAt = todayISO();
+    commit('review-mention-link');
+  }
+  function insertDevChipAtCaret(field, a, pr) {
+    field.focus();
+    const html = devActionChipHTML(a, pr || (state.projects || []).find((prx) => (prx.actions || []).some((x) => x.id === a.id))) + '&nbsp;';
+    document.execCommand('insertHTML', false, html);
   }
   function devRvCommit(host, p, rv, silent) {
     DEV_REVIEW_FIELDS.forEach((f) => {
