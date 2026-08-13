@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T16:25:07.298Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T16:31:10.137Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -24763,12 +24763,40 @@ body.notes-fullscreen { overflow: hidden; }
         });
         skills = skills.filter((s) => req.has(skillKey(s)) || heldByOwners.has(skillKey(s)));
       }
-      skills.sort((a, b) => {
-        const ca = skillCoverage(a).competentPlus;
-        const cb = skillCoverage(b).competentPlus;
-        if (ca !== cb) return ca - cb;
-        return skillKey(a).localeCompare(skillKey(b));
-      });
+      // Sort skills by ascending competent+ count so rare / gap skills
+      // read first — BUT cache the resulting order and reuse it while
+      // the user is interactively editing. Otherwise a click that
+      // promotes a level-1 cell to level-2 changes the skill's
+      // competent+ count, jumps its column to a new position, and
+      // reads as "the column disappeared" from the user's point of
+      // view. The cache is invalidated whenever the SET OF SKILL
+      // NAMES changes (add/remove) or a matrix filter changes.
+      const skillKeySet = skills.map(skillKey).sort().join('|');
+      const filterKey = `${filt.comp || ''}|${filt.min || 1}|${filt.single ? 1 : 0}|${filt.gaps ? 1 : 0}|${proj?.id || ''}`;
+      const cache = state.ui.skMtx._orderCache;
+      let sortedSkills;
+      if (cache && cache.skillKeySet === skillKeySet && cache.filterKey === filterKey) {
+        // Use the cached order. Any current skill missing from the
+        // cache (defensive: shouldn't happen given the keyset match)
+        // falls through to a resort.
+        const bySlug = new Map(skills.map((s) => [skillKey(s), s]));
+        sortedSkills = cache.order.map((k) => bySlug.get(k)).filter(Boolean);
+        if (sortedSkills.length !== skills.length) sortedSkills = null;
+      }
+      if (!sortedSkills) {
+        sortedSkills = skills.slice().sort((a, b) => {
+          const ca = skillCoverage(a).competentPlus;
+          const cb = skillCoverage(b).competentPlus;
+          if (ca !== cb) return ca - cb;
+          return skillKey(a).localeCompare(skillKey(b));
+        });
+        state.ui.skMtx._orderCache = {
+          skillKeySet,
+          filterKey,
+          order: sortedSkills.map(skillKey),
+        };
+      }
+      skills = sortedSkills;
       const projReq = new Set((proj ? projectRequiredSkills(proj.id) : []).map(skillKey));
       skills = skills.filter((s) => {
         const cov = skillCoverage(s);
