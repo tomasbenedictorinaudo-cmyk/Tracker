@@ -14174,6 +14174,15 @@
         <div class="field"><label>Total load (h)</label><input id="acHours" type="number" min="0" step="1" value="${a.totalHours}" /></div>
       </div>
       <div class="field">
+        <label>Predicted load over time <span class="muted">— same anchor as the person planner: total hours + window drives the weekly profile below</span></label>
+        <div class="ac-loadwin">
+          <label class="ac-loadwin-lbl">Starts <input id="acPlStart" type="date" value="${escapeHTML(a.plannedStart || '')}" /></label>
+          <label class="ac-loadwin-lbl">Ends <input id="acPlEnd" type="date" value="${escapeHTML(a.plannedEnd || '')}" /></label>
+          <span class="ac-loadwin-info" id="acLoadInfo"></span>
+        </div>
+        <div id="acLoadChart" class="ac-load-chart"></div>
+      </div>
+      <div class="field">
         <label>Description <span class="muted">— rich text; paste Gmail thread URLs to attach</span></label>
         ${ceComposeHTML({ id: 'acDesc', value: a.description, placeholder: 'Context, scope, why it matters — Gmail links welcome', style: 'min-height:80px;' })}
       </div>
@@ -14307,10 +14316,97 @@
         });
       });
     }
+    // Load-profile chart — reuses the planner's visual language:
+    // one bar per calendar week over [plannedStart, plannedEnd],
+    // height ∝ hours/week (totalHours ÷ weeks). Info line surfaces
+    // the derived commitment as % FTE so the number lands the same
+    // way it does on a person planner bar.
+    function renderLoadChart() {
+      const startEl = $('#acPlStart');
+      const endEl = $('#acPlEnd');
+      const hoursEl = $('#acHours');
+      const chart = $('#acLoadChart');
+      const info = $('#acLoadInfo');
+      if (!chart) return;
+      const startISO = startEl?.value || a.plannedStart;
+      const endISO   = endEl?.value   || a.plannedEnd;
+      const hoursTotal = Math.max(0, Number(hoursEl?.value) || a.totalHours);
+      if (!startISO || !endISO || endISO < startISO || !hoursTotal) {
+        chart.innerHTML = '<div class="ac-load-empty">Set a start date, end date, and total hours to draw the weekly load profile.</div>';
+        if (info) info.textContent = '';
+        return;
+      }
+      const s = new Date(startISO); s.setHours(0,0,0,0);
+      const e = new Date(endISO);   e.setHours(0,0,0,0);
+      const spanDays = Math.round((e - s) / dayMs) + 1;
+      const weeksExact = spanDays / 7;
+      const hoursPerWeek = hoursTotal / Math.max(1, weeksExact);
+      const commitPct = Math.round((hoursPerWeek / HOURS_PER_WEEK) * 100);
+      if (info) info.innerHTML = `<b>${hoursPerWeek.toFixed(1)} h/week</b> · <b>${commitPct}%</b> of 1 FTE · ${spanDays} day${spanDays === 1 ? '' : 's'} (${weeksExact.toFixed(1)} weeks)`;
+      // Bucket by ISO week (Monday-based) so the bar matches the
+      // planner's week grid. First bar may be partial.
+      const monday = new Date(s); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+      const weeks = [];
+      let cursor = new Date(monday);
+      while (cursor <= e) {
+        const wStart = new Date(cursor);
+        const wEnd = new Date(cursor.getTime() + 7 * dayMs);
+        const overlapStart = Math.max(wStart.getTime(), s.getTime());
+        const overlapEnd   = Math.min(wEnd.getTime(), e.getTime() + dayMs);
+        const days = Math.max(0, (overlapEnd - overlapStart) / dayMs);
+        const h = (hoursPerWeek / 7) * days;
+        weeks.push({ start: new Date(wStart), h, days });
+        cursor = new Date(cursor.getTime() + 7 * dayMs);
+      }
+      const W = 720, H = 130, padL = 40, padR = 12, padT = 10, padB = 26;
+      const innerW = W - padL - padR;
+      const innerH = H - padT - padB;
+      const barW = innerW / Math.max(1, weeks.length);
+      const maxH = Math.max(1, ...weeks.map((w) => w.h));
+      const capHeightPct = Math.min(1, hoursPerWeek / HOURS_PER_WEEK);
+      const capY = padT + innerH * (1 - capHeightPct);
+      const color = capHeightPct >= 1 ? 'rgba(248, 113, 121, .80)'
+                  : capHeightPct >= .8 ? 'rgba(251, 191, 36, .80)'
+                  : 'rgba(96, 165, 250, .80)';
+      const svg = [];
+      svg.push(`<svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none">`);
+      // Y grid — 4 ticks
+      for (let i = 0; i <= 4; i++) {
+        const y = padT + (innerH / 4) * i;
+        const v = ((maxH * (4 - i)) / 4);
+        svg.push(`<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(148,163,184,.12)" />`);
+        svg.push(`<text x="${padL - 5}" y="${y + 3}" text-anchor="end" font-size="9" fill="var(--text-faint)">${v.toFixed(0)}h</text>`);
+      }
+      // 1-FTE reference dashed line when it falls in-frame
+      if (capHeightPct > 0 && capHeightPct < 1 && HOURS_PER_WEEK <= maxH * 1.4) {
+        const fteY = padT + innerH * (1 - Math.min(1, HOURS_PER_WEEK / maxH));
+        svg.push(`<line x1="${padL}" y1="${fteY}" x2="${W - padR}" y2="${fteY}" stroke="rgba(251, 191, 36, .55)" stroke-dasharray="4 3" />`);
+        svg.push(`<text x="${W - padR}" y="${fteY - 3}" text-anchor="end" font-size="9" fill="var(--warn)">${HOURS_PER_WEEK}h · 1 FTE</text>`);
+      }
+      // Bars
+      weeks.forEach((w, i) => {
+        const x = padL + i * barW;
+        const hpx = (w.h / maxH) * innerH;
+        const y = padT + innerH - hpx;
+        const label = w.start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        svg.push(`<rect x="${x + 2}" y="${y}" width="${Math.max(1, barW - 4)}" height="${hpx}" rx="2" ry="2" fill="${color}"><title>Week of ${escapeHTML(label)} — ${w.h.toFixed(1)}h (${w.days.toFixed(1)}d in window)</title></rect>`);
+        if (weeks.length <= 20 || i % Math.ceil(weeks.length / 12) === 0) {
+          svg.push(`<text x="${x + barW / 2}" y="${H - 10}" text-anchor="middle" font-size="9" fill="var(--text-faint)">${escapeHTML(label)}</text>`);
+        }
+      });
+      svg.push('</svg>');
+      chart.innerHTML = svg.join('');
+    }
     renderStk();
     renderMilestones();
     renderDeliverables();
     renderAllocations();
+    renderLoadChart();
+    // Live-redraw the load profile when window / hours change.
+    ['#acPlStart', '#acPlEnd', '#acHours'].forEach((sel) => {
+      $(sel)?.addEventListener('input',  renderLoadChart);
+      $(sel)?.addEventListener('change', renderLoadChart);
+    });
     $('#acStkAdd')?.addEventListener('change', (e) => {
       const v = e.target.value; if (!v) return;
       if (!a.stakeholderIds.includes(v)) a.stakeholderIds.push(v);
@@ -14348,6 +14444,11 @@
       a.projectId = $('#acProj').value || null;
       a.status = $('#acStatus').value || a.status;
       a.totalHours = Math.max(0, Number($('#acHours').value) || 0);
+      a.plannedStart = $('#acPlStart').value || null;
+      a.plannedEnd   = $('#acPlEnd').value   || null;
+      if (a.plannedStart && a.plannedEnd && a.plannedEnd < a.plannedStart) {
+        const t = a.plannedStart; a.plannedStart = a.plannedEnd; a.plannedEnd = t;
+      }
       a.description = serializeChipsToText($('#acDesc'));
       a.updatedAt = todayISO();
       commit('activity-save');
@@ -19045,6 +19146,15 @@
       a.projectId = a.projectId || null;
       a.stakeholderIds = Array.isArray(a.stakeholderIds) ? a.stakeholderIds.filter((x) => typeof x === 'string') : [];
       a.totalHours = Math.max(0, Number(a.totalHours) || 0);
+      // Predicted load window — same anchor pattern as the person
+      // planner: (plannedStart, plannedEnd, totalHours) drive a
+      // hours/week bar chart. Independent of the per-person
+      // allocation split (which may or may not add up to totalHours).
+      a.plannedStart = typeof a.plannedStart === 'string' ? a.plannedStart : null;
+      a.plannedEnd   = typeof a.plannedEnd   === 'string' ? a.plannedEnd   : null;
+      if (a.plannedStart && a.plannedEnd && a.plannedEnd < a.plannedStart) {
+        const t = a.plannedStart; a.plannedStart = a.plannedEnd; a.plannedEnd = t;
+      }
       const validStatus = ['requested', 'planning', 'allocated', 'in-progress', 'done'];
       a.status = validStatus.includes(a.status) ? a.status : 'requested';
       a.allocations = Array.isArray(a.allocations) ? a.allocations : [];

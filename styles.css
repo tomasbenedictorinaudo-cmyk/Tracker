@@ -9894,9 +9894,53 @@ body.notes-fullscreen { overflow: hidden; }
 .ac-al-tent { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); }
 .ac-alloc-summary { font-size: 11.5px; margin-top: 4px; }
 
+/* Predicted load-over-time — same visual family as the planner's
+   workload chart (colored weekly bars with 1-FTE reference line). */
+.ac-loadwin {
+  display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+  padding: 6px 8px;
+  background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+.ac-loadwin-lbl {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--text-faint);
+}
+.ac-loadwin-lbl input[type="date"] {
+  background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
+  color: var(--text); padding: 3px 6px; font-size: 12px;
+}
+.ac-loadwin-info { font-size: 11.5px; color: var(--text-faint); margin-left: auto; }
+.ac-loadwin-info b { color: var(--text); }
+.ac-load-chart {
+  padding: 6px 4px;
+  background: rgba(0,0,0,.15);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.ac-load-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
 /* Embedded Planner — dashboard variant. Drops the page-head and
-   uses a compact toolbar row instead of the full picker. */
-.view.pln-embedded { padding: 0; }
+   uses a compact toolbar row instead of the full picker. Confines
+   the planner inside the dashboard section width — horizontal
+   overflow stays inside the section instead of pushing the drawer
+   layout wide. */
+.view.pln-embedded { padding: 0; max-width: 100%; overflow: hidden; }
+#dashPlannerHost { max-width: 100%; overflow: hidden; }
+.view.pln-embedded .pln-scroll,
+.view.pln-embedded .pln-scroll-wrap,
+.view.pln-embedded .pln-frame {
+  max-width: 100%;
+}
+/* The Planner's Gantt renders as a wide SVG inside .pln-scroll —
+   keep horizontal scroll ownership on that container instead of on
+   the whole page. */
+.view.pln-embedded .pln-scroll { overflow-x: auto; }
 .pln-embed-toolbar {
   display: flex; align-items: center; gap: 10px;
   padding: 6px 0 10px;
