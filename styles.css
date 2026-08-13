@@ -4200,6 +4200,18 @@ body.is-card-dragging * { cursor: grabbing !important; }
 }
 .sk-chip:hover { transform: translateY(-1px); }
 .sk-chip-name { white-space: nowrap; }
+/* Force inheritance on chip descendants so parent-container styles
+   (e.g. .person-row .name-cell .who span { color: var(--text-faint) }
+   at specificity 0-3-1) don't leak into chip labels and wash them
+   out to unreadable grey. !important because outranking existing
+   3-class row selectors otherwise needs contrived selector chains. */
+.sk-chip .sk-chip-name,
+.sk-chip .sk-chip-dots,
+.sk-chip .sk-chip-grow,
+.sk-chip .sk-chip-x { color: inherit !important; }
+.sk-chip.level-1 { color: rgba(226, 232, 240, 1) !important; }
+.sk-chip.level-2 { color: rgba(191, 219, 254, 1) !important; }
+.sk-chip.level-3 { color: rgba(187, 247, 208, 1) !important; }
 .sk-chip-dots { font-size: 8px; letter-spacing: 1px; opacity: .8; }
 .sk-chip-grow { color: rgba(96, 165, 250, 1); font-size: 10px; }
 .sk-chip.level-1 { background: rgba(148, 163, 184, .12); border-color: rgba(148, 163, 184, .40); }
@@ -4441,11 +4453,38 @@ body.is-card-dragging * { cursor: grabbing !important; }
    content doesn't leak through. Use two opaque tones for odd/even
    rows on the name cell; the transparent alternation tint applies
    only to the data cells behind the sticky column. */
-.sk-mtx-row:nth-child(even) td { background-color: rgba(255,255,255,.015); }
+/* Zebra stripe applies ONLY to unlevelled cells so the level color
+   band stays true on lvl-1 / lvl-2 / lvl-3 cells. */
+.sk-mtx-row:nth-child(even) td.sk-mtx-cell.lvl-0 { background-color: rgba(255,255,255,.015); }
 .sk-mtx-row:nth-child(odd)  th.sk-mtx-name { background: var(--bg-2); }
 .sk-mtx-row:nth-child(even) th.sk-mtx-name { background: var(--bg-1); }
-.sk-mtx-row:hover td { background-color: rgba(96, 165, 250, .06); }
-.sk-mtx-row:hover th.sk-mtx-name { background: rgba(96, 165, 250, .18) !important; }
+/* Row hover — use inset outline (top+bottom) instead of a
+   background wash so the heat color under the cursor stays fully
+   visible. Name column gets a blue anchor bar. */
+.sk-mtx-row:hover td {
+  box-shadow: inset 0 1px 0 rgba(96, 165, 250, .35), inset 0 -1px 0 rgba(96, 165, 250, .35);
+}
+.sk-mtx-row:hover th.sk-mtx-name {
+  background: linear-gradient(90deg, rgba(96, 165, 250, .22), rgba(96, 165, 250, .06)) !important;
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 1px 0 rgba(96, 165, 250, .35), inset 0 -1px 0 rgba(96, 165, 250, .35);
+}
+/* Column crosshair — JS adds .col-hover to every cell + header
+   sharing the hovered skill. Same inset-outline pattern (left +
+   right) so level colors survive. Row and column intersection
+   gets a fuller outline. */
+.sk-mtx-cell.col-hover {
+  box-shadow: inset 1px 0 0 rgba(96, 165, 250, .35), inset -1px 0 0 rgba(96, 165, 250, .35);
+}
+.sk-mtx-row:hover td.sk-mtx-cell.col-hover {
+  box-shadow: inset 0 1px 0 rgba(96, 165, 250, .60), inset 0 -1px 0 rgba(96, 165, 250, .60),
+              inset 1px 0 0 rgba(96, 165, 250, .60), inset -1px 0 0 rgba(96, 165, 250, .60);
+}
+.sk-mtx-h.col-hover {
+  background: linear-gradient(180deg, rgba(96, 165, 250, .22), rgba(96, 165, 250, .04)) !important;
+}
+.sk-mtx-h.col-hover .sk-mtx-h-label {
+  color: var(--accent) !important;
+}
 .sk-mtx-name {
   width: 200px;
   min-width: 200px;

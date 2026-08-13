@@ -13672,7 +13672,7 @@
       <div class="panel" id="pnlSkillsMatrix">
         <div class="panel-title panel-title-stack">
           <span>Skills Matrix</span>
-          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click</b> a cell to raise the level by one (empty → Learning → Competent → Expert, stops at Expert). <b>Right-click</b> to lower it. <b>Shift-click</b> toggles "developing". Double-click a name to open the person editor.</span>
+          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click</b> a cell to cycle its level (empty → Learning → Competent → Expert → empty). <b>Right-click</b> to step down. <b>Shift-click</b> toggles "developing". Double-click a name to open the person editor.</span>
         </div>
         <div class="sk-mtx-legend">
           <span><span class="sk-swatch lvl-1"></span>Learning</span>
@@ -13865,15 +13865,12 @@
           ]);
         });
       });
-      // Cell edit — left-click increments the skill level by one
-      // (empty → Learning → Competent → Expert; stops at Expert so a
-      // stray click never wipes an entry). Right-click decrements by
-      // one, dropping the entry once it hits empty. Shift-click
-      // toggles the developing flag; Cmd/Ctrl-click opens the full
-      // person editor for larger edits. Scroll position is preserved
-      // across re-renders so the viewport doesn't lurch during rapid
-      // batch edits.
-      function editCellLevel(td, delta, opts = {}) {
+      // Cell edit. Left-click cycles the level: empty → Learning →
+      // Competent → Expert → empty. Right-click steps DOWN by one.
+      // Shift-click toggles the developing flag; Cmd/Ctrl-click opens
+      // the full person editor. Scroll position is preserved across
+      // re-renders so rapid batch edits don't lurch the viewport.
+      function editCellLevel(td, mode, opts = {}) {
         const personId = td.dataset.personId;
         const skillName = td.dataset.skill;
         if (!personId || !skillName) return;
@@ -13885,11 +13882,12 @@
         if (opts.toggleDeveloping) {
           if (hit) hit.developing = !hit.developing;
           else p.skills.push({ name: skillName, level: 1, developing: true });
-        } else if (delta > 0) {
+        } else if (mode === 'up') {
+          // Cycle: empty → 1 → 2 → 3 → empty
           if (!hit) p.skills.push({ name: skillName, level: 1, developing: false });
           else if (hit.level < 3) hit.level += 1;
-          // else: already Expert, no-op
-        } else if (delta < 0) {
+          else p.skills.splice(idx, 1);
+        } else if (mode === 'down') {
           if (hit && hit.level > 1) hit.level -= 1;
           else if (hit) p.skills.splice(idx, 1);
         }
@@ -13903,14 +13901,37 @@
       host.querySelectorAll('.sk-mtx-cell').forEach((td) => {
         td.addEventListener('click', (ev) => {
           if (ev.metaKey || ev.ctrlKey) { openPersonEditor(td.dataset.personId); return; }
-          if (ev.shiftKey) { editCellLevel(td, 0, { toggleDeveloping: true }); return; }
-          editCellLevel(td, +1);
+          if (ev.shiftKey) { editCellLevel(td, null, { toggleDeveloping: true }); return; }
+          editCellLevel(td, 'up');
         });
         td.addEventListener('contextmenu', (ev) => {
           ev.preventDefault();
-          editCellLevel(td, -1);
+          editCellLevel(td, 'down');
         });
       });
+      // Column crosshair — hovering a cell also marks every other cell
+      // in the same column (and the header) as "col-hover" so the user
+      // can see which skill they're in. Row hover uses a class the CSS
+      // paints with an inset outline instead of a background swap, so
+      // level colors stay visible under the cursor.
+      const table = host.querySelector('.sk-mtx');
+      function clearCrosshair() {
+        table.querySelectorAll('.col-hover').forEach((el) => el.classList.remove('col-hover'));
+      }
+      table?.addEventListener('mouseover', (e) => {
+        const td = e.target.closest?.('.sk-mtx-cell');
+        if (!td) { clearCrosshair(); return; }
+        const skill = td.dataset.skill;
+        if (!skill) return;
+        clearCrosshair();
+        table.querySelectorAll(`.sk-mtx-cell[data-skill="${CSS.escape(skill)}"]`).forEach((el) => el.classList.add('col-hover'));
+        // Header column tag matches on textContent trimmed against skill.
+        table.querySelectorAll('.sk-mtx-h').forEach((h) => {
+          const label = h.querySelector('.sk-mtx-h-label')?.textContent?.trim();
+          if (label === skill) h.classList.add('col-hover');
+        });
+      });
+      table?.addEventListener('mouseleave', clearCrosshair);
     }
     // Wire filter controls
     const compSel = $('#skMtxComp'); if (compSel) compSel.value = state.ui.skMtx.comp || '';
@@ -16533,7 +16554,7 @@
         return;
       }
       chipsEl.innerHTML = drawerSkills.map((s, i) => `
-        <span class="sk-chip level-${s.level}${s.developing ? ' developing' : ''}" data-idx="${i}" title="Level ${s.level} — ${SKILL_LEVELS[s.level - 1]?.label || ''}${s.developing ? ' · developing' : ''} — click to cycle, shift-click to toggle developing, Alt-click to remove">
+        <span class="sk-chip level-${s.level}${s.developing ? ' developing' : ''}" data-idx="${i}" title="Level ${s.level} — ${SKILL_LEVELS[s.level - 1]?.label || ''}${s.developing ? ' · developing' : ''} — click to cycle level, shift-click to toggle developing, Alt-click to remove">
           <span class="sk-chip-name">${escapeHTML(s.name)}</span>
           <span class="sk-chip-dots" aria-hidden="true">${'●'.repeat(s.level)}${'○'.repeat(3 - s.level)}</span>
           ${s.developing ? '<span class="sk-chip-grow" title="Wants to develop this">◇</span>' : ''}
@@ -16549,8 +16570,9 @@
       if (e.altKey) { drawerSkills.splice(idx, 1); }
       else if (e.shiftKey) { s.developing = !s.developing; }
       else {
-        s.level = s.level + 1;
-        if (s.level > 3) { drawerSkills.splice(idx, 1); }
+        // Cycle Learning → Competent → Expert → Learning. Never
+        // deletes; use Alt-click to remove a chip.
+        s.level = s.level >= 3 ? 1 : s.level + 1;
       }
       renderSkillChips();
     });
