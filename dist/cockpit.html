@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T13:09:52.003Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T13:18:32.735Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -9947,13 +9947,34 @@ body.notes-fullscreen { overflow: hidden; }
    layout wide. */
 .view.pln-embedded { padding: 0; max-width: 100%; overflow: hidden; }
 #dashPlannerHost { max-width: 100%; overflow: hidden; }
-/* The Planner's Gantt renders as a wide SVG inside .planner-scroll
-   — keep horizontal scroll ownership on that container instead of
-   pushing the drawer wider than its viewport. Applies whether the
-   drawer is fullscreen or not; the embedded variant just forwards
-   the constraint through every wrapper layer. */
+/* Embedded planner — the standalone .planner-scroll uses
+   max-height:calc(100vh - 240px) which is ~600 px and larger
+   than a typical dashboard section. Left as-is the rows
+   overflow past the section boundary and appear to float over
+   the sections below.
+   In embedded mode: bound the scroll to a reasonable in-page
+   height so the planner lives inside its section, and neutralise
+   the internal sticky axis / row-label so they don't detach on
+   drawer scroll. Horizontal scroll ownership stays on the
+   .planner-scroll container so the SVG doesn't push the drawer
+   wide. */
 .view.pln-embedded, .view.pln-embedded > * { max-width: 100%; min-width: 0; }
-.view.pln-embedded .planner-scroll { max-width: 100%; overflow-x: auto; }
+.view.pln-embedded .planner-scroll {
+  max-width: 100%;
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+}
+/* Sticky axis + sticky row-label inside the standalone planner
+   snap to the outer viewport, which reads as "floating" when the
+   drawer scrolls. Anchor them to the planner-scroll box instead —
+   sticky already respects the nearest scroll ancestor, so this
+   just makes sure the z-index doesn't lift them over neighbouring
+   dashboard sections. */
+.view.pln-embedded .planner-axis   { z-index: 1; }
+.view.pln-embedded .pln-row-label  { z-index: 1; }
 .pln-embed-toolbar {
   display: flex; align-items: center; gap: 10px;
   padding: 6px 0 10px;
