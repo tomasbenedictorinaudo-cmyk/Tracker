@@ -14845,20 +14845,22 @@
         <div class="dash-section-title">Planner<span class="dash-section-count">workload timeline</span></div>
         <div id="dashPlannerHost"></div>
       </div>
-      <div class="dash-section" id="dashReviewsWrap">
-        <div class="dash-section-title">
-          Development reviews
+      <div class="dash-section is-collapsible${(state.ui?.dashUi?.reviewCollapsed) ? ' is-collapsed' : ''}" id="dashReviewsWrap">
+        <button type="button" class="dash-section-title dev-rv-heading" id="devRvToggle" aria-expanded="${!(state.ui?.dashUi?.reviewCollapsed)}">
+          <span class="dev-rv-caret">▾</span>
+          <span>Development reviews</span>
           <span class="dash-section-count">${(p.reviews || []).length} on record</span>
-        </div>
-        <div class="dev-rv-toolbar">
-          <div class="dev-rv-dates" id="devRvDates"></div>
-          <div class="dev-rv-actions">
-            <button class="ghost" id="devRvNew" title="Start a new dated review">+ New review</button>
-            <button class="ghost" id="devRvCompare" title="Show any two reviews side-by-side with differences highlighted">⇄ Compare</button>
-            <button class="ghost" id="devRvDelete" title="Delete the currently selected review" style="color: var(--bad);">Delete</button>
+        </button>
+        <div class="dev-rv-collapsible" id="devRvCollapsible">
+          <div class="dev-rv-toolbar">
+            <div class="dev-rv-dates" id="devRvDates" title="Shift/Ctrl-click a second date to compare two reviews"></div>
+            <div class="dev-rv-actions">
+              <button class="primary" id="devRvNew" title="Start a new dated review — will ask whether to start blank or from an existing one">+ New review</button>
+              <button class="ghost" id="devRvDelete" title="Delete the currently selected review" style="color: var(--bad);">Delete</button>
+            </div>
           </div>
+          <div id="devRvBody" class="dev-rv-body"></div>
         </div>
-        <div id="devRvBody" class="dev-rv-body"></div>
       </div>
       ${listOrEmpty('Late actions', late.length,
         late.slice(0, 12).map(({ a, pr }) => `
@@ -14951,13 +14953,24 @@
           ${r.id === rvState.compareId ? '<span class="dev-rv-cmp-tag">compare</span>' : ''}
         </button>`).join('');
       bar.querySelectorAll('.dev-rv-chip').forEach((el) => {
-        el.addEventListener('click', () => {
-          if (rvState.compareMode) {
-            // In compare mode, clicking sets the second date
-            if (el.dataset.rvId === rvState.selectedId) return;
-            rvState.compareId = el.dataset.rvId;
+        el.addEventListener('click', (ev) => {
+          const multi = ev.shiftKey || ev.ctrlKey || ev.metaKey;
+          if (multi) {
+            // Shift/Ctrl-click a second date → enter compare mode with
+            // (selectedId, this) as the pair. Clicking the primary again
+            // (same modifier) exits compare mode.
+            if (el.dataset.rvId === rvState.selectedId) {
+              rvState.compareId = null;
+              rvState.compareMode = false;
+            } else {
+              rvState.compareId = el.dataset.rvId;
+              rvState.compareMode = true;
+            }
           } else {
+            // Plain click resets compare mode + selects for editing.
             rvState.selectedId = el.dataset.rvId;
+            rvState.compareId = null;
+            rvState.compareMode = false;
           }
           renderDevReviewChrome();
           renderDevReviewBody();
@@ -14983,20 +14996,16 @@
       }
     }
     $('#devRvNew')?.addEventListener('click', () => devRvNewReview(p));
-    $('#devRvCompare')?.addEventListener('click', () => {
-      rvState.compareMode = !rvState.compareMode;
-      const btn = $('#devRvCompare');
-      if (btn) btn.classList.toggle('active', !!rvState.compareMode);
-      if (rvState.compareMode) {
-        // Pre-pick the second-most-recent as the comparison partner
-        const reviews = p.reviews || [];
-        const others = reviews.filter((r) => r.id !== rvState.selectedId);
-        rvState.compareId = others[0]?.id || null;
-      } else {
-        rvState.compareId = null;
-      }
-      renderDevReviewChrome();
-      renderDevReviewBody();
+    // Collapse toggle for the whole Dev Reviews section. State
+    // persists across dashboard opens on state.ui.dashUi so users
+    // land in the layout they left.
+    $('#devRvToggle')?.addEventListener('click', () => {
+      state.ui = state.ui || {}; state.ui.dashUi = state.ui.dashUi || {};
+      state.ui.dashUi.reviewCollapsed = !state.ui.dashUi.reviewCollapsed;
+      const wrap = $('#dashReviewsWrap');
+      wrap?.classList.toggle('is-collapsed', !!state.ui.dashUi.reviewCollapsed);
+      $('#devRvToggle')?.setAttribute('aria-expanded', String(!state.ui.dashUi.reviewCollapsed));
+      saveState();
     });
     $('#devRvDelete')?.addEventListener('click', () => {
       const rv = (p.reviews || []).find((r) => r.id === rvState.selectedId);
@@ -15010,7 +15019,6 @@
     function devRvNewReview(person) {
       const reviews = person.reviews || [];
       const today = todayISO();
-      // If a review already exists for today, just select it.
       const existing = reviews.find((r) => r.date === today);
       if (existing) {
         rvState.selectedId = existing.id;
@@ -15019,32 +15027,65 @@
         return;
       }
       const latest = reviews[0];
-      let copyLatest = false;
-      if (latest) {
-        copyLatest = confirm(`Start today's review from the ${latest.date} entry?\n\n[OK] copy the latest review as a starting point\n[Cancel] start with a blank review`);
+      if (!latest) {
+        // No existing review → create blank directly, no prompt.
+        finishNewReview(false);
+        return;
       }
-      const fresh = {
-        id: uid('rev'),
-        date: today,
-        role: copyLatest ? latest.role : '',
-        position: copyLatest ? latest.position : '',
-        salary: copyLatest ? latest.salary : '',
-        strengths: copyLatest ? latest.strengths : '',
-        growthAreas: copyLatest ? latest.growthAreas : '',
-        motivations: copyLatest ? latest.motivations : '',
-        frustrations: copyLatest ? latest.frustrations : '',
-        careerGoals: copyLatest ? latest.careerGoals : '',
-        supportNeeded: copyLatest ? latest.supportNeeded : '',
-        observations: copyLatest ? latest.observations : '',
-        notes: '',
-        actionIds: copyLatest ? latest.actionIds.slice() : [],
-        createdAt: today,
-        updatedAt: today,
-      };
-      person.reviews = [fresh, ...reviews];
-      rvState.selectedId = fresh.id;
-      commit('review-add');
-      openPersonDashboard(personId);
+      // Two-button modal — much clearer than a browser confirm().
+      // Autosave picks up any subsequent edits within a second.
+      const overlay = document.createElement('div');
+      overlay.className = 'overlay desc-overlay';
+      overlay.innerHTML = `
+        <div class="desc-modal" style="width: 460px; max-width: 92vw;">
+          <div class="desc-head">
+            <div class="desc-title">+ New review tab</div>
+            <button class="icon-btn" id="nrClose" title="Cancel">×</button>
+          </div>
+          <div style="padding: 16px; display: flex; flex-direction: column; gap: 12px;">
+            <div style="font-size: 13px; line-height: 1.5;">
+              Add a new review tab for <b>${escapeHTML(person.name)}</b>. You can fill the date and content later — everything autosaves as you type.
+            </div>
+            <button type="button" class="ghost nr-choice" id="nrCopy" style="text-align:left; padding:12px 14px; display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+              <strong style="font-size:14px;">↺ Copy from the ${escapeHTML(latest.date)} review</strong>
+              <span class="muted" style="font-size:12px;">Pre-fills every field with the latest values so you only edit what changed.</span>
+            </button>
+            <button type="button" class="ghost nr-choice" id="nrBlank" style="text-align:left; padding:12px 14px; display:flex; flex-direction:column; gap:4px; align-items:flex-start;">
+              <strong style="font-size:14px;">＋ Start with a blank review</strong>
+              <span class="muted" style="font-size:12px;">Every field empty; useful when the situation has changed significantly.</span>
+            </button>
+          </div>
+        </div>`;
+      document.body.appendChild(overlay);
+      const closeM = () => overlay.remove();
+      overlay.querySelector('#nrClose').addEventListener('click', closeM);
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) closeM(); });
+      overlay.querySelector('#nrCopy').addEventListener('click', () => { closeM(); finishNewReview(true); });
+      overlay.querySelector('#nrBlank').addEventListener('click', () => { closeM(); finishNewReview(false); });
+      function finishNewReview(copyLatest) {
+        const fresh = {
+          id: uid('rev'),
+          date: today,
+          role: copyLatest && latest ? latest.role : '',
+          position: copyLatest && latest ? latest.position : '',
+          salary: copyLatest && latest ? latest.salary : '',
+          strengths: copyLatest && latest ? latest.strengths : '',
+          growthAreas: copyLatest && latest ? latest.growthAreas : '',
+          motivations: copyLatest && latest ? latest.motivations : '',
+          frustrations: copyLatest && latest ? latest.frustrations : '',
+          careerGoals: copyLatest && latest ? latest.careerGoals : '',
+          supportNeeded: copyLatest && latest ? latest.supportNeeded : '',
+          observations: copyLatest && latest ? latest.observations : '',
+          notes: '',
+          actionIds: (copyLatest && latest && Array.isArray(latest.actionIds)) ? latest.actionIds.slice() : [],
+          createdAt: today,
+          updatedAt: today,
+        };
+        person.reviews = [fresh, ...(person.reviews || [])];
+        rvState.selectedId = fresh.id;
+        commit('review-add');
+        openPersonDashboard(personId);
+      }
     }
   }
 
@@ -15052,24 +15093,60 @@
   // Field descriptors drive both the single-review form and the
   // side-by-side comparison layout so both stay in sync.
   const DEV_REVIEW_FIELDS = [
-    { key: 'role',          label: 'Current role' },
-    { key: 'position',      label: 'Position' },
-    { key: 'salary',        label: 'Salary' },
-    { key: 'strengths',     label: 'Strengths' },
-    { key: 'growthAreas',   label: 'Growth areas' },
-    { key: 'motivations',   label: 'Motivations' },
-    { key: 'frustrations',  label: 'Frustrations' },
-    { key: 'careerGoals',   label: 'Career goals' },
-    { key: 'supportNeeded', label: 'Support needed' },
-    { key: 'observations',  label: 'Observations' },
-    { key: 'notes',         label: 'Free notes' },
+    { key: 'role',          label: 'Current role',   rich: true  },
+    { key: 'position',      label: 'Position',       rich: false, kind: 'text'   },
+    { key: 'salary',        label: 'Salary (€)',     rich: false, kind: 'salary' },
+    { key: 'strengths',     label: 'Strengths',      rich: true  },
+    { key: 'growthAreas',   label: 'Growth areas',   rich: true  },
+    { key: 'motivations',   label: 'Motivations',    rich: true  },
+    { key: 'frustrations',  label: 'Frustrations',   rich: true  },
+    { key: 'careerGoals',   label: 'Career goals',   rich: true  },
+    { key: 'supportNeeded', label: 'Support needed', rich: true  },
+    { key: 'observations',  label: 'Observations',   rich: true  },
+    { key: 'notes',         label: 'Free notes',     rich: true  },
   ];
+  // Salary display helpers — accepts numbers ("60000"), strings with
+  // separators ("60 000"), or existing "N €" forms and returns a
+  // display string ("60 000 €") or the raw digits ("60000") for
+  // storage. Pattern is deliberately forgiving.
+  function fmtSalaryDisplay(v) {
+    if (v == null) return '';
+    const digits = String(v).replace(/[^0-9]/g, '');
+    if (!digits) return '';
+    // Group thousands with a thin space for readability
+    const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return `${grouped} €`;
+  }
+  function parseSalaryInput(v) { return String(v || '').replace(/[^0-9]/g, ''); }
   function renderDevReviewForm(rv, p) {
-    const fields = DEV_REVIEW_FIELDS.map((f) => `
-      <div class="dev-rv-field">
-        <label class="dev-rv-lbl">${escapeHTML(f.label)}</label>
-        ${ceComposeHTML({ id: `devRv_${f.key}`, value: rv[f.key], placeholder: `${f.label}…`, style: 'min-height:60px;' })}
-      </div>`).join('');
+    const fields = DEV_REVIEW_FIELDS.map((f) => {
+      if (f.rich) {
+        // Store innerHTML directly for rich fields — B/I/U, lists,
+        // colour, and Gmail chips all survive round-trip. Seed with
+        // renderTextWithChips only when the value looks like plain
+        // text (no HTML tags) so legacy plain-text reviews upgrade
+        // gracefully to the rich editor.
+        const raw = rv[f.key] || '';
+        const seed = /<\w+/.test(raw) ? raw : renderTextWithChips(raw);
+        return `
+          <div class="dev-rv-field">
+            <label class="dev-rv-lbl">${escapeHTML(f.label)}</label>
+            <div class="ce-compose rich" id="devRv_${f.key}" contenteditable="true" data-placeholder="${escapeHTML(f.label)}…" data-rv-key="${escapeHTML(f.key)}" style="min-height:60px;">${seed}</div>
+          </div>`;
+      }
+      if (f.kind === 'salary') {
+        return `
+          <div class="dev-rv-field dev-rv-field-plain">
+            <label class="dev-rv-lbl">${escapeHTML(f.label)}</label>
+            <input type="text" class="dev-rv-plain dev-rv-salary" id="devRv_${f.key}" data-rv-key="${escapeHTML(f.key)}" placeholder="e.g. 60 000 €" value="${escapeHTML(fmtSalaryDisplay(rv[f.key]))}" inputmode="numeric" />
+          </div>`;
+      }
+      return `
+        <div class="dev-rv-field dev-rv-field-plain">
+          <label class="dev-rv-lbl">${escapeHTML(f.label)}</label>
+          <input type="text" class="dev-rv-plain" id="devRv_${f.key}" data-rv-key="${escapeHTML(f.key)}" placeholder="${escapeHTML(f.label)}…" value="${escapeHTML(rv[f.key] || '')}" />
+        </div>`;
+    }).join('');
     const linked = collectLinkedActions(rv);
     const linkedHtml = linked.length ? linked.map(({ a, pr }) => `
       <div class="dev-rv-act-row" data-action-id="${escapeHTML(a.id)}">
@@ -15083,6 +15160,18 @@
         <label class="dev-rv-lbl">Date</label>
         <input type="date" id="devRvDate" value="${escapeHTML(rv.date)}" />
         <span class="muted" style="font-size:11px;">Last updated ${escapeHTML(rv.updatedAt || rv.date)}</span>
+        <span class="muted dev-rv-saved" id="devRvSaved" style="margin-left:auto;"></span>
+      </div>
+      <div class="dev-rv-rtb" role="toolbar" aria-label="Rich text formatting">
+        <button type="button" data-rt="bold"                    title="Bold (⌘B)"><b>B</b></button>
+        <button type="button" data-rt="italic"                  title="Italic (⌘I)"><i>I</i></button>
+        <button type="button" data-rt="underline"               title="Underline (⌘U)"><u>U</u></button>
+        <span class="dev-rv-rtb-sep"></span>
+        <button type="button" data-rt="insertUnorderedList"     title="Bullet list">•&nbsp;list</button>
+        <button type="button" data-rt="insertOrderedList"       title="Numbered list">1.&nbsp;list</button>
+        <span class="dev-rv-rtb-sep"></span>
+        <label class="dev-rv-rtb-color" title="Text colour"><span>A</span><input type="color" data-rt="foreColor" value="#eaeaf0" /></label>
+        <button type="button" data-rt="removeFormat"            title="Clear formatting">✕</button>
       </div>
       <div class="dev-rv-grid">${fields}</div>
       <div class="dev-rv-field dev-rv-actions-field">
@@ -15090,12 +15179,8 @@
         <div class="dev-rv-act-list" id="devRvActList">${linkedHtml}</div>
         <div class="dev-rv-act-controls">
           <button type="button" class="ghost" id="devRvActLink">+ Link existing action…</button>
-          <button type="button" class="ghost" id="devRvActNew">+ New action for ${escapeHTML(p.name)}</button>
+          <button type="button" class="primary" id="devRvActNew">+ New action for ${escapeHTML(p.name)}</button>
         </div>
-      </div>
-      <div class="dev-rv-footer">
-        <button type="button" class="primary" id="devRvSave">Save</button>
-        <span class="muted" style="font-size:11px;" id="devRvSaved"></span>
       </div>`;
   }
   function collectLinkedActions(rv) {
@@ -15109,12 +15194,59 @@
     return out;
   }
   function wireDevReviewForm(host, p, rv) {
-    host.querySelector('#devRvSave')?.addEventListener('click', () => devRvCommit(host, p, rv, false));
-    // Autosave on blur to reduce risk of losing edits when the user
-    // clicks elsewhere without hitting Save.
-    host.querySelectorAll('.ce-compose').forEach((el) => {
+    // Autosave: fires on blur (immediate) and on input (debounced).
+    // The Save button is intentionally gone — every keystroke lands
+    // in state within a second.
+    let autosaveTimer = null;
+    const autosave = () => {
+      clearTimeout(autosaveTimer);
+      autosaveTimer = setTimeout(() => devRvCommit(host, p, rv, true), 700);
+    };
+    // Rich text toolbar — one shared toolbar operates on the last
+    // focused .ce-compose.rich field. mousedown preventDefault
+    // preserves the selection so execCommand hits the right range.
+    let lastRichFocus = null;
+    host.querySelectorAll('.ce-compose.rich').forEach((el) => {
+      el.addEventListener('focus', () => { lastRichFocus = el; });
+      el.addEventListener('blur', () => devRvCommit(host, p, rv, true));
+      el.addEventListener('input', autosave);
+    });
+    host.querySelectorAll('.dev-rv-rtb [data-rt]').forEach((el) => {
+      const cmd = el.dataset.rt;
+      if (el.tagName === 'INPUT' && el.type === 'color') {
+        el.addEventListener('mousedown', (e) => e.preventDefault());
+        el.addEventListener('input', () => {
+          if (!lastRichFocus) return;
+          lastRichFocus.focus();
+          document.execCommand('foreColor', false, el.value);
+          devRvCommit(host, p, rv, true);
+        });
+        return;
+      }
+      el.addEventListener('mousedown', (e) => e.preventDefault()); // keep selection
+      el.addEventListener('click', () => {
+        if (lastRichFocus) lastRichFocus.focus();
+        document.execCommand(cmd, false, null);
+        devRvCommit(host, p, rv, true);
+      });
+    });
+    // Plain text inputs (position, salary)
+    host.querySelectorAll('.dev-rv-plain').forEach((el) => {
+      el.addEventListener('input', autosave);
       el.addEventListener('blur', () => devRvCommit(host, p, rv, true));
     });
+    // Salary — focus strips the "€" suffix so the user can edit
+    // digits freely, blur re-adds the formatted display.
+    const salaryEl = host.querySelector('#devRv_salary');
+    if (salaryEl) {
+      salaryEl.addEventListener('focus', () => {
+        salaryEl.value = parseSalaryInput(salaryEl.value);
+      });
+      salaryEl.addEventListener('blur', () => {
+        salaryEl.value = fmtSalaryDisplay(parseSalaryInput(salaryEl.value));
+        devRvCommit(host, p, rv, true);
+      });
+    }
     host.querySelector('#devRvDate')?.addEventListener('change', () => devRvCommit(host, p, rv, true));
     // Linked actions — unlink / link / create.
     host.querySelectorAll('.dev-rv-act-unlink').forEach((btn) => {
@@ -15148,7 +15280,16 @@
   function devRvCommit(host, p, rv, silent) {
     DEV_REVIEW_FIELDS.forEach((f) => {
       const el = host.querySelector(`#devRv_${f.key}`);
-      if (el) rv[f.key] = serializeChipsToText(el);
+      if (!el) return;
+      if (f.rich) {
+        // Store innerHTML directly for rich fields so B/I/U, lists,
+        // colour, and Gmail chips survive verbatim.
+        rv[f.key] = el.innerHTML;
+      } else if (f.kind === 'salary') {
+        rv[f.key] = parseSalaryInput(el.value);
+      } else {
+        rv[f.key] = el.value || '';
+      }
     });
     const dateEl = host.querySelector('#devRvDate');
     if (dateEl && dateEl.value) rv.date = dateEl.value;
