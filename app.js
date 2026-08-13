@@ -14155,12 +14155,18 @@
           if (hit) hit.developing = !hit.developing;
           else p.skills.push({ name: skillName, level: 1, developing: true });
         } else if (mode === 'up') {
+          // Cycle 0 → 1 → 2 → 3 → 0. Never remove the entry — a
+          // "level: 0" record keeps the skill in allTeamSkills() so
+          // the matrix column stays visible after cycling back to
+          // empty. (A splice would drop the column entirely when
+          // this person was the sole holder.)
           if (!hit) p.skills.push({ name: skillName, level: 1, developing: false });
-          else if (hit.level < 3) hit.level += 1;
-          else p.skills.splice(idx, 1);
+          else if (hit.level >= 3) hit.level = 0;
+          else hit.level += 1;
         } else if (mode === 'down') {
-          if (hit && hit.level > 1) hit.level -= 1;
-          else if (hit) p.skills.splice(idx, 1);
+          if (hit && hit.level > 0) hit.level -= 1;
+          else if (hit) hit.level = 3; // cycle down wraps
+          // no hit → do nothing on right-click (nothing to decrement)
         }
         const scroller = $('#skMtx');
         const sx = scroller?.scrollLeft || 0;
@@ -20097,8 +20103,12 @@
         if (!key || seenSkill.has(key)) return false;
         seenSkill.add(key);
         s.name = s.name.trim();
+        // Level 0 is a valid state — the matrix cycle uses it as
+        // "no skill, but keep the column visible". Clamp to [0, 3]
+        // instead of defaulting to 1 so a level-0 entry survives a
+        // save + reload without being silently promoted back to 1.
         const lvl = Math.round(Number(s.level));
-        s.level = (lvl >= 1 && lvl <= 3) ? lvl : 1;
+        s.level = (lvl >= 0 && lvl <= 3) ? lvl : 1;
         s.developing = !!s.developing;
         return true;
       });
