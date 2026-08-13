@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T14:50:02.466Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T15:01:48.102Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -29583,24 +29583,261 @@ body.notes-fullscreen { overflow: hidden; }
         hits.push(n);
       }
     }
-    hits.forEach((m) => {
-      // Replace <mark class="nt-hl…"><span icon><span text>content</span></span></mark>
-      // with just the inner content nodes.
-      const textSpan = m.querySelector(':scope > .nt-hl-text');
-      const parent = m.parentNode;
-      if (!parent) return;
-      const frag = document.createDocumentFragment();
-      if (textSpan) {
-        while (textSpan.firstChild) frag.appendChild(textSpan.firstChild);
-      } else {
-        while (m.firstChild) {
-          const c = m.firstChild;
-          if (c.classList && c.classList.contains('nt-hl-icon')) { m.removeChild(c); continue; }
-          frag.appendChild(c);
+    hits.forEach((m) => _unwrapMark(m));
+  }
+
+  // Replace a single <mark.nt-hl> with its inner content nodes,
+  // stripping the icon span. Shared by _unhighlightRange and
+  // _stripHighlightMarksIn (which operates on detached fragments).
+  function _unwrapMark(m) {
+    const parent = m.parentNode;
+    if (!parent) return;
+    const textSpan = m.querySelector(':scope > .nt-hl-text');
+    const frag = document.createDocumentFragment();
+    if (textSpan) {
+      while (textSpan.firstChild) frag.appendChild(textSpan.firstChild);
+    } else {
+      while (m.firstChild) {
+        const c = m.firstChild;
+        if (c.nodeType === 1 && c.classList && c.classList.contains('nt-hl-icon')) {
+          m.removeChild(c);
+          continue;
         }
+        frag.appendChild(c);
       }
-      parent.replaceChild(frag, m);
+    }
+    parent.replaceChild(frag, m);
+  }
+
+  // Unwrap every nt-hl mark in `root` — used AFTER extractContents
+  // pulls a fragment out, so nested/partial marks captured by the
+  // extraction don't stack inside the fresh wrapper. Operating on
+  // the detached fragment keeps the live range's boundaries valid.
+  function _stripHighlightMarksIn(root) {
+    if (!root || !root.querySelectorAll) return;
+    root.querySelectorAll('mark.nt-hl').forEach(_unwrapMark);
+  }
+
+  // Return the child of `body` that hosts `node` — walk up until the
+  // parent is `body` (or until we hit `body` itself). Text nodes and
+  // deep descendants both resolve to the top-level block child.
+  function _notesBodyBlockOf(body, node) {
+    let n = node;
+    if (n && n.nodeType !== 1) n = n.parentNode;
+    while (n && n.parentNode && n.parentNode !== body) n = n.parentNode;
+    return (n && n.parentNode === body) ? n : null;
+  }
+
+  // Split a range that spans multiple block children of body into
+  // one sub-range per block. Wrapping each in its own <mark> keeps
+  // the resulting HTML valid (inline mark inside a block), where a
+  // single wrap would put block-level content inside an inline mark.
+  function _splitNotesRangeByBlocks(body, range) {
+    const startBlock = _notesBodyBlockOf(body, range.startContainer);
+    const endBlock   = _notesBodyBlockOf(body, range.endContainer);
+    if (!startBlock || !endBlock || startBlock === endBlock) {
+      return [range.cloneRange()];
+    }
+    const ranges = [];
+    // First block: from selection start to end of that block.
+    const r1 = document.createRange();
+    r1.setStart(range.startContainer, range.startOffset);
+    r1.setEnd(startBlock, startBlock.childNodes.length);
+    if (!r1.collapsed) ranges.push(r1);
+    // Middle blocks: full contents.
+    let cursor = startBlock.nextSibling;
+    while (cursor && cursor !== endBlock) {
+      if (cursor.nodeType === 1) {
+        const rm = document.createRange();
+        rm.selectNodeContents(cursor);
+        if (!rm.collapsed) ranges.push(rm);
+      }
+      cursor = cursor.nextSibling;
+    }
+    // Last block: from start of that block to selection end.
+    const rN = document.createRange();
+    rN.setStart(endBlock, 0);
+    rN.setEnd(range.endContainer, range.endOffset);
+    if (!rN.collapsed) ranges.push(rN);
+    return ranges.length ? ranges : [range.cloneRange()];
+  }
+
+  // Walk up from `node` looking for the closest ancestor `mark.nt-hl`
+  // that is still a descendant of `stopAt`. Returns null if none.
+  function _enclosingHighlightMark(node, stopAt) {
+    let n = node;
+    if (n && n.nodeType !== 1) n = n.parentNode;
+    while (n && n !== stopAt) {
+      if (n.nodeType === 1 && n.tagName === 'MARK' && n.classList && n.classList.contains('nt-hl')) {
+        return n;
+      }
+      n = n.parentNode;
+    }
+    return null;
+  }
+
+  // If either endpoint of `range` lies inside a highlight mark that
+  // itself lives inside `body`, extend that endpoint to sit just before
+  // (or after) the enclosing mark. Prevents the new highlight from
+  // being inserted inside the old one when the selection is fully
+  // enclosed by an existing highlight — and cleans up partial overlaps
+  // symmetrically on either endpoint.
+  function _expandRangeAcrossMarks(range, body) {
+    const startMark = _enclosingHighlightMark(range.startContainer, body);
+    if (startMark) range.setStartBefore(startMark);
+    const endMark = _enclosingHighlightMark(range.endContainer, body);
+    if (endMark) range.setEndAfter(endMark);
+  }
+
+  function _createHighlightMark(kind, solo) {
+    const iconMap  = { ok: '✓', warn: '⚠', bad: '✕' };
+    const labelMap = { ok: 'success', warn: 'warning', bad: 'failure' };
+    const mark = document.createElement('mark');
+    mark.className = `nt-hl nt-hl-${kind}${solo ? ' nt-hl-solo' : ''}`;
+    mark.setAttribute('data-hl', kind);
+    mark.setAttribute('title', labelMap[kind] || kind);
+    const icon = document.createElement('span');
+    icon.className = 'nt-hl-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    icon.textContent = iconMap[kind] || '';
+    mark.appendChild(icon);
+    return mark;
+  }
+
+  // Last valid caret/selection range inside the notes body. Kept in
+  // sync via a document-level selectionchange listener so a highlight
+  // click after the user tabbed through other toolbar controls (color
+  // input, heading dropdown, etc.) can still recover the intended
+  // selection instead of snapping to end-of-body.
+  let _lastValidNotesRange = null;
+  let _notesSelectionTracked = false;
+  function _startTrackingNotesSelection() {
+    if (_notesSelectionTracked) return;
+    _notesSelectionTracked = true;
+    document.addEventListener('selectionchange', () => {
+      const body = $('#notesBody');
+      if (!body) return;
+      const sel = document.getSelection();
+      if (!sel || !sel.rangeCount) return;
+      const r = sel.getRangeAt(0);
+      const anchor = r.commonAncestorContainer;
+      if (anchor === body || body.contains(anchor)) {
+        _lastValidNotesRange = r.cloneRange();
+      }
     });
+  }
+
+  // Resolve the range to apply a highlight against. Prefers the live
+  // selection when it sits inside notesBody; otherwise falls back to
+  // the last tracked range; finally defaults to a caret at end-of-body.
+  // Always leaves the browser selection reflecting the chosen range,
+  // with focus on notesBody.
+  function _resolveNotesRange(body) {
+    const sel = window.getSelection();
+    let range = null;
+    if (sel && sel.rangeCount) {
+      const r0 = sel.getRangeAt(0);
+      const anchor = r0.commonAncestorContainer;
+      if (anchor === body || body.contains(anchor)) range = r0.cloneRange();
+    }
+    if (!range && _lastValidNotesRange) {
+      // Validate the cached range is still in the tree.
+      const anchor = _lastValidNotesRange.commonAncestorContainer;
+      if (anchor === body || body.contains(anchor)) {
+        range = _lastValidNotesRange.cloneRange();
+      }
+    }
+    if (!range) {
+      let host = body.lastElementChild;
+      if (!host) { host = document.createElement('p'); body.appendChild(host); }
+      range = document.createRange();
+      range.selectNodeContents(host);
+      range.collapse(false);
+    }
+    body.focus();
+    if (sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    return range;
+  }
+
+  // Apply the ok / warn / bad / clear highlight to the current notes
+  // selection. Robust across:
+  //   - selection lost between clicks in the toolbar
+  //   - selections spanning multiple blocks (split per-block)
+  //   - selections partially overlapping existing highlights
+  //   - keyboard-activated buttons (Tab + Enter/Space)
+  function applyNotesHighlight(kind) {
+    const body = $('#notesBody');
+    if (!body) return;
+    const range = _resolveNotesRange(body);
+    if (!range) return;
+    const sel = window.getSelection();
+    if (kind === 'clear') {
+      _unhighlightRange(body, range);
+      _lastValidNotesRange = range.cloneRange();
+      scheduleNotesSave();
+      return;
+    }
+    if (range.collapsed) {
+      const mark = _createHighlightMark(kind, true);
+      range.insertNode(mark);
+      const after = document.createRange();
+      after.setStartAfter(mark);
+      after.collapse(true);
+      if (sel) { sel.removeAllRanges(); sel.addRange(after); }
+      _lastValidNotesRange = after.cloneRange();
+      scheduleNotesSave();
+      return;
+    }
+    const subRanges = _splitNotesRangeByBlocks(body, range);
+    const marks = [];
+    for (const sub of subRanges) {
+      if (sub.collapsed) continue;
+      // If either endpoint sits inside an existing highlight, expand
+      // that endpoint to just outside the mark. This turns a partial or
+      // fully-contained overlap into a clean fully-enclosing overlap,
+      // so extractContents pulls the whole old mark into the fragment
+      // where _stripHighlightMarksIn can unwrap it — instead of leaving
+      // an emptied wrapper behind or inserting the new mark INSIDE the
+      // old one.
+      _expandRangeAcrossMarks(sub, body);
+      // Extract FIRST so the live range's boundaries remain valid
+      // through any subsequent unwrapping — then strip nested marks
+      // out of the detached fragment.
+      const contents = sub.extractContents();
+      _stripHighlightMarksIn(contents);
+      // If the resulting fragment is empty (whitespace only), skip.
+      if (!contents.hasChildNodes()) continue;
+      const mark = _createHighlightMark(kind, false);
+      const textSpan = document.createElement('span');
+      textSpan.className = 'nt-hl-text';
+      textSpan.appendChild(contents);
+      mark.appendChild(textSpan);
+      sub.insertNode(mark);
+      marks.push(mark);
+    }
+    // Sweep empty leftover marks. When the caller range starts or ends
+    // INSIDE an existing mark, extractContents leaves that mark behind
+    // with an empty .nt-hl-text (the content moved into the extracted
+    // fragment). The stranded icon renders as a stray ✓ / ⚠ / ✕ next
+    // to the new highlight, so drop those wrappers entirely.
+    body.querySelectorAll('mark.nt-hl').forEach((m) => {
+      if (m.classList.contains('nt-hl-solo')) return;
+      const textSpan = m.querySelector(':scope > .nt-hl-text');
+      if (!textSpan) return;
+      if (textSpan.hasChildNodes() && textSpan.textContent.length > 0) return;
+      m.remove();
+    });
+    if (marks.length) {
+      const after = document.createRange();
+      after.setStartAfter(marks[marks.length - 1]);
+      after.collapse(true);
+      if (sel) { sel.removeAllRanges(); sel.addRange(after); }
+      _lastValidNotesRange = after.cloneRange();
+    }
+    scheduleNotesSave();
   }
 
   function scheduleNotesSave() {
@@ -29915,88 +30152,30 @@ body.notes-fullscreen { overflow: hidden; }
 
     // Semantic highlight buttons — wrap the current selection in a
     // <mark> chip with an icon so the annotation reads as "warning /
-    // success / failure" not just a background colour. Round-trip via
-    // execCommand so undo/redo captures the change.
-    // Clamp a range so it lives inside a block child of notesBody
-    // instead of directly at body level. Without this, clicking a
-    // highlight button without a prior caret in a paragraph would
-    // insert the <mark> as a sibling of <p> (dirty contenteditable
-    // HTML the browser wouldn't otherwise produce).
-    function _normalizeNotesRange(body, sel) {
-      let range = (sel && sel.rangeCount) ? sel.getRangeAt(0) : null;
-      const insideBody = range && body.contains(range.commonAncestorContainer);
-      if (!insideBody || range.startContainer === body) {
-        // Ensure there's a block child to host the mark.
-        let host = body.lastElementChild;
-        if (!host) { host = document.createElement('p'); body.appendChild(host); }
-        // If the range collapsed at a body-level offset, prefer the
-        // child right at that offset (or the last one) — otherwise
-        // land at the end of the last block.
-        if (insideBody && range.collapsed) {
-          const idx = range.startOffset;
-          const candidate = body.childNodes[idx - 1] || body.childNodes[idx] || host;
-          if (candidate && candidate.nodeType === 1) host = candidate;
-        }
-        range = document.createRange();
-        range.selectNodeContents(host);
-        range.collapse(false);
-        sel.removeAllRanges();
-        sel.addRange(range);
-      }
-      return range;
-    }
-    panel.querySelectorAll('.notes-toolbar [data-hl]').forEach((btn) => {
-      btn.addEventListener('mousedown', (e) => {
+    // success / failure" not just a background colour.
+    //
+    // Wired via event delegation on the toolbar so re-entrant wire-up
+    // never doubles the listener. mousedown preventDefault preserves
+    // the notes selection when clicking the button; click fires for
+    // both mouse and keyboard activation (Tab + Enter/Space). The
+    // actual selection resolution happens inside applyNotesHighlight,
+    // which also falls back to the tracked last-valid range if the
+    // caret was lost to another toolbar control before this click.
+    _startTrackingNotesSelection();
+    const toolbar = panel.querySelector('.notes-toolbar');
+    if (toolbar) {
+      toolbar.addEventListener('mousedown', (e) => {
+        const btn = e.target.closest?.('[data-hl]');
+        if (!btn) return;
         e.preventDefault();
-        const kind = btn.dataset.hl;
-        const body = $('#notesBody');
-        if (!body) return;
-        body.focus();
-        const sel = window.getSelection();
-        if (!sel) return;
-        const range = _normalizeNotesRange(body, sel);
-        if (!range) return;
-        if (kind === 'clear') {
-          // Unwrap any <mark class="nt-hl"> that intersects the selection.
-          _unhighlightRange(body, range);
-          scheduleNotesSave();
-          return;
-        }
-        const iconMap = { ok: '✓', warn: '⚠', bad: '✕' };
-        const label   = { ok: 'success', warn: 'warning', bad: 'failure' }[kind] || kind;
-        const mark = document.createElement('mark');
-        mark.className = `nt-hl nt-hl-${kind}${range.collapsed ? ' nt-hl-solo' : ''}`;
-        mark.setAttribute('data-hl', kind);
-        mark.setAttribute('title', label);
-        const icon = document.createElement('span');
-        icon.className = 'nt-hl-icon';
-        icon.setAttribute('aria-hidden', 'true');
-        icon.textContent = iconMap[kind] || '';
-        mark.appendChild(icon);
-        if (range.collapsed) {
-          // No selection → drop just the semantic icon at the caret.
-          range.insertNode(mark);
-        } else {
-          // Wrap the selection: unwrap any pre-existing highlight so
-          // classes don't stack, then wrap in a fresh <mark> containing
-          // the icon and a .nt-hl-text span with the extracted contents.
-          _unhighlightRange(body, range);
-          const contents = range.extractContents();
-          const text = document.createElement('span');
-          text.className = 'nt-hl-text';
-          text.appendChild(contents);
-          mark.appendChild(text);
-          range.insertNode(mark);
-        }
-        // Move the caret to after the inserted mark and clear the selection.
-        sel.removeAllRanges();
-        const after = document.createRange();
-        after.setStartAfter(mark);
-        after.collapse(true);
-        sel.addRange(after);
-        scheduleNotesSave();
       });
-    });
+      toolbar.addEventListener('click', (e) => {
+        const btn = e.target.closest?.('[data-hl]');
+        if (!btn) return;
+        e.preventDefault();
+        applyNotesHighlight(btn.dataset.hl);
+      });
+    }
 
     // Drag-to-resize on the panel's left edge
     const handle = $('#notesResize');
