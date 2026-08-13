@@ -3373,7 +3373,8 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .pln-lg-margin.bad { color: var(--bad); font-weight: 700; font-size: 13px; }
 .planner-scroll {
   overflow: auto;
-  max-height: calc(100vh - 240px);
+  max-height: calc(100vh - 480px);
+  min-height: 240px;
 }
 .planner-axis {
   position: sticky; top: 0; z-index: 3;
@@ -3528,11 +3529,11 @@ body.is-card-dragging * { cursor: grabbing !important; }
   stroke-width: 2 !important;
 }
 
-/* Bottom half — the workload chart. Sticks to the bottom of the
-   planner-scroll container so the total-capacity view is always
-   visible while the Gantt above scrolls vertically. Horizontally
-   the element still scrolls with the timeline, keeping the axis
-   aligned. */
+/* Bottom half — the workload chart. Lives in its own horizontal
+   scroll pane below the Gantt (.planner-workload-scroll), so the
+   total-capacity view is always visible without ever floating over
+   the Gantt rows. Horizontal scroll is JS-synced with the Gantt so
+   the timeline stays aligned. */
 .planner-workload {
   border-top: 1px solid var(--line);
   background: var(--bg-1);
@@ -3544,10 +3545,12 @@ body.is-card-dragging * { cursor: grabbing !important; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  box-shadow: 0 -6px 12px -8px rgba(0,0,0,.55);
+}
+.planner-workload-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
 }
 .planner-workload .pln-wl-head,
 .planner-workload .pln-wl-legend { padding: 0 14px; }
@@ -9973,11 +9976,20 @@ body.notes-fullscreen { overflow: hidden; }
 .view.pln-embedded > * { max-width: 100%; min-width: 0; }
 .view.pln-embedded .planner-scroll {
   max-width: 100%;
-  max-height: 420px;
+  max-height: 300px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-top-left-radius: var(--radius-sm);
+  border-top-right-radius: var(--radius-sm);
+  border-bottom: 0;
   background: var(--bg-1);
+}
+.view.pln-embedded .planner-workload-scroll {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-bottom-left-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
 }
 .view.pln-embedded .planner-axis   { z-index: 1; }
 .view.pln-embedded .pln-row-label  { z-index: 1; }

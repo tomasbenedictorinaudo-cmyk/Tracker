@@ -24124,6 +24124,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // person's timeline.
     if (person) {
       const scroll = view.querySelector('#plnScroll');
+      const wlScroll = view.querySelector('#plnWorkloadScroll');
       const sig = JSON.stringify({ p: s.personId, sc: s.scope, z: s.zoomStep, hd: s.hideDone });
       if (scroll && s.lastAutoScrollSig !== sig) {
         const dayW = parseFloat(scroll.dataset.dayW) || 8;
@@ -24132,7 +24133,29 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         const todayX = ((todayMs - winStartMs) / dayMs) * dayW;
         const target = Math.max(0, todayX - scroll.clientWidth / 2 + 120);
         scroll.scrollLeft = target;
+        if (wlScroll) wlScroll.scrollLeft = target;
         s.lastAutoScrollSig = sig;
+      }
+      // Horizontal scroll sync — the Gantt (top) and the workload chart
+      // (bottom) live in separate scroll containers so the workload can
+      // stay visible while the Gantt scrolls vertically. Keep their
+      // scrollLeft locked so the timeline stays aligned.
+      if (scroll && wlScroll) {
+        let syncing = false;
+        scroll.addEventListener('scroll', () => {
+          if (syncing) return;
+          if (wlScroll.scrollLeft === scroll.scrollLeft) return;
+          syncing = true;
+          wlScroll.scrollLeft = scroll.scrollLeft;
+          syncing = false;
+        });
+        wlScroll.addEventListener('scroll', () => {
+          if (syncing) return;
+          if (scroll.scrollLeft === wlScroll.scrollLeft) return;
+          syncing = true;
+          scroll.scrollLeft = wlScroll.scrollLeft;
+          syncing = false;
+        });
       }
     }
 
@@ -24773,6 +24796,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             </svg>
             <div class="planner-rows">${rowsHTML}</div>
           </div>
+        </div>
+        <div class="planner-workload-scroll" id="plnWorkloadScroll">
           ${_plannerWorkloadHTML(items, bars, winStart, winEnd, dayW, weeklyCapHours, person, capacityPct)}
         </div>
       </div>
@@ -24946,9 +24971,13 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const capBadgeCls = weekTotals.some((t) => t > capHours * 1.5) ? 'bad'
       : weekTotals.some((t) => t > capHours) ? 'warn' : '';
 
+    // Total block width matches the Gantt grid width so both scroll
+    // containers share the same scrollWidth — the horizontal scroll
+    // sync between them then maps 1:1.
+    const blockW = LABEL_COL_W + LABEL_GAP + chartW;
     return `
-      <div class="planner-workload" id="plnWorkload" data-cap-hours="${capHours}">
-        <div class="pln-wl-head">
+      <div class="planner-workload" id="plnWorkload" data-cap-hours="${capHours}" style="width:${blockW}px">
+        <div class="pln-wl-head" style="width:${blockW}px">
           <div>
             <span class="pln-wl-title">Weekly workload</span>
             <span class="pln-wl-sub">stacked hours per week · dashed line = capacity</span>
@@ -24964,7 +24993,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             ${capLine}
           </svg>
         </div>
-        <div class="pln-wl-legend">${legend}${legendMore}</div>
+        <div class="pln-wl-legend" style="width:${blockW}px">${legend}${legendMore}</div>
       </div>
     `;
   }

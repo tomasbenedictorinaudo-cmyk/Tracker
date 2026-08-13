@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T14:41:29.166Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T14:50:02.466Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -3382,7 +3382,8 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .pln-lg-margin.bad { color: var(--bad); font-weight: 700; font-size: 13px; }
 .planner-scroll {
   overflow: auto;
-  max-height: calc(100vh - 240px);
+  max-height: calc(100vh - 480px);
+  min-height: 240px;
 }
 .planner-axis {
   position: sticky; top: 0; z-index: 3;
@@ -3537,11 +3538,11 @@ body.is-card-dragging * { cursor: grabbing !important; }
   stroke-width: 2 !important;
 }
 
-/* Bottom half — the workload chart. Sticks to the bottom of the
-   planner-scroll container so the total-capacity view is always
-   visible while the Gantt above scrolls vertically. Horizontally
-   the element still scrolls with the timeline, keeping the axis
-   aligned. */
+/* Bottom half — the workload chart. Lives in its own horizontal
+   scroll pane below the Gantt (.planner-workload-scroll), so the
+   total-capacity view is always visible without ever floating over
+   the Gantt rows. Horizontal scroll is JS-synced with the Gantt so
+   the timeline stays aligned. */
 .planner-workload {
   border-top: 1px solid var(--line);
   background: var(--bg-1);
@@ -3553,10 +3554,12 @@ body.is-card-dragging * { cursor: grabbing !important; }
   display: flex;
   flex-direction: column;
   gap: 6px;
-  position: sticky;
-  bottom: 0;
-  z-index: 4;
-  box-shadow: 0 -6px 12px -8px rgba(0,0,0,.55);
+}
+.planner-workload-scroll {
+  overflow-x: auto;
+  overflow-y: hidden;
+  background: var(--bg-1);
+  border-top: 1px solid var(--line);
 }
 .planner-workload .pln-wl-head,
 .planner-workload .pln-wl-legend { padding: 0 14px; }
@@ -9982,11 +9985,20 @@ body.notes-fullscreen { overflow: hidden; }
 .view.pln-embedded > * { max-width: 100%; min-width: 0; }
 .view.pln-embedded .planner-scroll {
   max-width: 100%;
-  max-height: 420px;
+  max-height: 300px;
   overflow: auto;
   border: 1px solid var(--line);
-  border-radius: var(--radius-sm);
+  border-top-left-radius: var(--radius-sm);
+  border-top-right-radius: var(--radius-sm);
+  border-bottom: 0;
   background: var(--bg-1);
+}
+.view.pln-embedded .planner-workload-scroll {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-bottom-left-radius: var(--radius-sm);
+  border-bottom-right-radius: var(--radius-sm);
 }
 .view.pln-embedded .planner-axis   { z-index: 1; }
 .view.pln-embedded .pln-row-label  { z-index: 1; }
@@ -34799,6 +34811,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // person's timeline.
     if (person) {
       const scroll = view.querySelector('#plnScroll');
+      const wlScroll = view.querySelector('#plnWorkloadScroll');
       const sig = JSON.stringify({ p: s.personId, sc: s.scope, z: s.zoomStep, hd: s.hideDone });
       if (scroll && s.lastAutoScrollSig !== sig) {
         const dayW = parseFloat(scroll.dataset.dayW) || 8;
@@ -34807,7 +34820,29 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
         const todayX = ((todayMs - winStartMs) / dayMs) * dayW;
         const target = Math.max(0, todayX - scroll.clientWidth / 2 + 120);
         scroll.scrollLeft = target;
+        if (wlScroll) wlScroll.scrollLeft = target;
         s.lastAutoScrollSig = sig;
+      }
+      // Horizontal scroll sync — the Gantt (top) and the workload chart
+      // (bottom) live in separate scroll containers so the workload can
+      // stay visible while the Gantt scrolls vertically. Keep their
+      // scrollLeft locked so the timeline stays aligned.
+      if (scroll && wlScroll) {
+        let syncing = false;
+        scroll.addEventListener('scroll', () => {
+          if (syncing) return;
+          if (wlScroll.scrollLeft === scroll.scrollLeft) return;
+          syncing = true;
+          wlScroll.scrollLeft = scroll.scrollLeft;
+          syncing = false;
+        });
+        wlScroll.addEventListener('scroll', () => {
+          if (syncing) return;
+          if (scroll.scrollLeft === wlScroll.scrollLeft) return;
+          syncing = true;
+          scroll.scrollLeft = wlScroll.scrollLeft;
+          syncing = false;
+        });
       }
     }
 
@@ -35448,6 +35483,8 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             </svg>
             <div class="planner-rows">${rowsHTML}</div>
           </div>
+        </div>
+        <div class="planner-workload-scroll" id="plnWorkloadScroll">
           ${_plannerWorkloadHTML(items, bars, winStart, winEnd, dayW, weeklyCapHours, person, capacityPct)}
         </div>
       </div>
@@ -35621,9 +35658,13 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const capBadgeCls = weekTotals.some((t) => t > capHours * 1.5) ? 'bad'
       : weekTotals.some((t) => t > capHours) ? 'warn' : '';
 
+    // Total block width matches the Gantt grid width so both scroll
+    // containers share the same scrollWidth — the horizontal scroll
+    // sync between them then maps 1:1.
+    const blockW = LABEL_COL_W + LABEL_GAP + chartW;
     return `
-      <div class="planner-workload" id="plnWorkload" data-cap-hours="${capHours}">
-        <div class="pln-wl-head">
+      <div class="planner-workload" id="plnWorkload" data-cap-hours="${capHours}" style="width:${blockW}px">
+        <div class="pln-wl-head" style="width:${blockW}px">
           <div>
             <span class="pln-wl-title">Weekly workload</span>
             <span class="pln-wl-sub">stacked hours per week · dashed line = capacity</span>
@@ -35639,7 +35680,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
             ${capLine}
           </svg>
         </div>
-        <div class="pln-wl-legend">${legend}${legendMore}</div>
+        <div class="pln-wl-legend" style="width:${blockW}px">${legend}${legendMore}</div>
       </div>
     `;
   }
