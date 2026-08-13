@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T10:41:22.021Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T10:57:17.018Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -8366,7 +8366,13 @@ kbd {
   width: 460px; max-width: 96vw;
   display: flex; flex-direction: column;
   box-shadow: var(--shadow);
+  transition: width var(--transition);
 }
+/* Full-screen dashboard — widens the drawer to the entire viewport
+   so the reviews section has room to breathe. Toggled by
+   #dashFullscreen; Esc / × still closes as normal. */
+#drawer.is-fullscreen .drawer { width: 100vw; max-width: 100vw; }
+#drawer.is-fullscreen .drawer-body { padding: 20px 32px; }
 .drawer-head {
   display: flex; align-items: center;
   padding: 12px 14px;
@@ -9797,12 +9803,202 @@ body.notes-fullscreen { overflow: hidden; }
   box-shadow: var(--shadow);
 }
 
+/* ── Development reviews — person dashboard ─────────────────────
+   Dated snapshots collected during 1:1s. Chip bar of dates on top,
+   rich-text form below. Compare mode swaps the form for a two-
+   column diff view. */
+.dev-rv-toolbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.dev-rv-dates {
+  display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0;
+}
+.dev-rv-chip {
+  padding: 4px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.dev-rv-chip:hover { border-color: var(--accent); }
+.dev-rv-chip.active {
+  background: rgba(96, 165, 250, .22);
+  border-color: var(--accent);
+  color: rgba(191, 219, 254, 1);
+  font-weight: 600;
+}
+.dev-rv-chip.compare {
+  background: rgba(251, 191, 36, .18);
+  border-color: var(--warn);
+  color: rgba(254, 240, 138, 1);
+}
+.dev-rv-cmp-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0,0,0,.35);
+  letter-spacing: .04em;
+}
+.dev-rv-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.dev-rv-actions .ghost.active {
+  background: rgba(96, 165, 250, .18);
+  border-color: var(--accent);
+  color: rgba(191, 219, 254, 1);
+}
+.dev-rv-body { display: flex; flex-direction: column; gap: 12px; }
+.dev-rv-meta {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.dev-rv-meta input[type="date"] {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.dev-rv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+.dev-rv-field { display: flex; flex-direction: column; gap: 4px; }
+.dev-rv-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.dev-rv-actions-field { grid-column: 1 / -1; }
+.dev-rv-act-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.dev-rv-act-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  font-size: 12px;
+}
+.dev-rv-act-row:hover { border-color: var(--accent); }
+.dev-rv-act-status {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+.dev-rv-act-status.status-todo    { background: rgba(148, 163, 184, .70); }
+.dev-rv-act-status.status-doing   { background: rgba(96, 165, 250, .90); }
+.dev-rv-act-status.status-blocked { background: var(--warn); }
+.dev-rv-act-status.status-done    { background: var(--ok); }
+.dev-rv-act-status.status-cancelled { background: var(--bad); }
+.dev-rv-act-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-rv-act-meta { color: var(--text-faint); font-size: 11px; flex-shrink: 0; }
+.dev-rv-act-unlink { padding: 0 6px; }
+.dev-rv-act-controls { display: flex; gap: 6px; }
+.dev-rv-footer {
+  display: flex; align-items: center; gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+/* Compare mode — three-column grid: label + date-A + date-B. */
+.dev-rv-cmp-head, .dev-rv-cmp-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 1fr;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.dev-rv-cmp-head {
+  font-size: 11px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--line);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.dev-rv-cmp-date { font-weight: 700; color: var(--text); }
+.dev-rv-cmp-grid { display: flex; flex-direction: column; }
+.dev-rv-cmp-row {
+  border-bottom: 1px solid rgba(148, 163, 184, .10);
+  align-items: start;
+}
+.dev-rv-cmp-row.differs { background: rgba(251, 191, 36, .06); }
+.dev-rv-cmp-lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  display: flex; align-items: center; gap: 6px;
+}
+.dev-rv-cmp-row.differs .dev-rv-cmp-lbl { color: var(--warn); }
+.dev-rv-cell {
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  min-height: 24px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.dev-rv-cmp-row.differs .dev-rv-cell {
+  border-color: rgba(251, 191, 36, .35);
+  background: rgba(251, 191, 36, .04);
+}
+
+/* SWOT modal — 2x2 quadrant. */
+.swot-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.swot-q {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  min-height: 140px;
+}
+.swot-q-title {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
+}
+.swot-q-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.swot-ok   { background: rgba(74, 222, 128, .08);  border-color: rgba(74, 222, 128, .35);  }
+.swot-warn { background: rgba(251, 191, 36, .08); border-color: rgba(251, 191, 36, .35); }
+.swot-info { background: rgba(96, 165, 250, .08); border-color: rgba(96, 165, 250, .35); }
+.swot-bad  { background: rgba(248, 113, 121, .08); border-color: rgba(248, 113, 121, .35); }
+.swot-ok   .swot-q-title { color: var(--ok);   border-bottom-color: rgba(74, 222, 128, .30); }
+.swot-warn .swot-q-title { color: var(--warn); border-bottom-color: rgba(251, 191, 36, .30); }
+.swot-info .swot-q-title { color: rgba(147, 197, 253, 1); border-bottom-color: rgba(96, 165, 250, .30); }
+.swot-bad  .swot-q-title { color: var(--bad);  border-bottom-color: rgba(248, 113, 121, .30); }
+
 /* Responsive */
 @media (max-width: 900px) {
   .filters { display: none; }
   .board { grid-template-columns: repeat(2, 1fr); }
   .dashboard { grid-template-columns: repeat(2, 1fr); }
   .panel.half, .panel { grid-column: span 2; }
+  .dev-rv-cmp-head, .dev-rv-cmp-row { grid-template-columns: 100px 1fr 1fr; }
+  .swot-grid { grid-template-columns: 1fr; }
 }
 
   </style>
@@ -24127,6 +24323,8 @@ body.notes-fullscreen { overflow: hidden; }
           <div class="dash-head-actions">
             <button class="ghost" id="dashEdit">Edit person…</button>
             <button class="ghost" id="dashFilter">Filter Register to ${escapeHTML(p.name)}</button>
+            <button class="ghost" id="dashSwot" title="Generate SWOT view from the current development review">⊞ SWOT</button>
+            <button class="ghost" id="dashFullscreen" title="Toggle full-screen (Esc to exit)">⛶ Fullscreen</button>
           </div>
         </div>
       </div>
@@ -24176,6 +24374,21 @@ body.notes-fullscreen { overflow: hidden; }
           </div>` : ''}
         </div>`;
       })()}
+      <div class="dash-section" id="dashReviewsWrap">
+        <div class="dash-section-title">
+          Development reviews
+          <span class="dash-section-count">${(p.reviews || []).length} on record</span>
+        </div>
+        <div class="dev-rv-toolbar">
+          <div class="dev-rv-dates" id="devRvDates"></div>
+          <div class="dev-rv-actions">
+            <button class="ghost" id="devRvNew" title="Start a new dated review">+ New review</button>
+            <button class="ghost" id="devRvCompare" title="Show any two reviews side-by-side with differences highlighted">⇄ Compare</button>
+            <button class="ghost" id="devRvDelete" title="Delete the currently selected review" style="color: var(--bad);">Delete</button>
+          </div>
+        </div>
+        <div id="devRvBody" class="dev-rv-body"></div>
+      </div>
       ${listOrEmpty('Late actions', late.length,
         late.slice(0, 12).map(({ a, pr }) => `
           <div class="dash-row clickable" data-action-id="${a.id}">
@@ -24227,6 +24440,376 @@ body.notes-fullscreen { overflow: hidden; }
         openRiskEditor(row.dataset.riskId);
       });
     });
+    // Fullscreen toggle — adds .is-fullscreen to the drawer overlay so
+    // CSS overrides the fixed drawer width. Esc still closes the
+    // drawer (browser-native contract for the ×).
+    $('#dashFullscreen')?.addEventListener('click', () => {
+      const overlay = $('#drawer');
+      overlay?.classList.toggle('is-fullscreen');
+      const on = overlay?.classList.contains('is-fullscreen');
+      $('#dashFullscreen').textContent = on ? '↙ Exit fullscreen' : '⛶ Fullscreen';
+    });
+    // SWOT view — opens a modal built from the currently-selected
+    // review. Falls back to a message if no review exists.
+    $('#dashSwot')?.addEventListener('click', () => openSwotForPerson(p.id));
+    // Development reviews controller. Keeps a local `selected` id
+    // pointing at the review currently in the editor. Re-renders on
+    // any mutation. Compare mode swaps in a two-column view.
+    const rvState = { selectedId: (p.reviews || [])[0]?.id || null, compareId: null };
+    renderDevReviewChrome();
+    renderDevReviewBody();
+    function renderDevReviewChrome() {
+      const bar = $('#devRvDates'); if (!bar) return;
+      const reviews = p.reviews || [];
+      if (!reviews.length) {
+        bar.innerHTML = '<span class="muted" style="font-size:12px;">No reviews yet — click <b>+ New review</b> to add one.</span>';
+        return;
+      }
+      bar.innerHTML = reviews.map((r) => `
+        <button type="button" class="dev-rv-chip${r.id === rvState.selectedId ? ' active' : ''}${r.id === rvState.compareId ? ' compare' : ''}" data-rv-id="${escapeHTML(r.id)}" title="${escapeHTML(r.date)} — updated ${escapeHTML(r.updatedAt || r.date)}">
+          <span>${escapeHTML(r.date)}</span>
+          ${r.id === rvState.compareId ? '<span class="dev-rv-cmp-tag">compare</span>' : ''}
+        </button>`).join('');
+      bar.querySelectorAll('.dev-rv-chip').forEach((el) => {
+        el.addEventListener('click', () => {
+          if (rvState.compareMode) {
+            // In compare mode, clicking sets the second date
+            if (el.dataset.rvId === rvState.selectedId) return;
+            rvState.compareId = el.dataset.rvId;
+          } else {
+            rvState.selectedId = el.dataset.rvId;
+          }
+          renderDevReviewChrome();
+          renderDevReviewBody();
+        });
+      });
+    }
+    function renderDevReviewBody() {
+      const host = $('#devRvBody'); if (!host) return;
+      const reviews = p.reviews || [];
+      if (!reviews.length) {
+        host.innerHTML = '<div class="empty" style="padding:24px; text-align:center;">Start a dated review to capture role, salary, strengths, growth areas, motivations, and career goals. Reviews are per-person, snapshot-in-time, and can be compared side-by-side.</div>';
+        return;
+      }
+      const rv = reviews.find((r) => r.id === rvState.selectedId) || reviews[0];
+      if (!rv) return;
+      if (rvState.compareMode && rvState.compareId && rvState.compareId !== rv.id) {
+        const rv2 = reviews.find((r) => r.id === rvState.compareId);
+        host.innerHTML = renderDevReviewCompare(rv, rv2, p);
+        wireDevReviewCompare(host, p, rv, rv2);
+      } else {
+        host.innerHTML = renderDevReviewForm(rv, p);
+        wireDevReviewForm(host, p, rv);
+      }
+    }
+    $('#devRvNew')?.addEventListener('click', () => devRvNewReview(p));
+    $('#devRvCompare')?.addEventListener('click', () => {
+      rvState.compareMode = !rvState.compareMode;
+      const btn = $('#devRvCompare');
+      if (btn) btn.classList.toggle('active', !!rvState.compareMode);
+      if (rvState.compareMode) {
+        // Pre-pick the second-most-recent as the comparison partner
+        const reviews = p.reviews || [];
+        const others = reviews.filter((r) => r.id !== rvState.selectedId);
+        rvState.compareId = others[0]?.id || null;
+      } else {
+        rvState.compareId = null;
+      }
+      renderDevReviewChrome();
+      renderDevReviewBody();
+    });
+    $('#devRvDelete')?.addEventListener('click', () => {
+      const rv = (p.reviews || []).find((r) => r.id === rvState.selectedId);
+      if (!rv) return;
+      if (!confirm(`Delete the review from ${rv.date}? This cannot be undone (except via Undo).`)) return;
+      p.reviews = (p.reviews || []).filter((r) => r.id !== rv.id);
+      rvState.selectedId = (p.reviews[0] || {}).id || null;
+      commit('review-delete');
+      openPersonDashboard(personId);
+    });
+    function devRvNewReview(person) {
+      const reviews = person.reviews || [];
+      const today = todayISO();
+      // If a review already exists for today, just select it.
+      const existing = reviews.find((r) => r.date === today);
+      if (existing) {
+        rvState.selectedId = existing.id;
+        renderDevReviewChrome();
+        renderDevReviewBody();
+        return;
+      }
+      const latest = reviews[0];
+      let copyLatest = false;
+      if (latest) {
+        copyLatest = confirm(`Start today's review from the ${latest.date} entry?\n\n[OK] copy the latest review as a starting point\n[Cancel] start with a blank review`);
+      }
+      const fresh = {
+        id: uid('rev'),
+        date: today,
+        role: copyLatest ? latest.role : '',
+        position: copyLatest ? latest.position : '',
+        salary: copyLatest ? latest.salary : '',
+        strengths: copyLatest ? latest.strengths : '',
+        growthAreas: copyLatest ? latest.growthAreas : '',
+        motivations: copyLatest ? latest.motivations : '',
+        frustrations: copyLatest ? latest.frustrations : '',
+        careerGoals: copyLatest ? latest.careerGoals : '',
+        supportNeeded: copyLatest ? latest.supportNeeded : '',
+        observations: copyLatest ? latest.observations : '',
+        notes: '',
+        actionIds: copyLatest ? latest.actionIds.slice() : [],
+        createdAt: today,
+        updatedAt: today,
+      };
+      person.reviews = [fresh, ...reviews];
+      rvState.selectedId = fresh.id;
+      commit('review-add');
+      openPersonDashboard(personId);
+    }
+  }
+
+  // ── Development reviews — helpers ─────────────────────────────
+  // Field descriptors drive both the single-review form and the
+  // side-by-side comparison layout so both stay in sync.
+  const DEV_REVIEW_FIELDS = [
+    { key: 'role',          label: 'Current role' },
+    { key: 'position',      label: 'Position' },
+    { key: 'salary',        label: 'Salary' },
+    { key: 'strengths',     label: 'Strengths' },
+    { key: 'growthAreas',   label: 'Growth areas' },
+    { key: 'motivations',   label: 'Motivations' },
+    { key: 'frustrations',  label: 'Frustrations' },
+    { key: 'careerGoals',   label: 'Career goals' },
+    { key: 'supportNeeded', label: 'Support needed' },
+    { key: 'observations',  label: 'Observations' },
+    { key: 'notes',         label: 'Free notes' },
+  ];
+  function renderDevReviewForm(rv, p) {
+    const fields = DEV_REVIEW_FIELDS.map((f) => `
+      <div class="dev-rv-field">
+        <label class="dev-rv-lbl">${escapeHTML(f.label)}</label>
+        ${ceComposeHTML({ id: `devRv_${f.key}`, value: rv[f.key], placeholder: `${f.label}…`, style: 'min-height:60px;' })}
+      </div>`).join('');
+    const linked = collectLinkedActions(rv);
+    const linkedHtml = linked.length ? linked.map(({ a, pr }) => `
+      <div class="dev-rv-act-row" data-action-id="${escapeHTML(a.id)}">
+        <span class="dev-rv-act-status status-${escapeHTML(a.status)}" title="${escapeHTML(a.status)}"></span>
+        <span class="dev-rv-act-title">${escapeHTML(a.title)}</span>
+        <span class="dev-rv-act-meta">${escapeHTML(pr?.name || '')}${a.due ? ' · due ' + escapeHTML(a.due) : ''}</span>
+        <button type="button" class="icon-btn dev-rv-act-unlink" data-action-id="${escapeHTML(a.id)}" title="Unlink">×</button>
+      </div>`).join('') : '<div class="muted" style="font-size:12px;">No development actions linked yet.</div>';
+    return `
+      <div class="dev-rv-meta">
+        <label class="dev-rv-lbl">Date</label>
+        <input type="date" id="devRvDate" value="${escapeHTML(rv.date)}" />
+        <span class="muted" style="font-size:11px;">Last updated ${escapeHTML(rv.updatedAt || rv.date)}</span>
+      </div>
+      <div class="dev-rv-grid">${fields}</div>
+      <div class="dev-rv-field dev-rv-actions-field">
+        <label class="dev-rv-lbl">Development actions <span class="muted">— linked to the actions register</span></label>
+        <div class="dev-rv-act-list" id="devRvActList">${linkedHtml}</div>
+        <div class="dev-rv-act-controls">
+          <button type="button" class="ghost" id="devRvActLink">+ Link existing action…</button>
+          <button type="button" class="ghost" id="devRvActNew">+ New action for ${escapeHTML(p.name)}</button>
+        </div>
+      </div>
+      <div class="dev-rv-footer">
+        <button type="button" class="primary" id="devRvSave">Save</button>
+        <span class="muted" style="font-size:11px;" id="devRvSaved"></span>
+      </div>`;
+  }
+  function collectLinkedActions(rv) {
+    const out = [];
+    (rv.actionIds || []).forEach((id) => {
+      state.projects.forEach((pr) => {
+        const a = (pr.actions || []).find((x) => x.id === id);
+        if (a) out.push({ a, pr });
+      });
+    });
+    return out;
+  }
+  function wireDevReviewForm(host, p, rv) {
+    host.querySelector('#devRvSave')?.addEventListener('click', () => devRvCommit(host, p, rv, false));
+    // Autosave on blur to reduce risk of losing edits when the user
+    // clicks elsewhere without hitting Save.
+    host.querySelectorAll('.ce-compose').forEach((el) => {
+      el.addEventListener('blur', () => devRvCommit(host, p, rv, true));
+    });
+    host.querySelector('#devRvDate')?.addEventListener('change', () => devRvCommit(host, p, rv, true));
+    // Linked actions — unlink / link / create.
+    host.querySelectorAll('.dev-rv-act-unlink').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        rv.actionIds = (rv.actionIds || []).filter((id) => id !== btn.dataset.actionId);
+        rv.updatedAt = todayISO();
+        commit('review-unlink');
+        openPersonDashboard(p.id);
+      });
+    });
+    host.querySelectorAll('.dev-rv-act-row').forEach((row) => {
+      row.addEventListener('click', (e) => {
+        if (e.target?.closest?.('.dev-rv-act-unlink')) return;
+        openDrawer(row.dataset.actionId);
+      });
+    });
+    host.querySelector('#devRvActLink')?.addEventListener('click', () => openDevActionLinkPicker(p, rv));
+    host.querySelector('#devRvActNew')?.addEventListener('click', () => {
+      // Pre-fill Quick Add with owner = p.id, then link the created
+      // action to this review via the onSave callback.
+      openQuickAdd('action', { owner: p.id }, (createdAction) => {
+        if (!createdAction?.id) return;
+        rv.actionIds = rv.actionIds || [];
+        if (!rv.actionIds.includes(createdAction.id)) rv.actionIds.push(createdAction.id);
+        rv.updatedAt = todayISO();
+        commit('review-link-new');
+        openPersonDashboard(p.id);
+      });
+    });
+  }
+  function devRvCommit(host, p, rv, silent) {
+    DEV_REVIEW_FIELDS.forEach((f) => {
+      const el = host.querySelector(`#devRv_${f.key}`);
+      if (el) rv[f.key] = serializeChipsToText(el);
+    });
+    const dateEl = host.querySelector('#devRvDate');
+    if (dateEl && dateEl.value) rv.date = dateEl.value;
+    rv.updatedAt = todayISO();
+    // Keep newest-first ordering after a date edit
+    p.reviews.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    commit('review-edit');
+    const saved = host.querySelector('#devRvSaved');
+    if (saved) saved.textContent = silent ? 'Autosaved · ' + new Date().toLocaleTimeString() : 'Saved';
+  }
+  function openDevActionLinkPicker(p, rv) {
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    const linked = new Set(rv.actionIds || []);
+    const candidates = [];
+    state.projects.forEach((pr) => (pr.actions || []).forEach((a) => {
+      if (linked.has(a.id)) return;
+      candidates.push({ a, pr });
+    }));
+    // Prioritize actions owned by this person, then any others.
+    candidates.sort((x, y) => {
+      const xo = x.a.owner === p.id ? 0 : 1;
+      const yo = y.a.owner === p.id ? 0 : 1;
+      if (xo !== yo) return xo - yo;
+      return (x.a.title || '').localeCompare(y.a.title || '');
+    });
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width: 560px; max-width: 96vw;">
+        <div class="desc-head">
+          <div class="desc-title">Link an existing action</div>
+          <button class="icon-btn" id="lnkClose" title="Close">×</button>
+        </div>
+        <div style="padding: 12px 14px;">
+          <input type="text" id="lnkSearch" placeholder="Search actions…" autocomplete="off" style="width:100%; padding:8px 10px; background:var(--bg-2); border:1px solid var(--line); border-radius:6px; color:var(--text); font-size:13px;" />
+          <div id="lnkResults" style="margin-top:10px; max-height:340px; overflow:auto;"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.querySelector('#lnkClose').addEventListener('click', close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    const results = overlay.querySelector('#lnkResults');
+    const input = overlay.querySelector('#lnkSearch');
+    function refresh() {
+      const q = (input.value || '').trim().toLowerCase();
+      const filtered = q
+        ? candidates.filter(({ a, pr }) => (a.title + ' ' + (pr?.name || '')).toLowerCase().includes(q))
+        : candidates;
+      results.innerHTML = filtered.length
+        ? filtered.slice(0, 60).map(({ a, pr }) => `
+          <div class="lnk-row" data-action-id="${escapeHTML(a.id)}" style="padding:8px 10px; border-radius:6px; cursor:pointer; display:flex; flex-direction:column; gap:2px;">
+            <div style="font-size:13px;">${escapeHTML(a.title)}${a.owner === p.id ? ' <span class="muted" style="font-size:11px;">(own)</span>' : ''}</div>
+            <div class="muted" style="font-size:11px;">${escapeHTML(pr?.name || '—')} · ${escapeHTML(a.status || '')}${a.due ? ' · due ' + escapeHTML(a.due) : ''}</div>
+          </div>`).join('')
+        : '<div class="muted" style="padding:12px;">No matching actions.</div>';
+      results.querySelectorAll('.lnk-row').forEach((row) => {
+        row.addEventListener('mouseenter', () => row.style.background = 'rgba(96,165,250,.10)');
+        row.addEventListener('mouseleave', () => row.style.background = 'transparent');
+        row.addEventListener('click', () => {
+          rv.actionIds = rv.actionIds || [];
+          if (!rv.actionIds.includes(row.dataset.actionId)) rv.actionIds.push(row.dataset.actionId);
+          rv.updatedAt = todayISO();
+          commit('review-link');
+          close();
+          openPersonDashboard(p.id);
+        });
+      });
+    }
+    input.addEventListener('input', refresh);
+    refresh();
+    setTimeout(() => input.focus(), 30);
+  }
+  // Side-by-side compare — two selected reviews, each field row spans
+  // both dates. Cells that differ (case-insensitive whitespace-normalised)
+  // get an amber border + "differs" chip so scanning is fast.
+  function renderDevReviewCompare(a, b, p) {
+    const norm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    const cell = (v) => `<div class="dev-rv-cell">${renderTextWithChips(v || '') || '<span class="muted">—</span>'}</div>`;
+    const rows = DEV_REVIEW_FIELDS.map((f) => {
+      const differs = norm(a[f.key]) !== norm(b[f.key]);
+      return `
+        <div class="dev-rv-cmp-row${differs ? ' differs' : ''}">
+          <div class="dev-rv-cmp-lbl">${escapeHTML(f.label)}${differs ? '<span class="dev-rv-cmp-tag">Δ differs</span>' : ''}</div>
+          ${cell(a[f.key])}${cell(b[f.key])}
+        </div>`;
+    }).join('');
+    const linkedA = collectLinkedActions(a);
+    const linkedB = collectLinkedActions(b);
+    const actListHTML = (arr) => arr.length
+      ? '<ul style="margin:0; padding-left:16px;">' + arr.map(({ a: act, pr }) => `<li style="font-size:12px;">${escapeHTML(act.title)} <span class="muted">— ${escapeHTML(pr?.name || '')} · ${escapeHTML(act.status)}</span></li>`).join('') + '</ul>'
+      : '<span class="muted">— none</span>';
+    const linkedDiffers = new Set((a.actionIds || [])).size !== new Set((b.actionIds || [])).size
+      || (a.actionIds || []).some((id) => !(b.actionIds || []).includes(id));
+    return `
+      <div class="dev-rv-cmp-head">
+        <div class="dev-rv-cmp-lbl">Field</div>
+        <div class="dev-rv-cmp-date">${escapeHTML(a.date)}</div>
+        <div class="dev-rv-cmp-date">${escapeHTML(b.date)}</div>
+      </div>
+      <div class="dev-rv-cmp-grid">${rows}
+        <div class="dev-rv-cmp-row${linkedDiffers ? ' differs' : ''}">
+          <div class="dev-rv-cmp-lbl">Development actions${linkedDiffers ? '<span class="dev-rv-cmp-tag">Δ differs</span>' : ''}</div>
+          <div class="dev-rv-cell">${actListHTML(linkedA)}</div>
+          <div class="dev-rv-cell">${actListHTML(linkedB)}</div>
+        </div>
+      </div>`;
+  }
+  function wireDevReviewCompare() { /* read-only view — no wiring */ }
+  // SWOT — 2x2 quadrant modal built from the currently-selected review.
+  function openSwotForPerson(personId) {
+    const p = (state.people || []).find((x) => x.id === personId);
+    if (!p) return;
+    const reviews = p.reviews || [];
+    const rv = reviews[0]; // Latest
+    const quadrant = (title, tone, txt, hint) => `
+      <div class="swot-q swot-${tone}">
+        <div class="swot-q-title">${escapeHTML(title)} <span class="muted" style="font-size:10.5px;">${escapeHTML(hint)}</span></div>
+        <div class="swot-q-body">${renderTextWithChips(txt || '') || '<span class="muted">—</span>'}</div>
+      </div>`;
+    const body = rv ? `
+      <div class="swot-grid">
+        ${quadrant('Strengths',    'ok',   rv.strengths,                            'internal · positive')}
+        ${quadrant('Weaknesses',   'warn', rv.growthAreas,                          'internal · to develop')}
+        ${quadrant('Opportunities','info', [rv.motivations, rv.careerGoals].filter(Boolean).join('\n\n'), 'external · positive')}
+        ${quadrant('Threats',      'bad',  rv.frustrations,                         'external · to manage')}
+      </div>
+      <div class="muted" style="font-size:11px; text-align:center; margin-top:10px;">Built from the ${escapeHTML(rv.date)} review. Edit the review to update this view.</div>`
+      : '<div class="empty" style="padding:24px; text-align:center;">No reviews yet — create one to generate a SWOT view.</div>';
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.innerHTML = `
+      <div class="desc-modal swot-modal" style="width: 800px; max-width: 96vw;">
+        <div class="desc-head">
+          <div class="desc-title">SWOT — ${escapeHTML(p.name)}</div>
+          <button class="icon-btn" id="swotClose" title="Close">×</button>
+        </div>
+        <div style="padding: 14px 16px;">${body}</div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#swotClose').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
   }
 
   /* -------------------------- Detail drawer -------------------------- */
@@ -28106,6 +28689,22 @@ body.notes-fullscreen { overflow: hidden; }
         s.developing = !!s.developing;
         return true;
       });
+      // Development reviews — dated snapshots collected during 1:1
+      // conversations. Each entry is a complete review; the UI diffs
+      // fields between any two dates and generates a SWOT view from
+      // the currently-selected review.
+      if (!Array.isArray(p.reviews)) p.reviews = [];
+      const reviewFields = ['role','position','salary','strengths','growthAreas','motivations','frustrations','careerGoals','supportNeeded','observations','notes'];
+      p.reviews = p.reviews.filter((r) => r && typeof r === 'object' && typeof r.date === 'string' && r.date);
+      p.reviews.forEach((r) => {
+        r.id = r.id || uid('rev');
+        reviewFields.forEach((f) => { if (typeof r[f] !== 'string') r[f] = ''; });
+        r.actionIds = Array.isArray(r.actionIds) ? r.actionIds.filter((x) => typeof x === 'string') : [];
+        r.createdAt = r.createdAt || r.date;
+        r.updatedAt = r.updatedAt || r.date;
+      });
+      // Sort newest-first so the dashboard defaults to the latest review.
+      p.reviews.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
     });
     // Stakeholders — external contacts (customer POCs, regulators, sister
     // projects). No capacity, no hourly rate. Still ownable so we can

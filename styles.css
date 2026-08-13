@@ -8357,7 +8357,13 @@ kbd {
   width: 460px; max-width: 96vw;
   display: flex; flex-direction: column;
   box-shadow: var(--shadow);
+  transition: width var(--transition);
 }
+/* Full-screen dashboard — widens the drawer to the entire viewport
+   so the reviews section has room to breathe. Toggled by
+   #dashFullscreen; Esc / × still closes as normal. */
+#drawer.is-fullscreen .drawer { width: 100vw; max-width: 100vw; }
+#drawer.is-fullscreen .drawer-body { padding: 20px 32px; }
 .drawer-head {
   display: flex; align-items: center;
   padding: 12px 14px;
@@ -9788,10 +9794,200 @@ body.notes-fullscreen { overflow: hidden; }
   box-shadow: var(--shadow);
 }
 
+/* ── Development reviews — person dashboard ─────────────────────
+   Dated snapshots collected during 1:1s. Chip bar of dates on top,
+   rich-text form below. Compare mode swaps the form for a two-
+   column diff view. */
+.dev-rv-toolbar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 12px;
+}
+.dev-rv-dates {
+  display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0;
+}
+.dev-rv-chip {
+  padding: 4px 10px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: var(--bg-2);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.dev-rv-chip:hover { border-color: var(--accent); }
+.dev-rv-chip.active {
+  background: rgba(96, 165, 250, .22);
+  border-color: var(--accent);
+  color: rgba(191, 219, 254, 1);
+  font-weight: 600;
+}
+.dev-rv-chip.compare {
+  background: rgba(251, 191, 36, .18);
+  border-color: var(--warn);
+  color: rgba(254, 240, 138, 1);
+}
+.dev-rv-cmp-tag {
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0,0,0,.35);
+  letter-spacing: .04em;
+}
+.dev-rv-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.dev-rv-actions .ghost.active {
+  background: rgba(96, 165, 250, .18);
+  border-color: var(--accent);
+  color: rgba(191, 219, 254, 1);
+}
+.dev-rv-body { display: flex; flex-direction: column; gap: 12px; }
+.dev-rv-meta {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.dev-rv-meta input[type="date"] {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--text);
+  padding: 4px 8px;
+  font-size: 13px;
+}
+.dev-rv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+.dev-rv-field { display: flex; flex-direction: column; gap: 4px; }
+.dev-rv-lbl {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+.dev-rv-actions-field { grid-column: 1 / -1; }
+.dev-rv-act-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.dev-rv-act-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  cursor: pointer;
+  font-size: 12px;
+}
+.dev-rv-act-row:hover { border-color: var(--accent); }
+.dev-rv-act-status {
+  width: 8px; height: 8px; border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--text-faint);
+}
+.dev-rv-act-status.status-todo    { background: rgba(148, 163, 184, .70); }
+.dev-rv-act-status.status-doing   { background: rgba(96, 165, 250, .90); }
+.dev-rv-act-status.status-blocked { background: var(--warn); }
+.dev-rv-act-status.status-done    { background: var(--ok); }
+.dev-rv-act-status.status-cancelled { background: var(--bad); }
+.dev-rv-act-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-rv-act-meta { color: var(--text-faint); font-size: 11px; flex-shrink: 0; }
+.dev-rv-act-unlink { padding: 0 6px; }
+.dev-rv-act-controls { display: flex; gap: 6px; }
+.dev-rv-footer {
+  display: flex; align-items: center; gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+/* Compare mode — three-column grid: label + date-A + date-B. */
+.dev-rv-cmp-head, .dev-rv-cmp-row {
+  display: grid;
+  grid-template-columns: 160px 1fr 1fr;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.dev-rv-cmp-head {
+  font-size: 11px;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--line);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.dev-rv-cmp-date { font-weight: 700; color: var(--text); }
+.dev-rv-cmp-grid { display: flex; flex-direction: column; }
+.dev-rv-cmp-row {
+  border-bottom: 1px solid rgba(148, 163, 184, .10);
+  align-items: start;
+}
+.dev-rv-cmp-row.differs { background: rgba(251, 191, 36, .06); }
+.dev-rv-cmp-lbl {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-faint);
+  display: flex; align-items: center; gap: 6px;
+}
+.dev-rv-cmp-row.differs .dev-rv-cmp-lbl { color: var(--warn); }
+.dev-rv-cell {
+  font-size: 12.5px;
+  line-height: 1.45;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  min-height: 24px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.dev-rv-cmp-row.differs .dev-rv-cell {
+  border-color: rgba(251, 191, 36, .35);
+  background: rgba(251, 191, 36, .04);
+}
+
+/* SWOT modal — 2x2 quadrant. */
+.swot-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+.swot-q {
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  min-height: 140px;
+}
+.swot-q-title {
+  font-weight: 700;
+  font-size: 13px;
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+  display: flex; align-items: baseline; justify-content: space-between; gap: 6px;
+}
+.swot-q-body {
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.swot-ok   { background: rgba(74, 222, 128, .08);  border-color: rgba(74, 222, 128, .35);  }
+.swot-warn { background: rgba(251, 191, 36, .08); border-color: rgba(251, 191, 36, .35); }
+.swot-info { background: rgba(96, 165, 250, .08); border-color: rgba(96, 165, 250, .35); }
+.swot-bad  { background: rgba(248, 113, 121, .08); border-color: rgba(248, 113, 121, .35); }
+.swot-ok   .swot-q-title { color: var(--ok);   border-bottom-color: rgba(74, 222, 128, .30); }
+.swot-warn .swot-q-title { color: var(--warn); border-bottom-color: rgba(251, 191, 36, .30); }
+.swot-info .swot-q-title { color: rgba(147, 197, 253, 1); border-bottom-color: rgba(96, 165, 250, .30); }
+.swot-bad  .swot-q-title { color: var(--bad);  border-bottom-color: rgba(248, 113, 121, .30); }
+
 /* Responsive */
 @media (max-width: 900px) {
   .filters { display: none; }
   .board { grid-template-columns: repeat(2, 1fr); }
   .dashboard { grid-template-columns: repeat(2, 1fr); }
   .panel.half, .panel { grid-column: span 2; }
+  .dev-rv-cmp-head, .dev-rv-cmp-row { grid-template-columns: 100px 1fr 1fr; }
+  .swot-grid { grid-template-columns: 1fr; }
 }
