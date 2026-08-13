@@ -3528,7 +3528,11 @@ body.is-card-dragging * { cursor: grabbing !important; }
   stroke-width: 2 !important;
 }
 
-/* Bottom half — the workload chart. */
+/* Bottom half — the workload chart. Sticks to the bottom of the
+   planner-scroll container so the total-capacity view is always
+   visible while the Gantt above scrolls vertically. Horizontally
+   the element still scrolls with the timeline, keeping the axis
+   aligned. */
 .planner-workload {
   border-top: 1px solid var(--line);
   background: var(--bg-1);
@@ -3540,6 +3544,10 @@ body.is-card-dragging * { cursor: grabbing !important; }
   display: flex;
   flex-direction: column;
   gap: 6px;
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  box-shadow: 0 -6px 12px -8px rgba(0,0,0,.55);
 }
 .planner-workload .pln-wl-head,
 .planner-workload .pln-wl-legend { padding: 0 14px; }

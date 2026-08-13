@@ -13599,6 +13599,7 @@
         <div><div class="page-title">People</div><div class="page-sub">${state.people.length} team members${externals.length ? ` · ${externals.length} external stakeholder${externals.length === 1 ? '' : 's'}` : ''} • capacity in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year) • workload across all projects, projected over the next 12 weeks</div></div>
         <div class="page-actions">
           <button class="ghost" id="btnNewPerson">+ Person</button>
+          <button class="ghost" id="btnNewStakeholder" title="Add an external stakeholder — customer POC, vendor rep, sister-project SE. Ownable but doesn't consume team capacity.">+ Stakeholder</button>
         </div>
       </div>
       <div class="panel">
@@ -13677,6 +13678,7 @@
       </div>` : ''}`;
     root.appendChild(view);
     $('#btnNewPerson').addEventListener('click', () => openQuickAdd('person'));
+    $('#btnNewStakeholder').addEventListener('click', () => openStakeholderInlineDialog());
     // External-stakeholder rows: click to filter the Register to that
     // stakeholder; right-click to delete.
     $$('.ext-row', view).forEach((row) => {
@@ -16806,6 +16808,81 @@
       + actorOptionsHTML(selectedId)
       + '<option disabled>──────────</option>'
       + '<option value="__new__">+ New person…</option>';
+  }
+
+  // Inline stakeholder-creation dialog — Name / Role / Organization
+  // in a single form, opened from the People page + Stakeholder
+  // button. Saves to state.stakeholders (external actors have no
+  // team-side capacity, still ownable / originatable). Re-renders
+  // the page so the new stakeholder appears in the External
+  // stakeholders panel immediately.
+  function openStakeholderInlineDialog(initialName = '') {
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay desc-overlay';
+    overlay.style.zIndex = '9700';
+    overlay.innerHTML = `
+      <div class="desc-modal" style="width: 420px; max-width: 92vw;">
+        <div class="desc-head">
+          <div class="desc-title">+ Add external stakeholder</div>
+          <button class="icon-btn" id="newStkClose" title="Cancel" aria-label="Cancel">×</button>
+        </div>
+        <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div class="muted" style="font-size:11.5px;">Customer POC, vendor rep, sister-project SE, regulator… anyone outside the team you need to keep in the loop. Ownable and originatable, but doesn't consume team capacity.</div>
+          <div class="field">
+            <label>Name <span class="muted">(required)</span></label>
+            <input id="newStkName" type="text" autocomplete="off" placeholder="e.g. Isabelle Fournier" value="${escapeHTML(initialName)}" />
+          </div>
+          <div class="field">
+            <label>Role <span class="muted">(optional)</span></label>
+            <input id="newStkRole" type="text" autocomplete="off" placeholder="e.g. Programme POC" />
+          </div>
+          <div class="field">
+            <label>Organization <span class="muted">(optional)</span></label>
+            <input id="newStkOrg" type="text" autocomplete="off" placeholder="e.g. CNES · Airbus · ITU" />
+          </div>
+          <div style="display: flex; gap: 8px; justify-content: flex-end; margin-top: 4px;">
+            <button class="ghost" id="newStkCancel">Cancel</button>
+            <button class="primary" id="newStkSave">Add stakeholder</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const nameInp = overlay.querySelector('#newStkName');
+    const roleInp = overlay.querySelector('#newStkRole');
+    const orgInp  = overlay.querySelector('#newStkOrg');
+    const close = () => overlay.remove();
+    const save = () => {
+      const name = (nameInp.value || '').trim();
+      if (!name) {
+        nameInp.focus();
+        nameInp.setAttribute('placeholder', 'Name is required');
+        nameInp.classList.add('field-err');
+        return;
+      }
+      const role = (roleInp.value || '').trim();
+      const org  = (orgInp.value  || '').trim();
+      const stk = { id: uid('sh'), name, role, organization: org, external: true };
+      state.stakeholders = state.stakeholders || [];
+      state.stakeholders.push(stk);
+      stampEdit(stk, null, 'stakeholder-add-inline');
+      commit('stakeholder-add');
+      close();
+      // Rerender People so the External stakeholders panel picks it up.
+      render();
+      toast(`Added ${name}${org ? ' · ' + org : ''}`);
+    };
+    overlay.querySelector('#newStkClose').addEventListener('click', close);
+    overlay.querySelector('#newStkCancel').addEventListener('click', close);
+    overlay.querySelector('#newStkSave').addEventListener('click', save);
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close(); });
+    [nameInp, roleInp, orgInp].forEach((inp) => {
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter')   { e.preventDefault(); save(); }
+        if (e.key === 'Escape')  { e.preventDefault(); close(); }
+      });
+      inp.addEventListener('input', () => inp.classList.remove('field-err'));
+    });
+    setTimeout(() => nameInp.focus(), 30);
   }
 
   // Inline person-creation dialog: a small modal with Name + Role in a
