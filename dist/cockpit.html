@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T13:30:36.837Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T13:51:09.087Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -37677,6 +37677,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     });
     $$('.nav-item').forEach((b) => {
       b.addEventListener('click', () => {
+        // A drawer (person dashboard, action drawer, risk editor…)
+        // is a modal-ish surface — leaving it open while the underlying
+        // page changes is confusing. Close it first so the nav click
+        // lands the user on a fresh, clean page.
+        const drawer = $('#drawer');
+        if (drawer && !drawer.hidden) closeDrawer();
         state.currentView = b.dataset.view;
         saveState(); render();
       });

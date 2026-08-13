@@ -27199,6 +27199,12 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     });
     $$('.nav-item').forEach((b) => {
       b.addEventListener('click', () => {
+        // A drawer (person dashboard, action drawer, risk editor…)
+        // is a modal-ish surface — leaving it open while the underlying
+        // page changes is confusing. Close it first so the nav click
+        // lands the user on a fresh, clean page.
+        const drawer = $('#drawer');
+        if (drawer && !drawer.hidden) closeDrawer();
         state.currentView = b.dataset.view;
         saveState(); render();
       });
