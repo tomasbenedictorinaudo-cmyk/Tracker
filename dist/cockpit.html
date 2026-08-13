@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T12:24:54.507Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T12:34:46.497Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -9803,6 +9803,17 @@ body.notes-fullscreen { overflow: hidden; }
   box-shadow: var(--shadow);
 }
 
+/* Embedded Planner — dashboard variant. Drops the page-head and
+   uses a compact toolbar row instead of the full picker. */
+.view.pln-embedded { padding: 0; }
+.pln-embed-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
 /* ── Development reviews — person dashboard ─────────────────────
    Dated snapshots collected during 1:1s. Chip bar of dates on top,
    rich-text form below. Compare mode swaps the form for a two-
@@ -10063,7 +10074,7 @@ body.notes-fullscreen { overflow: hidden; }
         <button class="nav-item" data-view="dashboard">
           <span class="nav-icon">◰</span><span>Dashboard</span>
         </button>
-        <button class="nav-item" data-view="planner">
+        <button class="nav-item" data-view="planner" hidden>
           <span class="nav-icon">◱</span><span>Planner</span>
         </button>
         <button class="nav-item" data-view="review">
@@ -12830,7 +12841,11 @@ body.notes-fullscreen { overflow: hidden; }
       inbox: renderInbox,
       calendar: renderCalendar,
       reports: renderReports,
-      planner: renderPlanner,
+      // Planner has moved to the person dashboard (each person's
+      // workload timeline lives on their own dashboard). Route stale
+      // state.currentView === 'planner' to People so old saved states
+      // and deeplinks land somewhere sensible.
+      planner: renderPeople,
     };
     (fns[view] || renderBoard)(main);
   }
@@ -24366,6 +24381,10 @@ body.notes-fullscreen { overflow: hidden; }
           </div>` : ''}
         </div>`;
       })()}
+      <div class="dash-section" id="dashPlannerSection">
+        <div class="dash-section-title">Planner<span class="dash-section-count">workload timeline</span></div>
+        <div id="dashPlannerHost"></div>
+      </div>
       <div class="dash-section" id="dashReviewsWrap">
         <div class="dash-section-title">
           Development reviews
@@ -24432,6 +24451,15 @@ body.notes-fullscreen { overflow: hidden; }
         openRiskEditor(row.dataset.riskId);
       });
     });
+    // Embed the Planner in this person's dashboard. Locked to the
+    // person, uses a local rerender so scope / zoom / hide-done
+    // toggles don't tear the drawer down.
+    (() => {
+      const host = document.querySelector('#dashPlannerHost');
+      if (!host) return;
+      function rerenderPlanner() { renderPlanner(host, { lockedPersonId: personId, onChange: rerenderPlanner }); }
+      rerenderPlanner();
+    })();
     // Fullscreen toggle — adds .is-fullscreen to the drawer overlay so
     // CSS overrides the fixed drawer width. Esc still closes the
     // drawer (browser-native contract for the ×).
@@ -32979,11 +33007,23 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const peakPct = weekPcts.length ? Math.max(...weekPcts) : 0;
     return { over: peakPct > 100, severe: peakPct > 150, peakPct, weekPcts };
   }
-  function renderPlanner(root) {
+  function renderPlanner(root, opts = {}) {
     _plannerInit();
     const s = _plannerState;
+    const lockedPersonId = opts.lockedPersonId || null;
+    // Locked mode is used by the person dashboard, which supplies its
+    // own container + a local rerender callback so scope / zoom /
+    // hide-done toggles don't tear down the entire drawer via the
+    // app-level render().
+    const rerender = opts.onChange || render;
+    if (lockedPersonId) {
+      s.personId = lockedPersonId;
+      // Clear any prior planner content in the host so re-renders
+      // don't stack ".view" nodes.
+      root.innerHTML = '';
+    }
     const view = document.createElement('div');
-    view.className = 'view';
+    view.className = 'view' + (lockedPersonId ? ' pln-embedded' : '');
 
     // Person picker — internal team only (externals have no capacity).
     const people = (state.people || []).slice().sort((x, y) => (x?.name || '').localeCompare(y?.name || ''));
@@ -33085,24 +33125,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       const cls = pct > 150 ? 'severe' : pct > 100 ? 'over' : pct > 75 ? 'high' : pct > 40 ? 'mid' : pct > 0 ? 'low' : 'idle';
       return `<span class="pln-spark-cell pln-spark-${cls}" title="week ${i + 1} · ${pct}%"></span>`;
     }).join('');
-    view.innerHTML = `
-      <div class="page-head">
-        <div>
-          <div class="page-title">Planner</div>
-          <div class="page-sub">One person, one calendar. Total workload is the anchor — reshape the bar and the commitment adjusts to preserve the hours.</div>
-        </div>
-        <div class="page-actions">
-          <label class="planner-picker">
-            <span class="muted">Person</span>
-            <select id="plnPerson">
-              ${people.map((p) => {
-                const ol = _plannerPersonOverload(p, s.scope, curProjId);
-                const mark = ol.severe ? '\u{1F534} ' : ol.over ? '⚠️ ' : '';
-                const suffix = ol.over ? ` — ${ol.peakPct}% peak` : '';
-                return `<option value="${escapeHTML(p.id)}" ${p.id === s.personId ? 'selected' : ''}>${mark}${escapeHTML(p.name)}${p.role ? ' · ' + escapeHTML(p.role) : ''}${suffix}</option>`;
-              }).join('')}
-            </select>
-          </label>
+    // Head layout: standalone view carries the full page-head + person
+    // picker; embedded (dashboard) mode drops both — the enclosing
+    // panel already names the person and provides a title.
+    const headHtml = lockedPersonId
+      ? `<div class="pln-embed-toolbar">
           ${sparkCells ? `<span class="pln-spark" title="12-week load — each cell is one week, next 12 weeks from Monday">${sparkCells}</span>` : ''}
           <div class="seg" role="tablist" aria-label="Scope">
             <button class="seg-btn ${s.scope === 'all' ? 'active' : ''}" data-pln-scope="all">All projects</button>
@@ -33110,12 +33137,43 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           </div>
           <button class="seg-btn pln-toggle ${s.hideDone ? 'active' : ''}" id="plnHideDone" title="Hide completed actions">Hide done</button>
           <div class="pln-zoom">
-            <button class="seg-btn" id="plnZoomOut" title="Zoom out"aria-label="Zoom out">−</button>
+            <button class="seg-btn" id="plnZoomOut" title="Zoom out" aria-label="Zoom out">−</button>
             <button class="seg-btn" id="plnZoomReset" title="Reset zoom">${s.zoomStep === 0 ? 'Auto' : (s.zoomStep > 0 ? '+' + s.zoomStep : s.zoomStep)}</button>
             <button class="seg-btn" id="plnZoomIn" title="Zoom in" aria-label="Zoom in">+</button>
           </div>
-        </div>
-      </div>
+        </div>`
+      : `<div class="page-head">
+          <div>
+            <div class="page-title">Planner</div>
+            <div class="page-sub">One person, one calendar. Total workload is the anchor — reshape the bar and the commitment adjusts to preserve the hours.</div>
+          </div>
+          <div class="page-actions">
+            <label class="planner-picker">
+              <span class="muted">Person</span>
+              <select id="plnPerson">
+                ${people.map((p) => {
+                  const ol = _plannerPersonOverload(p, s.scope, curProjId);
+                  const mark = ol.severe ? '\u{1F534} ' : ol.over ? '⚠️ ' : '';
+                  const suffix = ol.over ? ` — ${ol.peakPct}% peak` : '';
+                  return `<option value="${escapeHTML(p.id)}" ${p.id === s.personId ? 'selected' : ''}>${mark}${escapeHTML(p.name)}${p.role ? ' · ' + escapeHTML(p.role) : ''}${suffix}</option>`;
+                }).join('')}
+              </select>
+            </label>
+            ${sparkCells ? `<span class="pln-spark" title="12-week load — each cell is one week, next 12 weeks from Monday">${sparkCells}</span>` : ''}
+            <div class="seg" role="tablist" aria-label="Scope">
+              <button class="seg-btn ${s.scope === 'all' ? 'active' : ''}" data-pln-scope="all">All projects</button>
+              <button class="seg-btn ${s.scope === 'project' ? 'active' : ''}" data-pln-scope="project">This project</button>
+            </div>
+            <button class="seg-btn pln-toggle ${s.hideDone ? 'active' : ''}" id="plnHideDone" title="Hide completed actions">Hide done</button>
+            <div class="pln-zoom">
+              <button class="seg-btn" id="plnZoomOut" title="Zoom out"aria-label="Zoom out">−</button>
+              <button class="seg-btn" id="plnZoomReset" title="Reset zoom">${s.zoomStep === 0 ? 'Auto' : (s.zoomStep > 0 ? '+' + s.zoomStep : s.zoomStep)}</button>
+              <button class="seg-btn" id="plnZoomIn" title="Zoom in" aria-label="Zoom in">+</button>
+            </div>
+          </div>
+        </div>`;
+    view.innerHTML = `
+      ${headHtml}
       ${person ? renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s, _plannerChartSizing(span, s.zoomStep)) : `<div class="empty">No team members yet — add one from the People page.</div>`}
     `;
     root.appendChild(view);
@@ -33141,29 +33199,29 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     // Wire controls
     view.querySelector('#plnPerson')?.addEventListener('change', (e) => {
       s.personId = e.target.value;
-      render();
+      rerender();
     });
     view.querySelectorAll('[data-pln-scope]').forEach((btn) => {
       btn.addEventListener('click', () => {
         s.scope = btn.dataset.plnScope;
-        render();
+        rerender();
       });
     });
     view.querySelector('#plnHideDone')?.addEventListener('click', () => {
       s.hideDone = !s.hideDone;
-      render();
+      rerender();
     });
     view.querySelector('#plnZoomIn')?.addEventListener('click', () => {
       s.zoomStep = Math.min(3, (s.zoomStep || 0) + 1);
-      render();
+      rerender();
     });
     view.querySelector('#plnZoomOut')?.addEventListener('click', () => {
       s.zoomStep = Math.max(-2, (s.zoomStep || 0) - 1);
-      render();
+      rerender();
     });
     view.querySelector('#plnZoomReset')?.addEventListener('click', () => {
       s.zoomStep = 0;
-      render();
+      rerender();
     });
 
     // Drag wire-up (Phase 2 — workload-preserving drag).
