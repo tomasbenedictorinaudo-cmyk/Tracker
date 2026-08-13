@@ -14791,7 +14791,7 @@
             <button class="ghost" id="dashEdit">Edit person…</button>
             <button class="ghost" id="dashFilter">Filter Register to ${escapeHTML(p.name)}</button>
             <button class="ghost" id="dashSwot" title="Generate SWOT view from the current development review">⊞ SWOT</button>
-            <button class="ghost" id="dashFullscreen" title="Toggle full-screen">↙ Exit fullscreen</button>
+            <button class="ghost" id="dashFullscreen" title="Toggle full-screen">⛶ Fullscreen</button>
           </div>
         </div>
       </div>
@@ -14891,11 +14891,6 @@
             <div class="dash-row-sub">${escapeHTML(pr.name)} · residual ${_score}</div>
           </div>`).join(''))}`;
     $('#drawer').hidden = false;
-    // Person dashboard opens fullscreen by default — the section
-    // stack (KPIs, workload, skills, reviews, planner) reads far
-    // better with the extra width. The sidebar stays visible so
-    // the user can still navigate away without closing first.
-    $('#drawer').classList.add('is-fullscreen');
     $('#dashEdit').addEventListener('click', () => openPersonEditor(personId));
     $('#dashFilter').addEventListener('click', () => {
       closeDrawer();

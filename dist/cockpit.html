@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T13:51:09.087Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T13:53:57.754Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -25269,7 +25269,7 @@ body.notes-fullscreen { overflow: hidden; }
             <button class="ghost" id="dashEdit">Edit person…</button>
             <button class="ghost" id="dashFilter">Filter Register to ${escapeHTML(p.name)}</button>
             <button class="ghost" id="dashSwot" title="Generate SWOT view from the current development review">⊞ SWOT</button>
-            <button class="ghost" id="dashFullscreen" title="Toggle full-screen">↙ Exit fullscreen</button>
+            <button class="ghost" id="dashFullscreen" title="Toggle full-screen">⛶ Fullscreen</button>
           </div>
         </div>
       </div>
@@ -25369,11 +25369,6 @@ body.notes-fullscreen { overflow: hidden; }
             <div class="dash-row-sub">${escapeHTML(pr.name)} · residual ${_score}</div>
           </div>`).join(''))}`;
     $('#drawer').hidden = false;
-    // Person dashboard opens fullscreen by default — the section
-    // stack (KPIs, workload, skills, reviews, planner) reads far
-    // better with the extra width. The sidebar stays visible so
-    // the user can still navigate away without closing first.
-    $('#drawer').classList.add('is-fullscreen');
     $('#dashEdit').addEventListener('click', () => openPersonEditor(personId));
     $('#dashFilter').addEventListener('click', () => {
       closeDrawer();
