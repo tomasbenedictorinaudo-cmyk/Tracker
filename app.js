@@ -1696,10 +1696,247 @@
       return { notes, savedViews, todos };
     })();
 
+    // ── Development reviews, per-person holidays, and enriched notes ──
+    // Everything below runs AFTER the base graph is built, so it can
+    // reference actions/people already generated. Each block is defensive
+    // (uses find/filter with fallbacks) so a future seed change doesn't
+    // break the demo silently.
+    (function enrichPeople() {
+      const findAction = (predicate) => {
+        for (const pr of [proj1, proj2, proj3]) {
+          const hit = (pr.actions || []).find(predicate);
+          if (hit) return hit;
+        }
+        return null;
+      };
+      const nextActionByOwner = (ownerId, n = 3) =>
+        [proj1, proj2, proj3]
+          .flatMap((pr) => (pr.actions || []).filter((a) => a.owner === ownerId && a.status !== 'done' && a.status !== 'cancelled'))
+          .sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'))
+          .slice(0, n)
+          .map((a) => a.id);
+
+      // Historical development reviews — three team leads with a
+      // multi-cycle history so the compare / diff view has something
+      // meaningful to show. Uses realistic rich-text HTML the editor
+      // round-trips.
+      const sofia = people.find((p) => p.id === 'p_sofia');
+      if (sofia) sofia.reviews = [
+        { id: 'rv_sofia_1', date: d(-14), createdAt: d(-14), updatedAt: d(-14),
+          role: 'Project Manager · Orbit-7', position: 'Senior PM (M3)',
+          salary: '78 000 €',
+          strengths: '<p>Cross-team facilitation is outstanding; PDR risk-cut workshop is a case study we should reuse.</p><ul><li>Reads customer politics accurately</li><li>Trusted by engineering leads</li></ul>',
+          growthAreas: '<p>Earn-value literacy — <b>CPI/SPI</b> are still muscle memory rather than instinct.</p>',
+          motivations: '<p>Wants to lead a full mission (bid → commissioning), not just an execution slice.</p>',
+          frustrations: '<p>The <i>reforecast cycle</i> feels too heavyweight for what it delivers — argues for a lighter monthly variant.</p>',
+          careerGoals: '<p>Programme Manager track. Interested in the Helios-3 bid role next FY.</p>',
+          supportNeeded: '<ul><li>EVM masterclass (external)</li><li>Shadow the Mosaic-3 PM on a milestone review</li></ul>',
+          observations: '<p>Push her into the Helios-3 kick-off conversation early. She would model the bid team.</p>',
+          notes: '<p>Great half-cycle; low-flight-risk, but restless.</p>',
+          actionIds: nextActionByOwner('p_sofia', 3),
+        },
+        { id: 'rv_sofia_2', date: d(-190), createdAt: d(-190), updatedAt: d(-188),
+          role: 'Project Manager · Orbit-7', position: 'Senior PM (M3)',
+          salary: '74 500 €',
+          strengths: '<p>Delivered PDR one week early with a clean action list.</p>',
+          growthAreas: '<p>Delegation — takes on too much personally when a milestone slips.</p>',
+          motivations: '<p>Recognition, ownership of end-to-end delivery.</p>',
+          frustrations: '<p>Ambiguity in the deputy-PM role; wants clarity on who runs the customer stand-up when she is out.</p>',
+          careerGoals: '<p>Considering the deputy programme manager path.</p>',
+          supportNeeded: '<p>Clarify deputy-PM authority in a working agreement doc.</p>',
+          observations: '',
+          notes: '',
+          actionIds: [],
+        },
+      ];
+      const kira = people.find((p) => p.id === 'p_kira');
+      if (kira) kira.reviews = [
+        { id: 'rv_kira_1', date: d(-8), createdAt: d(-8), updatedAt: d(-2),
+          role: 'Software Architect · FSW', position: 'Principal SW Architect (M4)',
+          salary: '92 000 €',
+          strengths: '<p>Owns the <b>FSW architecture</b> end-to-end. Made the memory-scrubbing rewrite look easy.</p><ul><li>Mentors the two juniors well</li><li>Excellent PR discipline</li></ul>',
+          growthAreas: '<p>Written communication with non-SW stakeholders — the AOCS team keeps asking for a translation layer.</p>',
+          motivations: '<p>Deep-technical growth; wants to build a rust-based flight-safe kernel toy in Q4.</p>',
+          frustrations: '<p>Meeting overhead this cycle. Blocked most Mondays.</p>',
+          careerGoals: '<p>Distinguished engineer track, not management.</p>',
+          supportNeeded: '<ul><li>Two protected deep-work days per week</li><li>Attend the OSPO summit</li></ul>',
+          observations: '<p>Flight risk if we push her into management. Keep on the IC ladder.</p>',
+          notes: '<p>Confirmed IC intent in the 1:1 on ' + d(-3) + '.</p>',
+          actionIds: nextActionByOwner('p_kira', 2),
+        },
+      ];
+      const arjun = people.find((p) => p.id === 'p_arjun');
+      if (arjun) arjun.reviews = [
+        { id: 'rv_arjun_1', date: d(-21), createdAt: d(-21), updatedAt: d(-20),
+          role: 'Avionics Lead · Orbit-7', position: 'Lead Engineer (M3)',
+          salary: '82 000 €',
+          strengths: '<p>Deep <b>EMC intuition</b>; the OBC-MEMS interface fix landed on the first try.</p>',
+          growthAreas: '<p>Neutron-radiation-testing exposure — currently the team\'s single point of knowledge on the topic and it is only <i>Learning</i> level.</p>',
+          motivations: '<p>Building. Ship real hardware to a real customer.</p>',
+          frustrations: '<p>Vendor lead-times on the flight harness; twice missed a slot because of specs churn.</p>',
+          careerGoals: '<p>Wants to run a subsystem for a full mission. Ready for it.</p>',
+          supportNeeded: '<ul><li>Shadow the ESA HERMES radiation test</li><li>Buddy a junior on harness FMEA</li></ul>',
+          observations: '<p>Promote to Principal at next cycle if the harness campaign lands clean.</p>',
+          notes: '',
+          actionIds: nextActionByOwner('p_arjun', 2),
+        },
+      ];
+
+      // Holidays — realistic ranges. Marie is on holiday next week
+      // (illustrates the planner's holiday shading), Diego already
+      // burned a week last month, and Kira has a two-week block later
+      // in the quarter (drives the multi-week cap dip).
+      const marie = people.find((p) => p.id === 'p_marie');
+      if (marie) marie.holidays = [{ start: d(7), end: d(14), label: 'Family — Provence' }];
+      const diego = people.find((p) => p.id === 'p_diego');
+      if (diego) diego.holidays = [{ start: d(-35), end: d(-29), label: 'Winter break' }];
+      if (kira) kira.holidays = [{ start: d(42), end: d(56), label: 'Sabbatical block' }];
+      const lena = people.find((p) => p.id === 'p_lena');
+      if (lena) lena.holidays = [{ start: d(-90), end: d(-84), label: 'Home leave' }];
+    })();
+
+    // ── Extra stakeholders — reviewers, suppliers, cross-programme ──
+    stakeholders.push(
+      { id: 'st_review',   name: 'Anaïs Blanchet',    role: 'Independent reviewer',  organization: 'CNES-DTN' },
+      { id: 'st_supplier', name: 'Klaus Wagner',      role: 'Reaction wheel sales',  organization: 'RW-Systems GmbH' },
+      { id: 'st_sat',      name: 'Priya Ramanathan',  role: 'Payload cross-check',   organization: 'Sat-Optics Inc.' },
+    );
+
+    // ── Activities — planning envelopes with rich, overlapping load ──
+    // Uses three shapes:
+    //   • Q3 campaign — three people, back-to-back windows
+    //   • Cross-project review — small, single-person, tentative
+    //   • Sabbatical coverage — deliberately overlaps a person's own
+    //     other allocation so the Gantt row shows the new stacking
+    //     behavior out of the box.
+    const activities = [
+      {
+        id: 'act_tvac', title: 'Q3 TVAC campaign',
+        description: '<p>Full <b>TVAC campaign</b> for Orbit-7 including hot/cold-case rehearsals.</p><ul><li>Chamber slot booked at IABG</li><li>Requires thermal + AOCS + PM cover</li></ul>',
+        originator: 'st_customer', originatedAt: d(-30),
+        projectId: 'pr_orbit', stakeholderIds: ['st_customer', 'st_review'],
+        totalHours: 240, status: 'in-progress',
+        plannedStart: d(-3), plannedEnd: d(52),
+        allocations: [
+          { id: 'al_tvac_1', personId: 'p_lena',  startDate: d(-3),  endDate: d(24), hours: 90, tentative: false },
+          { id: 'al_tvac_2', personId: 'p_diego', startDate: d(10),  endDate: d(42), hours: 80, tentative: false },
+          { id: 'al_tvac_3', personId: 'p_sofia', startDate: d(-3),  endDate: d(52), hours: 40, tentative: false },
+          { id: 'al_tvac_4', personId: 'p_marie', startDate: d(20),  endDate: d(52), hours: 30, tentative: true },
+        ],
+        milestones: [
+          { id: 'am_tvac_start', name: 'TVAC kickoff',    date: d(-3) },
+          { id: 'am_tvac_mid',   name: 'Hot-case review', date: d(24) },
+          { id: 'am_tvac_end',   name: 'TVAC closeout',   date: d(52) },
+        ],
+        deliverables: [
+          { id: 'ad_tvac_plan',   name: 'TVAC test plan v3',    date: d(-3),  status: 'done'  },
+          { id: 'ad_tvac_report', name: 'TVAC campaign report', date: d(56),  status: 'todo'  },
+        ],
+        createdAt: d(-35), updatedAt: d(-1),
+      },
+      {
+        id: 'act_review', title: 'Independent PDR review',
+        description: '<p>External review of the PDR data pack by CNES-DTN.</p>',
+        originator: 'st_customer', originatedAt: d(-14),
+        projectId: 'pr_orbit', stakeholderIds: ['st_review'],
+        totalHours: 40, status: 'planning',
+        plannedStart: d(14), plannedEnd: d(28),
+        allocations: [
+          { id: 'al_review_1', personId: 'p_marie', startDate: d(14), endDate: d(28), hours: 24, tentative: true },
+          { id: 'al_review_2', personId: 'p_sofia', startDate: d(14), endDate: d(28), hours: 16, tentative: true },
+        ],
+        milestones: [
+          { id: 'am_review_kick', name: 'Reviewer briefing', date: d(14) },
+        ],
+        deliverables: [
+          { id: 'ad_review_out', name: 'Review findings report', date: d(35), status: 'todo' },
+        ],
+        createdAt: d(-14), updatedAt: d(-5),
+      },
+      {
+        id: 'act_cover', title: 'Kira sabbatical coverage — FSW build train',
+        description: '<p>Someone needs to run the FSW build cadence while Kira is off. <b>Yuki</b> takes lead, <b>Arjun</b> reviews.</p>',
+        originator: 'p_sofia', originatedAt: d(-7),
+        projectId: 'pr_helios', stakeholderIds: [],
+        totalHours: 120, status: 'allocated',
+        plannedStart: d(35), plannedEnd: d(70),
+        allocations: [
+          { id: 'al_cover_1', personId: 'p_yuki',  startDate: d(35), endDate: d(70), hours: 80, tentative: false },
+          { id: 'al_cover_2', personId: 'p_arjun', startDate: d(42), endDate: d(63), hours: 24, tentative: false },
+          { id: 'al_cover_3', personId: 'p_kira',  startDate: d(35), endDate: d(42), hours: 16, tentative: true },
+        ],
+        milestones: [
+          { id: 'am_cover_hand', name: 'Handover complete', date: d(42) },
+        ],
+        deliverables: [],
+        createdAt: d(-7), updatedAt: d(-1),
+      },
+    ];
+
+    // ── Enrich the project notes with semantic highlights ─────────────
+    // The highlight buttons produce <mark class="nt-hl nt-hl-{ok|warn|bad}">
+    // with an icon span + text span. Seed each project's notes with a
+    // few so the TOC chip counters and the ok/warn/bad icons render on
+    // first load (rather than needing the user to add them).
+    const hl = (kind, text) => {
+      const icon = { ok: '✓', warn: '⚠', bad: '✕' }[kind];
+      const label = { ok: 'success', warn: 'warning', bad: 'failure' }[kind];
+      return `<mark class="nt-hl nt-hl-${kind}" data-hl="${kind}" title="${label}"><span class="nt-hl-icon" aria-hidden="true">${icon}</span><span class="nt-hl-text">${text}</span></mark>`;
+    };
+    extras.notes[proj1.id] = `
+      <h2>Orbit-7 PDR push</h2>
+      <ul>
+        <li>PDR data pack final draft due ${d(20)}.</li>
+        <li>Customer feedback window: 2 weeks from delivery.</li>
+        <li>Key risks: <b>r_supply</b> (reaction wheel), <b>r_sw</b> (FSW timeline).</li>
+      </ul>
+      <h3>Wins this cycle</h3>
+      <ul>
+        <li>${hl('ok', 'Battery cell qualification closed — vendor sign-off received')}.</li>
+        <li>${hl('ok', 'Star tracker thermal interface passed first-time')} — Arjun / Lena.</li>
+      </ul>
+      <h3>Watch list</h3>
+      <ul>
+        <li>${hl('warn', 'Reaction wheel supplier — 6-week lead time is tight against PDR')}.</li>
+        <li>${hl('warn', 'Neutron-radiation-testing is a single-point-of-knowledge on Arjun')}.</li>
+      </ul>
+      <h3>Blockers</h3>
+      <ul>
+        <li>${hl('bad', 'Harness connector spec still not frozen — blocks two actions')}.</li>
+      </ul>
+      <h3>Decisions to make this month</h3>
+      <ol>
+        <li>Star tracker calibration (single vs two-pass)</li>
+        <li>Battery cell capacity bump</li>
+        <li>Thermal louvre material</li>
+      </ol>
+      <p><i>Last updated by Sofia, ${d(-1)}.</i></p>
+    `;
+    extras.notes[proj2.id] = `
+      <h2>Helios-2 beta plan</h2>
+      <p>Internal beta with Ops on ${d(18)}, customer beta two weeks later.</p>
+      <h3>Progress</h3>
+      <ul>
+        <li>${hl('ok', 'Live telemetry view MVP shipped to internal ops')}.</li>
+        <li>${hl('warn', 'Security review still pending — must land before customer beta')}.</li>
+        <li>${hl('bad', 'Audit logging on backlog — must land before GA')}.</li>
+      </ul>
+    `;
+    extras.notes[proj3.id] = `
+      <h2>Falcon P2 build</h2>
+      <p>Open vendor questions: motor (T-Motor MN5008?), prop (13" vs 15"), battery cells.</p>
+      <p>Field tests targeted for ${d(60)} — pre-flight checklist needed.</p>
+      <ul>
+        <li>${hl('ok', 'Airframe trade study locked')}.</li>
+        <li>${hl('warn', 'Prop balancing rig still bench-assembled, not calibrated')}.</li>
+      </ul>
+    `;
+
     return {
       people,
       stakeholders,
       projects: [proj1, proj2, proj3],
+      activities,
       currentProjectId: proj1.id,
       currentView: 'board',
       settings: { theme: 'dark', holidayCountries: [] },
