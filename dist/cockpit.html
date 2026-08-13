@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T10:57:17.018Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T12:24:54.507Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -10028,6 +10028,9 @@ body.notes-fullscreen { overflow: hidden; }
           <button class="nav-item" data-view="people">
             <span class="nav-icon">◔</span><span>People</span>
           </button>
+          <button class="nav-item" data-view="team">
+            <span class="nav-icon">◍</span><span>Team</span>
+          </button>
         </div>
 
         <button class="nav-section nav-section-toggle" data-group="work" aria-expanded="true">Work<span class="nav-section-caret">▾</span></button>
@@ -12802,6 +12805,7 @@ body.notes-fullscreen { overflow: hidden; }
     const fns = {
       portfolio: renderPortfolio,
       people: renderPeople,
+      team: renderTeam,
       board: renderBoard,
       register: renderRegister,
       actioncloud: renderActionCloud,
@@ -23960,44 +23964,7 @@ body.notes-fullscreen { overflow: hidden; }
               </div>
             </div>`).join('')}
         </div>
-      </div>` : ''}
-      <div class="panel" id="pnlSkillsMatrix">
-        <div class="panel-title panel-title-stack">
-          <span>Skills Matrix</span>
-          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click</b> a cell to cycle its level (empty → Learning → Competent → Expert → empty). <b>Right-click</b> to step down. <b>Shift-click</b> toggles "developing". Double-click a name to open the person editor.</span>
-        </div>
-        <div class="sk-mtx-legend">
-          <span><span class="sk-swatch lvl-1"></span>Learning</span>
-          <span><span class="sk-swatch lvl-2"></span>Competent</span>
-          <span><span class="sk-swatch lvl-3"></span>Expert</span>
-          <span><span class="sk-swatch developing"></span>Developing</span>
-          <span class="sk-mtx-legend-warn"><span class="sk-swatch warn"></span>Single-point</span>
-          <span class="sk-mtx-legend-bad"><span class="sk-swatch bad"></span>Gap</span>
-        </div>
-        <div class="sk-mtx-toolbar">
-          <label class="sk-mtx-lbl">Component
-            <select id="skMtxComp">
-              <option value="">All</option>
-              ${(curProject()?.components || []).map((c) => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}
-            </select>
-          </label>
-          <label class="sk-mtx-lbl">Min level
-            <select id="skMtxMin">
-              <option value="1">Any</option>
-              <option value="2">Competent+</option>
-              <option value="3">Expert only</option>
-            </select>
-          </label>
-          <label class="sk-mtx-lbl sk-mtx-flag">
-            <input type="checkbox" id="skMtxSingle" /> <span>Single-point only <span class="muted" title="Skills with 0-1 Competent-or-Expert holders — bus-factor risks">(bus factor)</span></span>
-          </label>
-          <label class="sk-mtx-lbl sk-mtx-flag">
-            <input type="checkbox" id="skMtxGaps" /> <span>Gaps only <span class="muted" title="Skills required by actions in the current project that no one on the team holds">(project needs, unheld)</span></span>
-          </label>
-          <span class="sk-mtx-summary" id="skMtxSummary"></span>
-        </div>
-        <div id="skMtx" class="sk-mtx-scroll"></div>
-      </div>`;
+      </div>` : ''}`;
     root.appendChild(view);
     $('#btnNewPerson').addEventListener('click', () => openQuickAdd('person'));
     // External-stakeholder rows: click to filter the Register to that
@@ -24025,8 +23992,95 @@ body.notes-fullscreen { overflow: hidden; }
         ]);
       });
     });
-    // Skills Matrix rendering + filter wiring. Filter state lives on
-    // state.ui.skMtx so changes survive a re-render.
+    wireListReorder(view.querySelector('#peopleWl'), {
+      rowSelector: '.person-row[data-owner-id]',
+      idAttr: 'ownerId',
+      getArray: () => state.people,
+      setOrder: (ids) => { state.people = ids.map((id) => state.people.find((x) => x.id === id)).filter(Boolean); },
+      commitName: 'people-reorder',
+    });
+    $$('.person-row.clickable', view).forEach((row) => {
+      row.addEventListener('click', () => {
+        openPersonDashboard(row.dataset.ownerId);
+      });
+      row.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const id = row.dataset.ownerId;
+        const p = state.people.find((x) => x.id === id);
+        showContextMenu(e.clientX, e.clientY, [
+          { icon: '◰', label: 'Open dashboard',  onClick: () => openPersonDashboard(id) },
+          { icon: '✎', label: 'Edit person…',    onClick: () => openPersonEditor(id) },
+          { icon: '⌕', label: `Filter Register to ${p?.name || ''}`, onClick: () => applyTopbarFilter({ owner: id, view: 'register' }) },
+          { divider: true },
+          { icon: '×', label: 'Delete person…', danger: true, onClick: () => {
+            const open = state.projects.flatMap((pr) => pr.actions || []).filter((a) => a.owner === id && a.status !== 'done').length;
+            if (!confirm(`Delete ${p?.name}?` + (open ? ` (${open} open action${open === 1 ? '' : 's'} will be unassigned).` : ''))) return;
+            state.projects.forEach((pr) => (pr.actions || []).forEach((a) => { if (a.owner === id) a.owner = null; }));
+            state.people = state.people.filter((x) => x.id !== id);
+            commit('person-delete');
+            toast('Deleted');
+          }},
+        ]);
+      });
+    });
+  }
+
+  // ── Team view — team-wide competency dashboard ────────────────
+  // Splits the People-level workload rows from the team-wide
+  // competency picture. People page: individual load. Team page:
+  // skills matrix + coverage. Both draw from the same state.people
+  // and state.stakeholders arrays.
+  function renderTeam(root) {
+    const view = document.createElement('div');
+    view.className = 'view';
+    const proj = curProject();
+    const skillCount = allTeamSkills().size;
+    const holderCount = (state.people || []).filter((p) => (p.skills || []).length).length;
+    view.innerHTML = `
+      <div class="page-head">
+        <div>
+          <div class="page-title">Team</div>
+          <div class="page-sub">${holderCount} of ${(state.people || []).length} people with competencies declared · ${skillCount} distinct skill${skillCount === 1 ? '' : 's'} across the team</div>
+        </div>
+      </div>
+      <div class="panel" id="pnlSkillsMatrix">
+        <div class="panel-title panel-title-stack">
+          <span>Skills Matrix</span>
+          <span class="panel-desc">Competencies × people. Rows are people; columns are skills, sorted by scarcity (thinnest coverage on the left). <b>Click</b> a cell to cycle its level (empty → Learning → Competent → Expert → empty). <b>Right-click</b> to step down. <b>Shift-click</b> toggles "developing". Double-click a name to open the person editor.</span>
+        </div>
+        <div class="sk-mtx-legend">
+          <span><span class="sk-swatch lvl-1"></span>Learning</span>
+          <span><span class="sk-swatch lvl-2"></span>Competent</span>
+          <span><span class="sk-swatch lvl-3"></span>Expert</span>
+          <span><span class="sk-swatch developing"></span>Developing</span>
+          <span class="sk-mtx-legend-warn"><span class="sk-swatch warn"></span>Single-point</span>
+          <span class="sk-mtx-legend-bad"><span class="sk-swatch bad"></span>Gap</span>
+        </div>
+        <div class="sk-mtx-toolbar">
+          <label class="sk-mtx-lbl">Component
+            <select id="skMtxComp">
+              <option value="">All</option>
+              ${(proj?.components || []).map((c) => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}
+            </select>
+          </label>
+          <label class="sk-mtx-lbl">Min level
+            <select id="skMtxMin">
+              <option value="1">Any</option>
+              <option value="2">Competent+</option>
+              <option value="3">Expert only</option>
+            </select>
+          </label>
+          <label class="sk-mtx-lbl sk-mtx-flag">
+            <input type="checkbox" id="skMtxSingle" /> <span>Single-point only <span class="muted" title="Skills with 0-1 Competent-or-Expert holders — bus-factor risks">(bus factor)</span></span>
+          </label>
+          <label class="sk-mtx-lbl sk-mtx-flag">
+            <input type="checkbox" id="skMtxGaps" /> <span>Gaps only <span class="muted" title="Skills required by actions in the current project that no one on the team holds">(project needs, unheld)</span></span>
+          </label>
+          <span class="sk-mtx-summary" id="skMtxSummary"></span>
+        </div>
+        <div id="skMtx" class="sk-mtx-scroll"></div>
+      </div>`;
+    root.appendChild(view);
     state.ui = state.ui || {};
     state.ui.skMtx = state.ui.skMtx || { comp: '', min: 1, single: false, gaps: false };
     function renderSkillsMatrix() {
@@ -24036,15 +24090,11 @@ body.notes-fullscreen { overflow: hidden; }
       const proj = curProject();
       const filt = state.ui.skMtx;
       const people = state.people || [];
-      // Column set: every skill anyone holds, plus every requiredSkill
-      // in the current project so uncovered demands show up too.
       const skillSet = new Map(allTeamSkills());
       if (proj) projectRequiredSkills(proj.id).forEach((s) => {
         const k = skillKey(s); if (!skillSet.has(k)) skillSet.set(k, s);
       });
       let skills = [...skillSet.values()];
-      // Component filter — restrict to skills required by that
-      // component's actions OR held by anyone with actions in it.
       if (filt.comp && proj) {
         const req = new Set(componentRequiredSkills(proj.id, filt.comp).map(skillKey));
         const ownersInComp = new Set((proj.actions || []).filter((a) => a.component === filt.comp).map((a) => a.owner).filter(Boolean));
@@ -24055,16 +24105,12 @@ body.notes-fullscreen { overflow: hidden; }
         });
         skills = skills.filter((s) => req.has(skillKey(s)) || heldByOwners.has(skillKey(s)));
       }
-      // Sort by scarcity (fewest competent+ holders first) so bus-factor
-      // risks land in the leftmost columns.
       skills.sort((a, b) => {
         const ca = skillCoverage(a).competentPlus;
         const cb = skillCoverage(b).competentPlus;
         if (ca !== cb) return ca - cb;
         return skillKey(a).localeCompare(skillKey(b));
       });
-      // Row-level min-level + single-point + gap filters (applied to
-      // columns, not rows — a matrix filter drops columns, not people).
       const projReq = new Set((proj ? projectRequiredSkills(proj.id) : []).map(skillKey));
       skills = skills.filter((s) => {
         const cov = skillCoverage(s);
@@ -24079,10 +24125,6 @@ body.notes-fullscreen { overflow: hidden; }
         if (summary) summary.textContent = '';
         return;
       }
-      // Vertical header labels + fixed narrow columns. Cells are pure
-      // color intensity (empty / L / C / E). "Developing" adds a small
-      // corner marker. Header text is truncated with ellipsis if it
-      // wraps too tall; full label lives in the title tooltip.
       const headerRow = `<tr>
         <th class="sk-mtx-corner">Person</th>
         ${skills.map((s) => {
@@ -24127,7 +24169,6 @@ body.notes-fullscreen { overflow: hidden; }
           <thead>${headerRow}</thead>
           <tbody>${rows}</tbody>
         </table>`;
-      // Summary strip — quick counts to make the state readable at a glance.
       if (summary) {
         const singleCount = skills.filter((s) => skillCoverage(s).competentPlus === 1).length;
         const gapCount = skills.filter((s) => projReq.has(skillKey(s)) && skillCoverage(s).holders === 0).length;
@@ -24136,11 +24177,6 @@ body.notes-fullscreen { overflow: hidden; }
         if (gapCount) parts.push(`<span class="sk-warn">${gapCount} gap${gapCount === 1 ? '' : 's'}</span>`);
         summary.innerHTML = parts.join(' · ');
       }
-      // Name column is intentionally NOT click-to-open — the column
-      // is sticky (position:sticky, left:0) so it overlays cells that
-      // scroll under it. A single click there would misfire the
-      // person editor on what the user perceives as "click the cell".
-      // Instead: double-click to open, right-click for a context menu.
       host.querySelectorAll('.sk-mtx-name').forEach((th) => {
         th.addEventListener('dblclick', (ev) => {
           ev.preventDefault();
@@ -24157,11 +24193,6 @@ body.notes-fullscreen { overflow: hidden; }
           ]);
         });
       });
-      // Cell edit. Left-click cycles the level: empty → Learning →
-      // Competent → Expert → empty. Right-click steps DOWN by one.
-      // Shift-click toggles the developing flag; Cmd/Ctrl-click opens
-      // the full person editor. Scroll position is preserved across
-      // re-renders so rapid batch edits don't lurch the viewport.
       function editCellLevel(td, mode, opts = {}) {
         const personId = td.dataset.personId;
         const skillName = td.dataset.skill;
@@ -24175,7 +24206,6 @@ body.notes-fullscreen { overflow: hidden; }
           if (hit) hit.developing = !hit.developing;
           else p.skills.push({ name: skillName, level: 1, developing: true });
         } else if (mode === 'up') {
-          // Cycle: empty → 1 → 2 → 3 → empty
           if (!hit) p.skills.push({ name: skillName, level: 1, developing: false });
           else if (hit.level < 3) hit.level += 1;
           else p.skills.splice(idx, 1);
@@ -24201,11 +24231,6 @@ body.notes-fullscreen { overflow: hidden; }
           editCellLevel(td, 'down');
         });
       });
-      // Column crosshair — hovering a cell also marks every other cell
-      // in the same column (and the header) as "col-hover" so the user
-      // can see which skill they're in. Row hover uses a class the CSS
-      // paints with an inset outline instead of a background swap, so
-      // level colors stay visible under the cursor.
       const table = host.querySelector('.sk-mtx');
       function clearCrosshair() {
         table.querySelectorAll('.col-hover').forEach((el) => el.classList.remove('col-hover'));
@@ -24217,7 +24242,6 @@ body.notes-fullscreen { overflow: hidden; }
         if (!skill) return;
         clearCrosshair();
         table.querySelectorAll(`.sk-mtx-cell[data-skill="${CSS.escape(skill)}"]`).forEach((el) => el.classList.add('col-hover'));
-        // Header column tag matches on textContent trimmed against skill.
         table.querySelectorAll('.sk-mtx-h').forEach((h) => {
           const label = h.querySelector('.sk-mtx-h-label')?.textContent?.trim();
           if (label === skill) h.classList.add('col-hover');
@@ -24225,7 +24249,6 @@ body.notes-fullscreen { overflow: hidden; }
       });
       table?.addEventListener('mouseleave', clearCrosshair);
     }
-    // Wire filter controls
     const compSel = $('#skMtxComp'); if (compSel) compSel.value = state.ui.skMtx.comp || '';
     const minSel  = $('#skMtxMin');  if (minSel)  minSel.value  = String(state.ui.skMtx.min || 1);
     const singleChk = $('#skMtxSingle'); if (singleChk) singleChk.checked = !!state.ui.skMtx.single;
@@ -24235,37 +24258,6 @@ body.notes-fullscreen { overflow: hidden; }
     singleChk?.addEventListener('change', () => { state.ui.skMtx.single = singleChk.checked; renderSkillsMatrix(); });
     gapsChk?.addEventListener('change', () => { state.ui.skMtx.gaps = gapsChk.checked; renderSkillsMatrix(); });
     renderSkillsMatrix();
-    wireListReorder(view.querySelector('#peopleWl'), {
-      rowSelector: '.person-row[data-owner-id]',
-      idAttr: 'ownerId',
-      getArray: () => state.people,
-      setOrder: (ids) => { state.people = ids.map((id) => state.people.find((x) => x.id === id)).filter(Boolean); },
-      commitName: 'people-reorder',
-    });
-    $$('.person-row.clickable', view).forEach((row) => {
-      row.addEventListener('click', () => {
-        openPersonDashboard(row.dataset.ownerId);
-      });
-      row.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        const id = row.dataset.ownerId;
-        const p = state.people.find((x) => x.id === id);
-        showContextMenu(e.clientX, e.clientY, [
-          { icon: '◰', label: 'Open dashboard',  onClick: () => openPersonDashboard(id) },
-          { icon: '✎', label: 'Edit person…',    onClick: () => openPersonEditor(id) },
-          { icon: '⌕', label: `Filter Register to ${p?.name || ''}`, onClick: () => applyTopbarFilter({ owner: id, view: 'register' }) },
-          { divider: true },
-          { icon: '×', label: 'Delete person…', danger: true, onClick: () => {
-            const open = state.projects.flatMap((pr) => pr.actions || []).filter((a) => a.owner === id && a.status !== 'done').length;
-            if (!confirm(`Delete ${p?.name}?` + (open ? ` (${open} open action${open === 1 ? '' : 's'} will be unassigned).` : ''))) return;
-            state.projects.forEach((pr) => (pr.actions || []).forEach((a) => { if (a.owner === id) a.owner = null; }));
-            state.people = state.people.filter((x) => x.id !== id);
-            commit('person-delete');
-            toast('Deleted');
-          }},
-        ]);
-      });
-    });
   }
 
   /* ---------------------- Phase I: Person dashboard -------------------- */
