@@ -9905,17 +9905,39 @@ body.notes-fullscreen { overflow: hidden; }
   background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
   color: var(--text); padding: 4px 8px; font-size: 12px;
 }
-.ac-alloc-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.ac-alloc-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+/* Two-row layout so the person picker gets full width even on a
+   narrow drawer. Row 1: person picker + delete. Row 2: start / end
+   / hours / tentative. Without this the 6-column single-row layout
+   squeezed the elastic person column to ~14px on ~460px drawers,
+   making the picker unreachable. */
 .ac-alloc-row {
-  display: grid; grid-template-columns: 1fr 130px 130px 80px auto 28px;
-  gap: 6px; align-items: center;
-  padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
+  display: grid;
+  grid-template-columns: 1fr 28px;
+  grid-template-areas:
+    "person delete"
+    "meta   meta";
+  gap: 6px;
+  align-items: center;
+  padding: 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
 }
+.ac-alloc-row .ac-al-person { grid-area: person; min-width: 0; width: 100%; }
+.ac-alloc-row .ac-al-del    { grid-area: delete; }
+.ac-alloc-row .ac-al-meta {
+  grid-area: meta;
+  display: grid;
+  grid-template-columns: 1fr 1fr 88px auto;
+  gap: 6px; align-items: center;
+}
+.ac-alloc-row .ac-al-meta .ac-al-start,
+.ac-alloc-row .ac-al-meta .ac-al-end,
+.ac-alloc-row .ac-al-meta .ac-al-hours { min-width: 0; width: 100%; }
 .ac-alloc-row select, .ac-alloc-row input {
   background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
   color: var(--text); padding: 4px 6px; font-size: 12px;
+  box-sizing: border-box;
 }
-.ac-al-tent { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); }
+.ac-al-tent { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); white-space: nowrap; }
 .ac-alloc-summary { font-size: 11.5px; margin-top: 4px; }
 
 /* Predicted load-over-time — same visual family as the planner's

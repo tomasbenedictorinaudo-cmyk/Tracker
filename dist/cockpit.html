@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T15:01:48.102Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-13T15:21:07.705Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -9914,17 +9914,39 @@ body.notes-fullscreen { overflow: hidden; }
   background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
   color: var(--text); padding: 4px 8px; font-size: 12px;
 }
-.ac-alloc-list { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+.ac-alloc-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+/* Two-row layout so the person picker gets full width even on a
+   narrow drawer. Row 1: person picker + delete. Row 2: start / end
+   / hours / tentative. Without this the 6-column single-row layout
+   squeezed the elastic person column to ~14px on ~460px drawers,
+   making the picker unreachable. */
 .ac-alloc-row {
-  display: grid; grid-template-columns: 1fr 130px 130px 80px auto 28px;
-  gap: 6px; align-items: center;
-  padding: 6px 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
+  display: grid;
+  grid-template-columns: 1fr 28px;
+  grid-template-areas:
+    "person delete"
+    "meta   meta";
+  gap: 6px;
+  align-items: center;
+  padding: 8px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 4px;
 }
+.ac-alloc-row .ac-al-person { grid-area: person; min-width: 0; width: 100%; }
+.ac-alloc-row .ac-al-del    { grid-area: delete; }
+.ac-alloc-row .ac-al-meta {
+  grid-area: meta;
+  display: grid;
+  grid-template-columns: 1fr 1fr 88px auto;
+  gap: 6px; align-items: center;
+}
+.ac-alloc-row .ac-al-meta .ac-al-start,
+.ac-alloc-row .ac-al-meta .ac-al-end,
+.ac-alloc-row .ac-al-meta .ac-al-hours { min-width: 0; width: 100%; }
 .ac-alloc-row select, .ac-alloc-row input {
   background: var(--bg-1); border: 1px solid var(--line); border-radius: 3px;
   color: var(--text); padding: 4px 6px; font-size: 12px;
+  box-sizing: border-box;
 }
-.ac-al-tent { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); }
+.ac-al-tent { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); white-space: nowrap; }
 .ac-alloc-summary { font-size: 11.5px; margin-top: 4px; }
 
 /* Predicted load-over-time — same visual family as the planner's
@@ -24975,12 +24997,14 @@ body.notes-fullscreen { overflow: hidden; }
       const opts = persons.map((p) => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('');
       host.innerHTML = (a.allocations || []).map((al) => `
         <div class="ac-alloc-row" data-alid="${escapeHTML(al.id)}">
-          <select class="ac-al-person"><option value="">— Person —</option>${opts.replace(new RegExp(`value="${al.personId}"`), `value="${al.personId}" selected`)}</select>
-          <input type="date" class="ac-al-start" value="${escapeHTML(al.startDate || '')}" title="Start" />
-          <input type="date" class="ac-al-end"   value="${escapeHTML(al.endDate || '')}"   title="End" />
-          <input type="number" class="ac-al-hours" min="0" step="1" value="${al.hours}" title="Hours" />
-          <label class="ac-al-tent"><input type="checkbox" class="ac-al-tent-chk" ${al.tentative ? 'checked' : ''}/> tentative</label>
+          <select class="ac-al-person" title="Assign to a team member"><option value="">— Assign to person —</option>${opts.replace(new RegExp(`value="${al.personId}"`), `value="${al.personId}" selected`)}</select>
           <button type="button" class="icon-btn ac-al-del" title="Remove">×</button>
+          <div class="ac-al-meta">
+            <input type="date" class="ac-al-start" value="${escapeHTML(al.startDate || '')}" title="Start" />
+            <input type="date" class="ac-al-end"   value="${escapeHTML(al.endDate || '')}"   title="End" />
+            <input type="number" class="ac-al-hours" min="0" step="1" value="${al.hours}" title="Hours" />
+            <label class="ac-al-tent"><input type="checkbox" class="ac-al-tent-chk" ${al.tentative ? 'checked' : ''}/> tentative</label>
+          </div>
         </div>`).join('') || '<div class="muted" style="font-size:11px;">No allocations yet — add one to plan the split.</div>';
       const sumEl = $('#acAllocSum');
       if (sumEl) {

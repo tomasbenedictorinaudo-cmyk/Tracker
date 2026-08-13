@@ -14288,12 +14288,14 @@
       const opts = persons.map((p) => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('');
       host.innerHTML = (a.allocations || []).map((al) => `
         <div class="ac-alloc-row" data-alid="${escapeHTML(al.id)}">
-          <select class="ac-al-person"><option value="">— Person —</option>${opts.replace(new RegExp(`value="${al.personId}"`), `value="${al.personId}" selected`)}</select>
-          <input type="date" class="ac-al-start" value="${escapeHTML(al.startDate || '')}" title="Start" />
-          <input type="date" class="ac-al-end"   value="${escapeHTML(al.endDate || '')}"   title="End" />
-          <input type="number" class="ac-al-hours" min="0" step="1" value="${al.hours}" title="Hours" />
-          <label class="ac-al-tent"><input type="checkbox" class="ac-al-tent-chk" ${al.tentative ? 'checked' : ''}/> tentative</label>
+          <select class="ac-al-person" title="Assign to a team member"><option value="">— Assign to person —</option>${opts.replace(new RegExp(`value="${al.personId}"`), `value="${al.personId}" selected`)}</select>
           <button type="button" class="icon-btn ac-al-del" title="Remove">×</button>
+          <div class="ac-al-meta">
+            <input type="date" class="ac-al-start" value="${escapeHTML(al.startDate || '')}" title="Start" />
+            <input type="date" class="ac-al-end"   value="${escapeHTML(al.endDate || '')}"   title="End" />
+            <input type="number" class="ac-al-hours" min="0" step="1" value="${al.hours}" title="Hours" />
+            <label class="ac-al-tent"><input type="checkbox" class="ac-al-tent-chk" ${al.tentative ? 'checked' : ''}/> tentative</label>
+          </div>
         </div>`).join('') || '<div class="muted" style="font-size:11px;">No allocations yet — add one to plan the split.</div>';
       const sumEl = $('#acAllocSum');
       if (sumEl) {
