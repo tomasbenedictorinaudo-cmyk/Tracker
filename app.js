@@ -15192,10 +15192,8 @@
           <div class="dash-name">${escapeHTML(p.name)}</div>
           <div class="dash-role">${escapeHTML(p.role || '—')}</div>
           <div class="dash-head-actions">
-            <button class="ghost" id="dashEdit">Edit person…</button>
             <button class="ghost" id="dashFilter">Filter Register to ${escapeHTML(p.name)}</button>
             <button class="ghost" id="dashSwot" title="Generate SWOT view from the current development review">⊞ SWOT</button>
-            <button class="ghost" id="dashFullscreen" title="Toggle full-screen">⛶ Fullscreen</button>
           </div>
         </div>
       </div>
@@ -15293,7 +15291,26 @@
             <div class="dash-row-sub">${escapeHTML(pr.name)} · residual ${_score}</div>
           </div>`).join(''))}`;
     $('#drawer').hidden = false;
-    $('#dashEdit').addEventListener('click', () => openPersonEditor(personId));
+    // Inject icon-only Full-screen + Edit actions into the drawer
+    // header (next to the ×). Cleared by closeDrawer so they don't
+    // leak into other drawer contents (action / risk / activity).
+    const headSlot = $('#drawerHeadActions');
+    if (headSlot) {
+      headSlot.innerHTML = `
+        <button class="icon-btn" id="dashFullscreenIcon" title="Toggle full-screen" aria-label="Toggle full-screen">⛶</button>
+        <button class="icon-btn" id="dashEditIcon" title="Edit person…" aria-label="Edit person">✎</button>`;
+      headSlot.querySelector('#dashEditIcon')?.addEventListener('click', () => openPersonEditor(personId));
+      headSlot.querySelector('#dashFullscreenIcon')?.addEventListener('click', () => {
+        const overlay = $('#drawer');
+        overlay?.classList.toggle('is-fullscreen');
+        const on = overlay?.classList.contains('is-fullscreen');
+        const btn = headSlot.querySelector('#dashFullscreenIcon');
+        if (btn) {
+          btn.textContent = on ? '↙' : '⛶';
+          btn.title = on ? 'Exit full-screen' : 'Toggle full-screen';
+        }
+      });
+    }
     $('#dashFilter').addEventListener('click', () => {
       closeDrawer();
       applyTopbarFilter({ owner: personId, view: 'register' });
@@ -15312,15 +15329,6 @@
         state.currentProjectId = row.dataset.projId;
         openRiskEditor(row.dataset.riskId);
       });
-    });
-    // Fullscreen toggle — adds .is-fullscreen to the drawer overlay so
-    // CSS overrides the fixed drawer width. Esc still closes the
-    // drawer (browser-native contract for the ×).
-    $('#dashFullscreen')?.addEventListener('click', () => {
-      const overlay = $('#drawer');
-      overlay?.classList.toggle('is-fullscreen');
-      const on = overlay?.classList.contains('is-fullscreen');
-      $('#dashFullscreen').textContent = on ? '↙ Exit fullscreen' : '⛶ Fullscreen';
     });
     // SWOT view — opens a modal built from the currently-selected
     // review. Falls back to a message if no review exists.
@@ -17278,6 +17286,11 @@
     // change-request) opens at its normal 460 px width instead of
     // inheriting the dashboard's full-viewport mode.
     d.classList.remove('is-fullscreen');
+    // Wipe any per-drawer icon actions injected into the header slot
+    // (e.g. person dashboard's ⛶ full-screen and ✎ edit) so they
+    // don't leak into the next drawer that reuses the same shell.
+    const slot = $('#drawerHeadActions');
+    if (slot) slot.innerHTML = '';
   }
 
   /* --------------------------- Quick add ----------------------------- */

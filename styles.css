@@ -8441,11 +8441,17 @@ kbd {
 #drawer.is-fullscreen .drawer { width: 100%; max-width: 100%; }
 #drawer.is-fullscreen .drawer-body { padding: 20px 32px; }
 .drawer-head {
-  display: flex; align-items: center;
+  display: flex; align-items: center; gap: 4px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--line);
 }
 .drawer-title { font-weight: 600; flex: 1; font-size: 14px; }
+/* Per-drawer icon action slot that sits between the title and the ×.
+   Empty by default; the person dashboard fills it with ⛶ / ✎ buttons. */
+.drawer-head-actions {
+  display: inline-flex; align-items: center; gap: 2px;
+}
+.drawer-head-actions:empty { display: none; }
 .drawer-body { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
 /* Multi-column field rows inside the drawer use inline grid templates
    like `grid-template-columns: 1fr 1fr 1fr` — give every grid cell
