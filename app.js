@@ -15230,7 +15230,7 @@
         <div class="dash-section">
           <div class="dash-section-title">Skills<span class="dash-section-count">${held.length} claimed${developing.length ? ` · ${developing.length} developing` : ''}</span></div>
           <div class="dash-skills-strip">
-            ${held.map((s) => `<span class="sk-chip level-${s.level}${s.developing ? ' developing' : ''}" title="${escapeHTML(s.name)} — ${SKILL_LEVELS[s.level - 1].label}${s.developing ? ' · developing' : ''}"><span class="sk-chip-name">${escapeHTML(s.name)}</span><span class="sk-chip-dots">${'●'.repeat(s.level)}${'○'.repeat(3 - s.level)}</span>${s.developing ? '<span class="sk-chip-grow">◇</span>' : ''}</span>`).join('')}
+            ${held.map((s) => `<span class="sk-chip level-${s.level}${s.developing ? ' developing' : ''}" data-skill-name="${escapeHTML(s.name)}" title="${escapeHTML(s.name)} — ${SKILL_LEVELS[s.level - 1].label}${s.developing ? ' · developing' : ''} · right-click to remove"><span class="sk-chip-name">${escapeHTML(s.name)}</span><span class="sk-chip-dots">${'●'.repeat(s.level)}${'○'.repeat(3 - s.level)}</span>${s.developing ? '<span class="sk-chip-grow">◇</span>' : ''}</span>`).join('')}
           </div>
           ${developing.length ? `
           <div class="dash-grow-callout">
@@ -15333,6 +15333,26 @@
     // SWOT view — opens a modal built from the currently-selected
     // review. Falls back to a message if no review exists.
     $('#dashSwot')?.addEventListener('click', () => openSwotForPerson(p.id));
+    // Right-click a skill chip to remove it. Confirms via the standard
+    // context menu so a mis-click doesn't destroy a skill silently.
+    // Re-opens the dashboard to reflect the removal (the strip is
+    // rendered inline; there's no local re-render callback here).
+    $('#drawerBody').querySelectorAll('.dash-skills-strip .sk-chip[data-skill-name]').forEach((chip) => {
+      chip.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        const name = chip.dataset.skillName;
+        if (!name) return;
+        showContextMenu(ev.clientX, ev.clientY, [
+          {
+            icon: '×', label: `Remove skill "${name}"`, danger: true, onClick: () => {
+              p.skills = (p.skills || []).filter((s) => skillKey(s.name) !== skillKey(name));
+              commit('skill-remove-from-dashboard');
+              openPersonDashboard(personId);
+            },
+          },
+        ]);
+      });
+    });
     // Development reviews controller. Keeps a local `selected` id
     // pointing at the review currently in the editor. Re-renders on
     // any mutation. Compare mode swaps in a two-column view.
