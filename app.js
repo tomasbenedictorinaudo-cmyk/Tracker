@@ -15245,10 +15245,6 @@
           </div>` : ''}
         </div>`;
       })()}
-      <div class="dash-section" id="dashPlannerSection">
-        <div class="dash-section-title">Planner<span class="dash-section-count">workload timeline</span></div>
-        <div id="dashPlannerHost"></div>
-      </div>
       <div class="dash-section is-collapsible${(state.ui?.dashUi?.reviewCollapsed) ? ' is-collapsed' : ''}" id="dashReviewsWrap">
         <button type="button" class="dash-section-title dev-rv-heading" id="devRvToggle" aria-expanded="${!(state.ui?.dashUi?.reviewCollapsed)}">
           <span class="dev-rv-caret">▾</span>
@@ -15317,15 +15313,6 @@
         openRiskEditor(row.dataset.riskId);
       });
     });
-    // Embed the Planner in this person's dashboard. Locked to the
-    // person, uses a local rerender so scope / zoom / hide-done
-    // toggles don't tear the drawer down.
-    (() => {
-      const host = document.querySelector('#dashPlannerHost');
-      if (!host) return;
-      function rerenderPlanner() { renderPlanner(host, { lockedPersonId: personId, onChange: rerenderPlanner }); }
-      rerenderPlanner();
-    })();
     // Fullscreen toggle — adds .is-fullscreen to the drawer overlay so
     // CSS overrides the fixed drawer width. Esc still closes the
     // drawer (browser-native contract for the ×).
