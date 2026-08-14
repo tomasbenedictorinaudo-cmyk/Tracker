@@ -9861,14 +9861,17 @@ body.notes-fullscreen { overflow: hidden; }
 .act-gantt-wrap { overflow-x: auto; }
 .act-gantt-scroll { overflow-x: auto; overflow-y: hidden; }
 .act-gantt { display: block; background: var(--bg-1); }
+.act-wl-scroll { overflow-x: auto; overflow-y: hidden; }
+.act-wl { display: block; background: var(--bg-1); }
 .act-bar { cursor: pointer; }
 .act-bar:hover rect { fill-opacity: 1; }
 .act-mile, .act-deliv { cursor: pointer; }
 .act-mile:hover polygon, .act-deliv:hover polygon { transform: translateY(-1px); filter: brightness(1.2); }
 
-/* Workload */
+/* Workload — the SVG's natural width matches the Gantt's totalW so
+   the two charts stack in perfect X alignment. Do NOT constrain to
+   100% here or the workload chart shrinks and mis-aligns. */
 .act-wl-wrap { padding-top: 8px; }
-.act-wl { display: block; max-width: 100%; }
 .act-wl-toolbar {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   padding: 8px 12px; background: var(--bg-2); border-bottom: 1px solid var(--line);

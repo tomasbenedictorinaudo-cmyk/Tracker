@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-13T16:31:10.137Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-14T15:11:57.903Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -9870,14 +9870,17 @@ body.notes-fullscreen { overflow: hidden; }
 .act-gantt-wrap { overflow-x: auto; }
 .act-gantt-scroll { overflow-x: auto; overflow-y: hidden; }
 .act-gantt { display: block; background: var(--bg-1); }
+.act-wl-scroll { overflow-x: auto; overflow-y: hidden; }
+.act-wl { display: block; background: var(--bg-1); }
 .act-bar { cursor: pointer; }
 .act-bar:hover rect { fill-opacity: 1; }
 .act-mile, .act-deliv { cursor: pointer; }
 .act-mile:hover polygon, .act-deliv:hover polygon { transform: translateY(-1px); filter: brightness(1.2); }
 
-/* Workload */
+/* Workload — the SVG's natural width matches the Gantt's totalW so
+   the two charts stack in perfect X alignment. Do NOT constrain to
+   100% here or the workload chart shrinks and mis-aligns. */
 .act-wl-wrap { padding-top: 8px; }
-.act-wl { display: block; max-width: 100%; }
 .act-wl-toolbar {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   padding: 8px 12px; background: var(--bg-2); border-bottom: 1px solid var(--line);
@@ -25056,6 +25059,33 @@ body.notes-fullscreen { overflow: hidden; }
     renderActivityList();
     renderActivityGantt();
     renderActivityWorkload();
+    // Bi-directional horizontal scroll sync between the People×Time
+    // Gantt and the Workload chart. Both use the same X coordinate
+    // system so a scroll of one drives an identical scroll of the
+    // other — reading a Wednesday on the top chart lands on the same
+    // Wednesday of the bottom chart.
+    const ganttScroll = view.querySelector('.act-gantt-scroll');
+    const wlScroll = view.querySelector('.act-wl-scroll');
+    if (ganttScroll && wlScroll) {
+      let syncing = false;
+      const bind = (from, to) => from.addEventListener('scroll', () => {
+        if (syncing) return;
+        if (to.scrollLeft === from.scrollLeft) return;
+        syncing = true;
+        to.scrollLeft = from.scrollLeft;
+        syncing = false;
+      });
+      bind(ganttScroll, wlScroll);
+      bind(wlScroll, ganttScroll);
+      // Auto-scroll both to center today on first render so past
+      // context is visible on the left without hiding upcoming work.
+      const win = state.ui.act._win;
+      if (win) {
+        const target = Math.max(0, win.dateX(win.today) - ganttScroll.clientWidth / 2);
+        ganttScroll.scrollLeft = target;
+        wlScroll.scrollLeft = target;
+      }
+    }
     // Filter wiring
     const g  = $('#actGroup');    if (g)  { g.value  = state.ui.act.groupBy;      g.addEventListener('change',  () => { state.ui.act.groupBy      = g.value;  renderActivityWorkload(); }); }
     const fp = $('#actFiltProj'); if (fp) { fp.value = state.ui.act.projectFilter; fp.addEventListener('change', () => { state.ui.act.projectFilter = fp.value; renderActivityWorkload(); }); }
@@ -25448,6 +25478,42 @@ body.notes-fullscreen { overflow: hidden; }
     });
   }
 
+  // Shared time window for the Activities Gantt + Workload chart.
+  // Computed once per render and cached on state.ui.act._win so both
+  // renderers use identical X coordinates — that lets the two charts
+  // stack under one another with columns aligned. The window extends
+  // to cover ALL activity dates (past AND future), padded with 2
+  // weeks before the earliest and 4 weeks after the latest so there
+  // is always some breathing room around the data on both sides.
+  function _activitiesWindow() {
+    const acts = state.activities || [];
+    const alls = acts.flatMap((a) => [
+      ...(a.allocations || []).map((al) => [al.startDate, al.endDate]).flat().filter(Boolean),
+      ...(a.milestones || []).map((m) => m.date).filter(Boolean),
+      ...(a.deliverables || []).map((d) => d.date).filter(Boolean),
+      a.plannedStart, a.plannedEnd,
+    ].filter(Boolean));
+    const today = todayISO();
+    const sorted = alls.slice().sort();
+    // Padding on both sides — 14 days before, 28 days after — so the
+    // window has context around the extremes. Also clamps around today
+    // so the "today" line always sits inside the visible span.
+    const earliest = sorted[0] || today;
+    const latest   = sorted[sorted.length - 1] || today;
+    const winStart = fmtISO(new Date(Math.min(new Date(earliest).getTime() - 14 * dayMs, new Date(today).getTime() - 14 * dayMs)));
+    const winEnd   = fmtISO(new Date(Math.max(new Date(latest).getTime()   + 28 * dayMs, new Date(today).getTime() + 84 * dayMs)));
+    const spanDays = Math.max(1, Math.round((new Date(winEnd) - new Date(winStart)) / dayMs) + 1);
+    // Aim for a chart width in the ~1600-2400 px range so bars are
+    // legible even on wide windows. Clamped to [4, 14] px/day.
+    const dayW = Math.max(4, Math.min(14, Math.round(2000 / spanDays)));
+    const totalW = spanDays * dayW;
+    const dateX = (iso) => {
+      if (!iso) return 0;
+      return ((new Date(iso) - new Date(winStart)) / dayMs) * dayW;
+    };
+    return { winStart, winEnd, spanDays, dayW, totalW, dateX, today };
+  }
+
   // ── Gantt: rows = people, columns = time ────────────────────
   function renderActivityGantt() {
     const host = $('#actGantt'); if (!host) return;
@@ -25457,28 +25523,12 @@ body.notes-fullscreen { overflow: hidden; }
       host.innerHTML = '<div class="empty" style="padding:24px; text-align:center;">Create an activity and add allocations to populate the gantt.</div>';
       return;
     }
-    // Time window: earliest allocation/milestone/deliverable date → 4 weeks after latest
-    const alls = acts.flatMap((a) => [
-      ...(a.allocations || []).map((al) => [al.startDate, al.endDate]).flat().filter(Boolean),
-      ...(a.milestones || []).map((m) => m.date).filter(Boolean),
-      ...(a.deliverables || []).map((d) => d.date).filter(Boolean),
-    ]);
-    const today = todayISO();
-    let winStart = alls.length ? alls.sort()[0] : today;
-    let winEnd   = alls.length ? alls.sort().slice(-1)[0] : today;
-    // Pad and clamp to at least a 12-week span
-    winStart = fmtISO(new Date(Math.min(new Date(winStart).getTime(), new Date(today).getTime() - 7 * dayMs)));
-    winEnd   = fmtISO(new Date(Math.max(new Date(winEnd).getTime(),   new Date(today).getTime() + 84 * dayMs)));
-    const spanDays = Math.max(1, Math.round((new Date(winEnd) - new Date(winStart)) / dayMs) + 1);
-    const dayW = Math.max(4, Math.min(14, Math.round(1600 / spanDays)));
+    const win = _activitiesWindow();
+    state.ui.act._win = win;
+    const { winStart, winEnd, dayW, totalW, dateX, today } = win;
     const rowH = 44;
     const laneY = (i) => 40 + i * rowH;
-    const totalW = spanDays * dayW;
     const totalH = 40 + people.length * rowH + 20;
-    const dateX = (iso) => {
-      if (!iso) return 0;
-      return ((new Date(iso) - new Date(winStart)) / dayMs) * dayW;
-    };
     // Group allocations by person
     const byPerson = new Map();
     people.forEach((p) => byPerson.set(p.id, []));
@@ -25506,6 +25556,12 @@ body.notes-fullscreen { overflow: hidden; }
     const todayX = dateX(today);
     const svg = `
       <svg class="act-gantt" viewBox="0 0 ${totalW} ${totalH}" width="${totalW}" height="${totalH}" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="actHolHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect width="6" height="6" fill="rgba(148,163,184,.12)" />
+            <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(148,163,184,.5)" stroke-width="1"/>
+          </pattern>
+        </defs>
         ${weekLines.map((x) => `<line x1="${x}" y1="30" x2="${x}" y2="${totalH - 10}" stroke="rgba(148,163,184,.12)" stroke-width="1" />`).join('')}
         ${monthMarks.map((mk) => `<text x="${mk.x + 4}" y="20" fill="var(--text-faint)" font-size="10.5" font-family="sans-serif">${escapeHTML(mk.label)}</text>`).join('')}
         <line x1="${todayX}" y1="24" x2="${todayX}" y2="${totalH - 10}" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="3 3" />
@@ -25584,8 +25640,28 @@ body.notes-fullscreen { overflow: hidden; }
               <polygon points="${x},${y2} ${x - 6},${y2 + 6} ${x},${y2 + 12} ${x + 6},${y2 + 6}" fill="var(--ok)" stroke="#000" stroke-opacity=".35" />
             </g>`;
           }).join('');
+          // Holiday bands — one hatched rect per off-window range on
+          // p.holidays. Set on the person's dashboard; visible here so
+          // the planner surface shows when a person is unavailable
+          // (vacation, leave, training, whatever they typed as label).
+          const holidayBands = (p.holidays || []).map((h) => {
+            if (!h.start || !h.end) return '';
+            const hs = h.start;
+            const he = h.end;
+            if (he < winStart || hs > winEnd) return '';
+            const clipStart = hs < winStart ? winStart : hs;
+            const clipEnd   = he > winEnd   ? winEnd   : he;
+            const bx = dateX(clipStart);
+            const bw = Math.max(2, dateX(clipEnd) + dayW - bx);
+            const label = (h.label || 'On holiday') + ' · ' + hs + ' → ' + he;
+            return `<g class="act-holiday">
+              <title>${escapeHTML(label)}</title>
+              <rect x="${bx}" y="${y + 4}" width="${bw}" height="${rowH - 8}" fill="url(#actHolHatch)" />
+            </g>`;
+          }).join('');
           return `
             <rect x="0" y="${y}" width="${totalW}" height="${rowH}" fill="${bg}" />
+            ${holidayBands}
             <text x="6" y="${y + rowH / 2 + 4}" fill="var(--text-faint)" font-size="11" font-family="sans-serif">${escapeHTML(p.name)}</text>
             ${rowBars}
             ${mileMarks}
@@ -25618,7 +25694,10 @@ body.notes-fullscreen { overflow: hidden; }
     }));
   }
 
-  // ── Workload chart — 12 weeks stacked hours ─────────────────
+  // ── Workload chart — weekly stacked hours over the Gantt window ─
+  // Uses the SAME time axis as the Activities Gantt (winStart, dayW,
+  // totalW) so the two charts read as one continuous timeline: each
+  // week column sits at the same X on both.
   function renderActivityWorkload() {
     const host = $('#actWorkload'); if (!host) return;
     const acts = state.activities || [];
@@ -25627,10 +25706,22 @@ body.notes-fullscreen { overflow: hidden; }
       return;
     }
     const filt = state.ui.act;
-    const weeks = 12;
-    const today = todayISO();
-    const monday = (() => { const d = new Date(today); const day = (d.getDay() + 6) % 7; d.setDate(d.getDate() - day); d.setHours(0,0,0,0); return d; })();
-    const weekStarts = Array.from({ length: weeks }, (_, i) => new Date(monday.getTime() + i * 7 * dayMs));
+    const win = state.ui.act._win || _activitiesWindow();
+    const { winStart, winEnd, dayW, totalW, dateX, today } = win;
+    // Monday-anchored weeks from winStart through winEnd.
+    const firstMonday = (() => {
+      const d = new Date(winStart);
+      const day = (d.getDay() + 6) % 7;
+      d.setDate(d.getDate() - day);
+      d.setHours(0,0,0,0);
+      return d;
+    })();
+    const weekStarts = [];
+    const endTime = new Date(winEnd).getTime();
+    for (let cursor = firstMonday.getTime(); cursor <= endTime; cursor += 7 * dayMs) {
+      weekStarts.push(new Date(cursor));
+    }
+    const weeks = weekStarts.length;
     // Compute hours per week per bucket (firm / tentative / requested-not-allocated)
     const filtered = acts.filter((a) => {
       if (filt.projectFilter && a.projectId !== filt.projectFilter) return false;
@@ -25699,29 +25790,32 @@ body.notes-fullscreen { overflow: hidden; }
       }
     });
     const groups = [...allGroups];
-    // Chart dims
-    const W = 720, H = 240, padL = 40, padR = 20, padT = 14, padB = 40;
-    const innerW = W - padL - padR;
+    // Chart dims — width matches the Gantt's totalW so weeks line up
+    // 1:1 in X. Y-axis lives inside the chart's own coordinate system.
+    const H = 220, padT = 14, padB = 40;
     const innerH = H - padT - padB;
-    const barW = innerW / weeks;
+    const barW = dayW * 7;
     // Max hours in any single week (stacked)
     const weekTotals = buckets.map((b) => Object.values(b).reduce((s, v) => s + v.firm + v.tent + v.unalloc, 0));
     const maxH = Math.max(1, ...weekTotals);
-    // Draw
     const svg = [];
-    svg.push(`<svg class="act-wl" viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg">`);
-    // Y grid
+    svg.push(`<svg class="act-wl" viewBox="0 0 ${totalW} ${H}" width="${totalW}" height="${H}" xmlns="http://www.w3.org/2000/svg">`);
+    // Y grid — spans the full width so the ticks visually connect
+    // with the Gantt column grid above.
     const yTicks = 4;
     for (let i = 0; i <= yTicks; i++) {
       const y = padT + (innerH / yTicks) * i;
       const v = Math.round((maxH * (yTicks - i)) / yTicks);
-      svg.push(`<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke="rgba(148,163,184,.10)" />`);
-      svg.push(`<text x="${padL - 6}" y="${y + 3}" text-anchor="end" font-size="10" fill="var(--text-faint)">${v}h</text>`);
+      svg.push(`<line x1="0" y1="${y}" x2="${totalW}" y2="${y}" stroke="rgba(148,163,184,.10)" />`);
+      svg.push(`<text x="4" y="${y + 3}" font-size="10" fill="var(--text-faint)">${v}h</text>`);
     }
-    // Bars
+    // Today line — same coordinate as the Gantt
+    const todayX = dateX(today);
+    svg.push(`<line x1="${todayX}" y1="${padT}" x2="${todayX}" y2="${padT + innerH}" stroke="var(--warn)" stroke-width="1.5" stroke-dasharray="3 3" />`);
+    // Bars — each week's bar sits at dateX(week start), width = 7 days
     buckets.forEach((b, wi) => {
       let yCursor = padT + innerH;
-      const x = padL + wi * barW;
+      const x = dateX(fmtISO(weekStarts[wi]));
       groups.forEach((k) => {
         const cell = b[k]; if (!cell) return;
         const color = groupColor(k);
@@ -25734,16 +25828,19 @@ body.notes-fullscreen { overflow: hidden; }
           if (!s.h) return;
           const hpx = (s.h / maxH) * innerH;
           yCursor -= hpx;
-          svg.push(`<rect x="${x + 2}" y="${yCursor}" width="${barW - 4}" height="${hpx}" fill="${color}" fill-opacity="${s.op}" ${s.pattern ? 'stroke="' + color + '" stroke-dasharray="3 2" stroke-width=".8"' : ''} />`);
+          svg.push(`<rect x="${x + 1}" y="${yCursor}" width="${barW - 2}" height="${hpx}" fill="${color}" fill-opacity="${s.op}" ${s.pattern ? 'stroke="' + color + '" stroke-dasharray="3 2" stroke-width=".8"' : ''} />`);
         });
       });
-      // Week label
-      const label = weekStarts[wi].toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-      svg.push(`<text x="${x + barW / 2}" y="${H - 20}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${escapeHTML(label)}</text>`);
+      // Week label — only every 4th so the axis stays readable at
+      // narrow dayW values.
+      if (barW >= 50 || wi % 4 === 0) {
+        const label = weekStarts[wi].toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        svg.push(`<text x="${x + barW / 2}" y="${H - 20}" text-anchor="middle" font-size="10" fill="var(--text-faint)">${escapeHTML(label)}</text>`);
+      }
     });
-    // Legend
+    // Legend — anchored top-left inside the chart area
     const legendY = H - 6;
-    let lx = padL;
+    let lx = 4;
     groups.forEach((k) => {
       const c = groupColor(k);
       svg.push(`<rect x="${lx}" y="${legendY - 8}" width="10" height="10" fill="${c}" fill-opacity=".85" />`);
@@ -25751,7 +25848,7 @@ body.notes-fullscreen { overflow: hidden; }
       lx += 14 + groupLabel(k).length * 6 + 12;
     });
     svg.push('</svg>');
-    host.innerHTML = svg.join('');
+    host.innerHTML = `<div class="act-wl-scroll">${svg.join('')}</div>`;
   }
 
   /* ---------------------- Phase I: Person dashboard -------------------- */
