@@ -27887,7 +27887,14 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
   function maybeRunFirstRunTour() {
     if (state.settings?.walkthroughsSeen?.['getting-started'] === 'completed') return;
     if (state.settings?.tourSeen) return; // legacy flag, still honoured
-    setTimeout(() => startWalkthrough('getting-started'), 600);
+    // The safety modal owns the very-first-run flow. Firing the tour
+    // in parallel produces two stacked overlays whose combined
+    // backdrops hide (and block clicks on) the first row of the
+    // People page and other spotlit targets. The safety modal's
+    // "seen()" callback re-invokes this function once dismissed, so
+    // waiting here is safe.
+    if (!state.settings?.safetySeen) return;
+    setTimeout(() => startWalkthrough('getting-started'), 300);
   }
   function startWalkthrough(topicId) {
     const topic = WALKTHROUGHS.find((t) => t.id === topicId);
@@ -28128,7 +28135,17 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       state.settings.safetySeen = true;
       saveState();
       overlay.remove();
+      // Now that the safety consent is dismissed, the tour can run
+      // without stacking two modals on top of each other (which was
+      // hiding — and click-blocking — the first person row underneath).
+      maybeRunFirstRunTour();
     };
+    // Backdrop click on the safety overlay treats it as "later" so
+    // users who click "the first person" (visually behind the modal)
+    // aren't silently swallowed by an invisible full-screen backdrop.
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) seen();
+    });
     overlay.querySelector('#frsPickFolder')?.addEventListener('click', () => {
       // Mark seen FIRST so canceling the picker doesn't re-trigger this.
       state.settings.safetySeen = true;
