@@ -817,18 +817,21 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .tour-mask {
   position: absolute; inset: 0;
-  pointer-events: auto;
-  /* No background here — the rectangular cutout element (.tour-spot)
-     handles the darkening via a giant box-shadow, which draws the mask
-     around whatever shape it has. This matches the target's actual
-     bounds exactly, so a 938×637px board is spotlit as a full rounded
-     rectangle rather than a circle that either misses the corners or
-     bleeds beyond the target. */
+  /* Do NOT intercept clicks. The mask is invisible (all darkening is
+     done by the .tour-spot cutout via a giant box-shadow), so a
+     `pointer-events: auto` mask was silently swallowing every click
+     outside the tour card — including clicks the tour itself was
+     instructing the user to make (e.g. "click a person row"). With
+     pointer-events: none the user can interact with the underlying
+     app normally; the card still floats above and stays clickable. */
+  pointer-events: none;
 }
 /* Full-viewport dark — used only when there's no target (or the tour
-   can't find one). The spotlight element is hidden in that case. */
+   can't find one). Blocks interaction so the user can't drive the app
+   from a placeholder step. */
 .tour-mask.full {
   background: rgba(0,0,0,.6);
+  pointer-events: auto;
 }
 /* Rectangular cutout matching the target rect. The huge box-shadow
    draws darkness in every direction around this element; the accent
