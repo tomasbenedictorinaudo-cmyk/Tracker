@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-14T21:27:39.415Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-14T22:12:20.827Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -4246,6 +4246,55 @@ body.is-card-dragging * { cursor: grabbing !important; }
 .sk-chip.req { background: rgba(96, 165, 250, .10); border-color: rgba(96, 165, 250, .35); color: rgba(191, 219, 254, 1); font-size: 11px; }
 .sk-chip.req .sk-chip-x { margin-left: 2px; color: rgba(147, 197, 253, 1); opacity: .6; }
 .sk-chip.req:hover .sk-chip-x { opacity: 1; }
+
+/* Light-mode font-colour overrides — the base chip colours are near-
+   white pastels tuned for a dark background. On the light theme they
+   wash out into the white panel background. Swap them for the same
+   hue at a much darker luminance so the chip text stays legible while
+   the tinted background + border keep the level cue. */
+:root[data-theme="light"] .sk-chip.level-1,
+:root[data-theme="light"] .sk-chip.level-1 .sk-chip-name,
+:root[data-theme="light"] .sk-chip.level-1 .sk-chip-dots {
+  color: rgba(51, 65, 85, 1) !important;      /* slate-700 — grey */
+}
+:root[data-theme="light"] .sk-chip.level-2,
+:root[data-theme="light"] .sk-chip.level-2 .sk-chip-name,
+:root[data-theme="light"] .sk-chip.level-2 .sk-chip-dots {
+  color: rgba(30, 64, 175, 1) !important;     /* blue-800 */
+}
+:root[data-theme="light"] .sk-chip.level-3,
+:root[data-theme="light"] .sk-chip.level-3 .sk-chip-name,
+:root[data-theme="light"] .sk-chip.level-3 .sk-chip-dots {
+  color: rgba(21, 128, 61, 1) !important;     /* green-700 */
+}
+:root[data-theme="light"] .sk-chip.req,
+:root[data-theme="light"] .sk-chip.req .sk-chip-name {
+  color: rgba(30, 64, 175, 1) !important;
+}
+:root[data-theme="light"] .sk-chip.req .sk-chip-x {
+  color: rgba(30, 64, 175, .65) !important;
+}
+:root[data-theme="light"] .sk-chip-grow {
+  color: rgba(29, 78, 216, 1) !important;
+}
+/* Slightly stronger backgrounds in light mode so the tint is
+   perceivable against a pure-white panel. */
+:root[data-theme="light"] .sk-chip.level-1 {
+  background: rgba(148, 163, 184, .22);
+  border-color: rgba(100, 116, 139, .55);
+}
+:root[data-theme="light"] .sk-chip.level-2 {
+  background: rgba(59, 130, 246, .18);
+  border-color: rgba(37, 99, 235, .55);
+}
+:root[data-theme="light"] .sk-chip.level-3 {
+  background: rgba(74, 222, 128, .20);
+  border-color: rgba(22, 163, 74, .60);
+}
+:root[data-theme="light"] .sk-chip.req {
+  background: rgba(96, 165, 250, .18);
+  border-color: rgba(37, 99, 235, .50);
+}
 
 .row-skills {
   display: inline-flex;
