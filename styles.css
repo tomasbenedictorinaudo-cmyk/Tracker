@@ -10412,6 +10412,36 @@ body.notes-fullscreen { overflow: hidden; }
   border-color: rgba(251, 191, 36, .35);
   background: rgba(251, 191, 36, .04);
 }
+/* Inline word-diff — <del> tokens are only in the OLD review, <ins>
+   tokens are only in the NEW one. Small rounded chip so a stream of
+   collapsed adjacent tokens reads as one contiguous change. */
+.dev-rv-cell del {
+  background: rgba(248, 113, 121, .22);
+  color: var(--bad);
+  text-decoration: line-through;
+  text-decoration-color: rgba(248, 113, 121, .55);
+  padding: 0 3px;
+  border-radius: 3px;
+  border: 1px solid rgba(248, 113, 121, .30);
+}
+.dev-rv-cell ins {
+  background: rgba(74, 222, 128, .22);
+  color: var(--ok);
+  text-decoration: none;
+  padding: 0 3px;
+  border-radius: 3px;
+  border: 1px solid rgba(74, 222, 128, .35);
+}
+:root[data-theme="light"] .dev-rv-cell del {
+  color: rgba(153, 27, 27, 1);
+  background: rgba(248, 113, 121, .18);
+  border-color: rgba(220, 38, 38, .45);
+}
+:root[data-theme="light"] .dev-rv-cell ins {
+  color: rgba(22, 101, 52, 1);
+  background: rgba(74, 222, 128, .22);
+  border-color: rgba(22, 163, 74, .50);
+}
 
 /* SWOT modal — 2x2 quadrant. */
 .swot-grid {

@@ -15953,13 +15953,108 @@
   // get an amber border + "differs" chip so scanning is fast.
   function renderDevReviewCompare(a, b, p) {
     const norm = (s) => (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
-    const cell = (v) => `<div class="dev-rv-cell">${renderTextWithChips(v || '') || '<span class="muted">—</span>'}</div>`;
+    // Strip HTML down to plain text while preserving line breaks
+    // between block elements — dev-review fields are rich text and a
+    // straight textContent would concatenate paragraphs.
+    const stripHtml = (html) => {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = (html || '')
+        .replace(/<br\s*\/?>/gi, '\n')
+        .replace(/<\/(p|div|li|h[1-6])>/gi, '</$1>\n');
+      // Bullet prefix on <li> so lists survive as text.
+      tmp.querySelectorAll('li').forEach((li) => {
+        if (!/^\s*[•*\-]/.test(li.textContent)) {
+          li.insertBefore(document.createTextNode('• '), li.firstChild);
+        }
+      });
+      return (tmp.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+    };
+    // Word-level LCS diff — returns { aHTML, bHTML } with <del>/<ins>
+    // wrapping the tokens that were removed / added. Whitespace is
+    // tokenised alongside words so line breaks read naturally.
+    const wordDiff = (oldStr, newStr) => {
+      const tokenize = (s) => s.split(/(\s+)/).filter((t) => t !== '');
+      const A = tokenize(oldStr);
+      const B = tokenize(newStr);
+      const m = A.length, n = B.length;
+      // Guard against pathological inputs — LCS is O(m*n).
+      if (m * n > 400000) {
+        return {
+          aHTML: `<del>${escapeHTML(oldStr)}</del>`,
+          bHTML: `<ins>${escapeHTML(newStr)}</ins>`,
+        };
+      }
+      const dp = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
+      for (let i = 1; i <= m; i++) {
+        const ai = A[i - 1];
+        for (let j = 1; j <= n; j++) {
+          dp[i][j] = ai === B[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+      const opsA = [], opsB = [];
+      let i = m, j = n;
+      while (i > 0 && j > 0) {
+        if (A[i - 1] === B[j - 1]) {
+          opsA.unshift({ t: 'same', s: A[i - 1] });
+          opsB.unshift({ t: 'same', s: B[j - 1] });
+          i--; j--;
+        } else if (dp[i - 1][j] >= dp[i][j - 1]) {
+          opsA.unshift({ t: 'del', s: A[i - 1] });
+          i--;
+        } else {
+          opsB.unshift({ t: 'ins', s: B[j - 1] });
+          j--;
+        }
+      }
+      while (i > 0) opsA.unshift({ t: 'del', s: A[--i] });
+      while (j > 0) opsB.unshift({ t: 'ins', s: B[--j] });
+      // Collapse adjacent same-type ops so the DOM has fewer nodes and
+      // consecutive changes highlight as one contiguous chip.
+      const collapse = (ops) => {
+        const out = [];
+        for (const o of ops) {
+          const last = out[out.length - 1];
+          if (last && last.t === o.t) last.s += o.s;
+          else out.push({ ...o });
+        }
+        return out;
+      };
+      const render = (ops) => collapse(ops).map((o) => {
+        const html = escapeHTML(o.s).replace(/\n/g, '<br>');
+        if (o.t === 'same') return html;
+        return `<${o.t}>${html}</${o.t}>`;
+      }).join('');
+      return { aHTML: render(opsA), bHTML: render(opsB) };
+    };
+    const cellDiff = (aStr, bStr) => {
+      const aTxt = stripHtml(aStr);
+      const bTxt = stripHtml(bStr);
+      if (!aTxt && !bTxt) return { aHTML: '<span class="muted">—</span>', bHTML: '<span class="muted">—</span>' };
+      if (norm(aTxt) === norm(bTxt)) {
+        return {
+          aHTML: renderTextWithChips(aStr || '') || '<span class="muted">—</span>',
+          bHTML: renderTextWithChips(bStr || '') || '<span class="muted">—</span>',
+        };
+      }
+      const { aHTML, bHTML } = wordDiff(aTxt, bTxt);
+      return {
+        aHTML: aHTML || '<span class="muted">— (empty)</span>',
+        bHTML: bHTML || '<span class="muted">— (empty)</span>',
+      };
+    };
     const rows = DEV_REVIEW_FIELDS.map((f) => {
       const differs = norm(a[f.key]) !== norm(b[f.key]);
+      const { aHTML, bHTML } = differs
+        ? cellDiff(a[f.key], b[f.key])
+        : {
+            aHTML: renderTextWithChips(a[f.key] || '') || '<span class="muted">—</span>',
+            bHTML: renderTextWithChips(b[f.key] || '') || '<span class="muted">—</span>',
+          };
       return `
         <div class="dev-rv-cmp-row${differs ? ' differs' : ''}">
           <div class="dev-rv-cmp-lbl">${escapeHTML(f.label)}${differs ? '<span class="dev-rv-cmp-tag">Δ differs</span>' : ''}</div>
-          ${cell(a[f.key])}${cell(b[f.key])}
+          <div class="dev-rv-cell">${aHTML}</div>
+          <div class="dev-rv-cell">${bHTML}</div>
         </div>`;
     }).join('');
     const linkedA = collectLinkedActions(a);
