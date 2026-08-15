@@ -10194,6 +10194,39 @@ body.is-plndrag * { cursor: ns-resize !important; }
   color: var(--text);
   white-space: pre-wrap;
   word-wrap: break-word;
+  padding: 2px 4px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  cursor: text;
+  outline: none;
+}
+.pln-cmt-pop-text[contenteditable="plaintext-only"]:hover {
+  background: rgba(148, 163, 184, .10);
+  border-color: rgba(148, 163, 184, .30);
+}
+.pln-cmt-pop-text[contenteditable="plaintext-only"]:focus {
+  background: var(--bg-1);
+  border-color: var(--accent);
+}
+/* Editable date input in the meta row — narrow, inline. */
+.pln-cmt-pop-date-edit {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 3px;
+  border-radius: 3px;
+  color-scheme: dark;
+  cursor: pointer;
+}
+:root[data-theme="light"] .pln-cmt-pop-date-edit { color-scheme: light; }
+.pln-cmt-pop-date-edit:hover,
+.pln-cmt-pop-date-edit:focus {
+  border-color: var(--line-2);
+  background: var(--bg-1);
+  outline: none;
 }
 .pln-cmt-pop-compose {
   display: flex; flex-direction: column; gap: 6px;

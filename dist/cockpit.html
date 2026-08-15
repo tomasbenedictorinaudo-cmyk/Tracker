@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-15T22:42:02.041Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-15T22:48:55.198Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -10203,6 +10203,39 @@ body.is-plndrag * { cursor: ns-resize !important; }
   color: var(--text);
   white-space: pre-wrap;
   word-wrap: break-word;
+  padding: 2px 4px;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  cursor: text;
+  outline: none;
+}
+.pln-cmt-pop-text[contenteditable="plaintext-only"]:hover {
+  background: rgba(148, 163, 184, .10);
+  border-color: rgba(148, 163, 184, .30);
+}
+.pln-cmt-pop-text[contenteditable="plaintext-only"]:focus {
+  background: var(--bg-1);
+  border-color: var(--accent);
+}
+/* Editable date input in the meta row — narrow, inline. */
+.pln-cmt-pop-date-edit {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--accent);
+  font-weight: 600;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 3px;
+  border-radius: 3px;
+  color-scheme: dark;
+  cursor: pointer;
+}
+:root[data-theme="light"] .pln-cmt-pop-date-edit { color-scheme: light; }
+.pln-cmt-pop-date-edit:hover,
+.pln-cmt-pop-date-edit:focus {
+  border-color: var(--line-2);
+  background: var(--bg-1);
+  outline: none;
 }
 .pln-cmt-pop-compose {
   display: flex; flex-direction: column; gap: 6px;
@@ -35999,11 +36032,11 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           ${list.length ? list.map((c) => `
             <div class="pln-cmt-pop-item" data-cmt-id="${escapeHTML(c.id)}">
               <div class="pln-cmt-pop-meta">
-                <span class="pln-cmt-pop-date">${escapeHTML((c.at || '').slice(0, 10))}</span>
+                <input type="date" class="pln-cmt-pop-date-edit" value="${escapeHTML((c.at || '').slice(0, 10))}" title="Comment date — click to change" />
                 <span class="pln-cmt-pop-by muted">${escapeHTML(actorLabel(c.by) || '—')}</span>
                 <button type="button" class="icon-btn pln-cmt-pop-del" title="Delete comment" aria-label="Delete">×</button>
               </div>
-              <div class="pln-cmt-pop-text">${renderTextWithChips(c.text || '')}</div>
+              <div class="pln-cmt-pop-text" contenteditable="plaintext-only" spellcheck="true" title="Click to edit — Enter to save · Esc to cancel">${renderTextWithChips(c.text || '')}</div>
             </div>`).join('') : '<div class="pln-cmt-pop-empty muted">No comments yet. Add one below.</div>'}
         </div>
         <div class="pln-cmt-pop-compose">
@@ -36021,6 +36054,70 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           action.comments = (action.comments || []).filter((c) => c.id !== cid);
           action.updatedAt = todayISO();
           commit('planner-comment-delete');
+          render();
+        });
+      });
+      // Click-to-edit on the comment text (plaintext contenteditable).
+      // Enter saves + blurs, Esc cancels. Save-on-blur commits only if
+      // the text actually changed.
+      pop.querySelectorAll('.pln-cmt-pop-text[contenteditable]').forEach((el) => {
+        const cid = el.closest('[data-cmt-id]')?.dataset.cmtId;
+        if (!cid) return;
+        let original = null;
+        el.addEventListener('focus', () => {
+          const c = (action.comments || []).find((x) => x.id === cid);
+          if (!c) return;
+          // Swap chip-rendered HTML for the raw text so the editor
+          // works on the source, not the rendered chips.
+          original = c.text || '';
+          el.textContent = original;
+        });
+        el.addEventListener('blur', () => {
+          if (original == null) return;
+          const c = (action.comments || []).find((x) => x.id === cid);
+          if (!c) return;
+          const nextText = (el.textContent || '').trim();
+          if (nextText === original.trim()) {
+            // No change — restore chip rendering.
+            el.innerHTML = renderTextWithChips(original);
+            original = null;
+            return;
+          }
+          if (!nextText) {
+            // Empty → treat as delete? Keep it safer: revert.
+            el.innerHTML = renderTextWithChips(original);
+            original = null;
+            return;
+          }
+          c.text = nextText;
+          action.updatedAt = todayISO();
+          commit('planner-comment-edit');
+          original = null;
+          // Defer re-render so we don't tear down the element mid-blur.
+          setTimeout(render, 0);
+        });
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el.blur(); }
+          else if (e.key === 'Escape') {
+            e.preventDefault();
+            const c = (action.comments || []).find((x) => x.id === cid);
+            if (c && original != null) el.textContent = original;
+            original = null;
+            el.blur();
+          }
+        });
+      });
+      // Editable date on existing comments — change re-sorts the list
+      // and persists immediately.
+      pop.querySelectorAll('.pln-cmt-pop-date-edit').forEach((inp) => {
+        const cid = inp.closest('[data-cmt-id]')?.dataset.cmtId;
+        if (!cid) return;
+        inp.addEventListener('change', () => {
+          const c = (action.comments || []).find((x) => x.id === cid);
+          if (!c) return;
+          c.at = inp.value || c.at;
+          action.updatedAt = todayISO();
+          commit('planner-comment-edit');
           render();
         });
       });
@@ -36567,6 +36664,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
               </rect>
               ${row.progressFrac > 0 ? `<rect class="pln-actual" x="${row.barX}" y="${rowH/2 - 3}" width="${Math.max(1, row.barW * row.progressFrac)}" height="6" rx="2" fill="rgba(${row.color.rgb},.95)" pointer-events="none"><title>${Math.round(row.logged)}h logged · ${Math.round(row.progressFrac * 100)}% of plan</title></rect>` : ''}
               ${row.barW > 26 ? `<text class="pln-bar-label" x="${row.barX + row.barW/2}" y="${rowH/2 + 4}" text-anchor="middle" pointer-events="none">${row.commitment}%</text>` : ''}
+              ${(row.a.comments || []).length ? `<g class="pln-bar-cmt-mark" pointer-events="none"><circle cx="${row.barX + row.barW - 5}" cy="12" r="4.5" fill="var(--accent)" stroke="var(--bg-1)" stroke-width="1.5" /><text x="${row.barX + row.barW - 5}" y="15" text-anchor="middle" font-size="7" fill="#fff" font-weight="700">${Math.min(9, (row.a.comments || []).length)}</text></g>` : ''}
               <rect class="pln-handle pln-handle-left" x="${row.barX - 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="left" fill="transparent" style="cursor:ew-resize"><title>Drag to shift start date</title></rect>
               <rect class="pln-handle pln-handle-right" x="${row.barX + row.barW - Math.min(8, row.barW/3) + 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="right" fill="transparent" style="cursor:ew-resize"><title>Drag to shift due date</title></rect>
             </g>
