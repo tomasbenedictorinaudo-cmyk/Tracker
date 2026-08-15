@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-15T22:48:55.198Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-15T22:55:21.692Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -36664,7 +36664,25 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
               </rect>
               ${row.progressFrac > 0 ? `<rect class="pln-actual" x="${row.barX}" y="${rowH/2 - 3}" width="${Math.max(1, row.barW * row.progressFrac)}" height="6" rx="2" fill="rgba(${row.color.rgb},.95)" pointer-events="none"><title>${Math.round(row.logged)}h logged · ${Math.round(row.progressFrac * 100)}% of plan</title></rect>` : ''}
               ${row.barW > 26 ? `<text class="pln-bar-label" x="${row.barX + row.barW/2}" y="${rowH/2 + 4}" text-anchor="middle" pointer-events="none">${row.commitment}%</text>` : ''}
-              ${(row.a.comments || []).length ? `<g class="pln-bar-cmt-mark" pointer-events="none"><circle cx="${row.barX + row.barW - 5}" cy="12" r="4.5" fill="var(--accent)" stroke="var(--bg-1)" stroke-width="1.5" /><text x="${row.barX + row.barW - 5}" y="15" text-anchor="middle" font-size="7" fill="#fff" font-weight="700">${Math.min(9, (row.a.comments || []).length)}</text></g>` : ''}
+              ${(row.a.comments || []).length ? (() => {
+                // Sticky-note flag on the LEFT edge of the bar,
+                // extending up into the row's top padding so it
+                // sits ABOVE the bar and is unmissable regardless
+                // of bar width. Yellow, hard-coded colours (some
+                // browsers won't resolve CSS vars in SVG attrs).
+                const n = Math.min(9, (row.a.comments || []).length);
+                const fx = row.barX;      // flag anchor x = bar's left edge
+                const fw = 22;             // flag width
+                const fh = 14;             // flag height
+                const fy = 0;              // sits at the very top of the row
+                return `<g class="pln-bar-cmt-mark" pointer-events="none">
+                  <path d="M${fx},${fy} h${fw} l-4,${fh/2} l4,${fh/2} h-${fw} z"
+                        style="fill:#fbbf24; stroke:#0a0a0a; stroke-width:1;" />
+                  <text x="${fx + fw/2 - 2}" y="${fy + fh/2 + 3.5}"
+                        text-anchor="middle"
+                        style="fill:#0a0a0a; font-size:10px; font-weight:800; font-family:sans-serif;">💬${n > 1 ? n : ''}</text>
+                </g>`;
+              })() : ''}
               <rect class="pln-handle pln-handle-left" x="${row.barX - 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="left" fill="transparent" style="cursor:ew-resize"><title>Drag to shift start date</title></rect>
               <rect class="pln-handle pln-handle-right" x="${row.barX + row.barW - Math.min(8, row.barW/3) + 2}" y="8" width="${Math.min(8, row.barW/3)}" height="${rowH - 16}" data-action-id="${escapeHTML(row.a.id)}" data-drag-zone="right" fill="transparent" style="cursor:ew-resize"><title>Drag to shift due date</title></rect>
             </g>
