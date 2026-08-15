@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-15T14:42:14.022Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-15T22:37:38.290Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -10116,6 +10116,114 @@ body.notes-fullscreen { overflow: hidden; }
 .pln-embed-resize.dragging::before { background: var(--accent); }
 body.is-plndrag { cursor: ns-resize !important; }
 body.is-plndrag * { cursor: ns-resize !important; }
+
+/* Small 💬 badge on the planner row label indicating N comments on
+   the action. Clickable target is the whole bar (right-click); the
+   badge is a visual affordance only. */
+.pln-cmt-flag {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 10px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  border-radius: 8px;
+  background: rgba(96, 165, 250, .18);
+  color: rgba(191, 219, 254, 1);
+  border: 1px solid rgba(96, 165, 250, .35);
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme="light"] .pln-cmt-flag {
+  color: rgba(30, 64, 175, 1);
+  border-color: rgba(37, 99, 235, .50);
+}
+
+/* Dated-comment popover on planner bars — opens from a right-click,
+   floats over the Gantt, click-outside dismisses. */
+.pln-cmt-pop {
+  position: fixed;
+  z-index: 9600;
+  width: 340px;
+  max-height: 60vh;
+  display: flex; flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  font-size: 12.5px;
+}
+.pln-cmt-pop-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.pln-cmt-pop-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.pln-cmt-pop-sub {
+  padding: 6px 10px 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.pln-cmt-pop-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.pln-cmt-pop-empty { font-size: 12px; padding: 8px 0; }
+.pln-cmt-pop-item {
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+}
+.pln-cmt-pop-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+.pln-cmt-pop-date {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pln-cmt-pop-by { flex: 1; }
+.pln-cmt-pop-del {
+  padding: 0 4px; font-size: 12px; line-height: 1;
+  color: var(--text-faint);
+}
+.pln-cmt-pop-del:hover { color: var(--bad); }
+.pln-cmt-pop-text {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.pln-cmt-pop-compose {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-2);
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+}
+.pln-cmt-pop-date-in,
+.pln-cmt-pop-text-in {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--text);
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.pln-cmt-pop-text-in { resize: vertical; min-height: 44px; }
+.pln-cmt-pop-save { align-self: flex-end; }
 .view.pln-embedded .planner-axis   { z-index: 1; }
 .view.pln-embedded .pln-row-label  { z-index: 1; }
 .pln-embed-toolbar {
@@ -35852,12 +35960,113 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     view.querySelectorAll(`.pln-wl-lg-item[data-action-id="${actionId}"]`).forEach((el) => el.classList.add('is-highlight'));
   }
 
+  // ── Planner-bar comment popover ─────────────────────────────
+  // Right-click a planner bar to open a lightweight popover that
+  // lists dated comments on that action and lets the user add a
+  // new one. Reuses action.comments — same records the full action
+  // drawer shows — so a note dropped from the planner is immediately
+  // visible everywhere else that surfaces comments.
+  function openPlannerCommentPopover(actionId, x, y) {
+    let action = null, project = null;
+    for (const pr of state.projects || []) {
+      const a = (pr.actions || []).find((x) => x.id === actionId);
+      if (a) { action = a; project = pr; break; }
+    }
+    if (!action) return;
+    document.querySelectorAll('.pln-cmt-pop').forEach((p) => p.remove());
+    const pop = document.createElement('div');
+    pop.className = 'pln-cmt-pop';
+    pop.style.left = x + 'px';
+    pop.style.top = y + 'px';
+    const render = () => {
+      const list = (action.comments || []).slice().sort((a, b) => (a.at || '').localeCompare(b.at || ''));
+      pop.innerHTML = `
+        <div class="pln-cmt-pop-head">
+          <div class="pln-cmt-pop-title" title="${escapeHTML(action.title)}">${escapeHTML(action.title)}</div>
+          <button type="button" class="icon-btn pln-cmt-pop-close" title="Close" aria-label="Close">×</button>
+        </div>
+        <div class="pln-cmt-pop-sub">${escapeHTML(project?.name || '')} · ${list.length} comment${list.length === 1 ? '' : 's'}</div>
+        <div class="pln-cmt-pop-list">
+          ${list.length ? list.map((c) => `
+            <div class="pln-cmt-pop-item" data-cmt-id="${escapeHTML(c.id)}">
+              <div class="pln-cmt-pop-meta">
+                <span class="pln-cmt-pop-date">${escapeHTML((c.at || '').slice(0, 10))}</span>
+                <span class="pln-cmt-pop-by muted">${escapeHTML(actorLabel(c.by) || '—')}</span>
+                <button type="button" class="icon-btn pln-cmt-pop-del" title="Delete comment" aria-label="Delete">×</button>
+              </div>
+              <div class="pln-cmt-pop-text">${renderTextWithChips(c.text || '')}</div>
+            </div>`).join('') : '<div class="pln-cmt-pop-empty muted">No comments yet. Add one below.</div>'}
+        </div>
+        <div class="pln-cmt-pop-compose">
+          <input type="date" class="pln-cmt-pop-date-in" value="${todayISO()}" title="Comment date" />
+          <textarea class="pln-cmt-pop-text-in" placeholder="Dated note about this action…" rows="2"></textarea>
+          <button type="button" class="primary pln-cmt-pop-save">Add comment</button>
+        </div>`;
+      pop.querySelector('.pln-cmt-pop-close')?.addEventListener('click', close);
+      pop.querySelectorAll('.pln-cmt-pop-del').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const cid = btn.closest('[data-cmt-id]')?.dataset.cmtId;
+          if (!cid) return;
+          if (!confirm('Delete this comment?')) return;
+          action.comments = (action.comments || []).filter((c) => c.id !== cid);
+          action.updatedAt = todayISO();
+          commit('planner-comment-delete');
+          render();
+        });
+      });
+      const dateIn = pop.querySelector('.pln-cmt-pop-date-in');
+      const textIn = pop.querySelector('.pln-cmt-pop-text-in');
+      const saveBtn = pop.querySelector('.pln-cmt-pop-save');
+      const submit = () => {
+        const text = textIn.value.trim();
+        if (!text) { textIn.focus(); return; }
+        action.comments = action.comments || [];
+        action.comments.push({
+          id: uid('cm'),
+          by: state.settings?.localUser || null,
+          at: dateIn.value || todayISO(),
+          text,
+        });
+        action.updatedAt = todayISO();
+        commit('planner-comment-add');
+        render();
+        pop.querySelector('.pln-cmt-pop-text-in')?.focus();
+      };
+      saveBtn.addEventListener('click', submit);
+      textIn.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); submit(); }
+      });
+      textIn.focus();
+    };
+    document.body.appendChild(pop);
+    render();
+    // Clamp inside viewport after first render.
+    const r = pop.getBoundingClientRect();
+    if (r.right > innerWidth)  pop.style.left = Math.max(8, innerWidth  - r.width  - 8) + 'px';
+    if (r.bottom > innerHeight) pop.style.top  = Math.max(8, innerHeight - r.height - 8) + 'px';
+    let outsideHandler;
+    const close = () => {
+      pop.remove();
+      if (outsideHandler) document.removeEventListener('mousedown', outsideHandler);
+    };
+    outsideHandler = (e) => { if (!pop.contains(e.target)) close(); };
+    setTimeout(() => document.addEventListener('mousedown', outsideHandler), 50);
+  }
+
   function _wirePlannerHighlight(view, person, s) {
     if (!view) return;
     view.querySelectorAll('.pln-bar[data-drag-zone="body"]').forEach((bar) => {
       bar.addEventListener('click', () => {
         // Skip if a drag just happened — the mousemove clears the click.
         _plannerToggleHighlight(view, s, bar.dataset.actionId);
+      });
+      // Right-click any planner bar → dated-comments popover on that
+      // action. Uses the same action.comments records as the action
+      // drawer's comment thread, so notes stay in sync everywhere.
+      bar.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        openPlannerCommentPopover(bar.dataset.actionId, ev.clientX, ev.clientY);
       });
     });
     view.querySelectorAll('.pln-wl-seg').forEach((seg) => {
@@ -36335,7 +36544,7 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       return `<div class="pln-row ${doneCls}" style="height:${rowH}px" data-action-id="${escapeHTML(row.a.id)}">
         <div class="pln-row-label">
           <span class="col-dot ${statusDot?.dot || ''}"></span>
-          <span class="pln-row-title" title="${escapeHTML(row.a.title)}">${escapeHTML(row.a.title)}${row.depViolation ? '<span class="pln-dep-flag" title="Starts before a predecessor finishes">⇤</span>' : ''}${row.conflict ? '<span class="pln-conflict-flag" title="Overlaps another action of this owner in an over-cap week">⚠</span>' : ''}</span>
+          <span class="pln-row-title" title="${escapeHTML(row.a.title)}">${escapeHTML(row.a.title)}${row.depViolation ? '<span class="pln-dep-flag" title="Starts before a predecessor finishes">⇤</span>' : ''}${row.conflict ? '<span class="pln-conflict-flag" title="Overlaps another action of this owner in an over-cap week">⚠</span>' : ''}${(row.a.comments || []).length ? `<span class="pln-cmt-flag" title="${(row.a.comments || []).length} comment${(row.a.comments || []).length === 1 ? '' : 's'} — right-click the bar to read or add" data-action-id="${escapeHTML(row.a.id)}">💬 ${(row.a.comments || []).length}</span>` : ''}</span>
           <span class="pln-row-meta">${row.hours}h${row.logged > 0 ? ` <span class="muted">· ${Math.round(row.logged)}h logged</span>` : ''} · ${escapeHTML(row.project.name)}${row.baseline && (row.baseline.startDrift || row.baseline.dueDrift) ? ` <span class="pln-base-drift" title="drift from baseline — start ${row.baseline.startDrift >= 0 ? '+' : ''}${row.baseline.startDrift}d, due ${row.baseline.dueDrift >= 0 ? '+' : ''}${row.baseline.dueDrift}d">base ${row.baseline.dueDrift >= 0 ? '+' : ''}${row.baseline.dueDrift}d</span>` : ''}</span>
           <span class="pln-row-badge">${row.marginBadge}</span>
         </div>

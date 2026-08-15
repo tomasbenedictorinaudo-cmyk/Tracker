@@ -10107,6 +10107,114 @@ body.notes-fullscreen { overflow: hidden; }
 .pln-embed-resize.dragging::before { background: var(--accent); }
 body.is-plndrag { cursor: ns-resize !important; }
 body.is-plndrag * { cursor: ns-resize !important; }
+
+/* Small 💬 badge on the planner row label indicating N comments on
+   the action. Clickable target is the whole bar (right-click); the
+   badge is a visual affordance only. */
+.pln-cmt-flag {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 10px;
+  padding: 1px 5px;
+  margin-left: 4px;
+  border-radius: 8px;
+  background: rgba(96, 165, 250, .18);
+  color: rgba(191, 219, 254, 1);
+  border: 1px solid rgba(96, 165, 250, .35);
+  cursor: help;
+  font-variant-numeric: tabular-nums;
+}
+:root[data-theme="light"] .pln-cmt-flag {
+  color: rgba(30, 64, 175, 1);
+  border-color: rgba(37, 99, 235, .50);
+}
+
+/* Dated-comment popover on planner bars — opens from a right-click,
+   floats over the Gantt, click-outside dismisses. */
+.pln-cmt-pop {
+  position: fixed;
+  z-index: 9600;
+  width: 340px;
+  max-height: 60vh;
+  display: flex; flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+  font-size: 12.5px;
+}
+.pln-cmt-pop-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--line);
+}
+.pln-cmt-pop-title {
+  flex: 1;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  min-width: 0;
+}
+.pln-cmt-pop-sub {
+  padding: 6px 10px 0;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.pln-cmt-pop-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 10px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.pln-cmt-pop-empty { font-size: 12px; padding: 8px 0; }
+.pln-cmt-pop-item {
+  padding: 6px 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+}
+.pln-cmt-pop-meta {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+.pln-cmt-pop-date {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.pln-cmt-pop-by { flex: 1; }
+.pln-cmt-pop-del {
+  padding: 0 4px; font-size: 12px; line-height: 1;
+  color: var(--text-faint);
+}
+.pln-cmt-pop-del:hover { color: var(--bad); }
+.pln-cmt-pop-text {
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+.pln-cmt-pop-compose {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-2);
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+}
+.pln-cmt-pop-date-in,
+.pln-cmt-pop-text-in {
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--text);
+  padding: 4px 6px;
+  font-size: 12px;
+  font-family: inherit;
+}
+.pln-cmt-pop-text-in { resize: vertical; min-height: 44px; }
+.pln-cmt-pop-save { align-self: flex-end; }
 .view.pln-embedded .planner-axis   { z-index: 1; }
 .view.pln-embedded .pln-row-label  { z-index: 1; }
 .pln-embed-toolbar {
