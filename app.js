@@ -14416,11 +14416,13 @@
             } : { firm: 0, tent: 0, gap: 100 };
             const st = actStatusMeta(a.status);
             const owners = [...new Set((a.allocations || []).map((al) => al.personId).filter(Boolean))].map(actorLabel).join(', ') || '—';
+            const linkedActionCount = state.projects.reduce((n, pr) => n + (pr.actions || []).filter((x) => x.activityId === a.id).length, 0);
+            const commentCount = (a.comments || []).length;
             return `
               <tr class="act-row" data-act-id="${escapeHTML(a.id)}">
                 <td>
                   <div class="act-row-title">${escapeHTML(a.title)}</div>
-                  <div class="act-row-sub">${owners !== '—' ? '→ ' + escapeHTML(owners) : '<span class="muted">unassigned</span>'}${(a.milestones || []).length ? ' · ' + (a.milestones || []).length + '▲' : ''}${(a.deliverables || []).length ? ' · ' + (a.deliverables || []).length + '◆' : ''}</div>
+                  <div class="act-row-sub">${owners !== '—' ? '→ ' + escapeHTML(owners) : '<span class="muted">unassigned</span>'}${(a.milestones || []).length ? ' · ' + (a.milestones || []).length + '▲' : ''}${(a.deliverables || []).length ? ' · ' + (a.deliverables || []).length + '◆' : ''}${linkedActionCount ? ' · ' + linkedActionCount + ' action' + (linkedActionCount === 1 ? '' : 's') : ''}${commentCount ? ' · 💬 ' + commentCount : ''}</div>
                 </td>
                 <td>${escapeHTML(actorLabel(a.originator))}<div class="muted" style="font-size:10.5px;">${escapeHTML(a.originatedAt || '')}</div></td>
                 <td>${escapeHTML(projName(a.projectId))}</td>
@@ -14523,6 +14525,24 @@
         <div id="acAllocList" class="ac-alloc-list"></div>
         <button type="button" class="ghost" id="acAllocAdd">+ Add allocation</button>
         <div class="ac-alloc-summary muted" id="acAllocSum"></div>
+      </div>
+      <div class="field">
+        <label>Linked actions <span class="muted">— the atomic to-dos that make up this activity (they appear on the Board, Register and Person planners)</span></label>
+        <div id="acLinkedActions" class="ac-linked-list"></div>
+        <div class="ac-linked-add">
+          <select id="acLinkedAdd">
+            <option value="">+ Link an action…</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label>Comments <span class="muted">— dated notes on this activity</span></label>
+        <div id="acComments" class="ac-comments-list"></div>
+        <div class="ac-comment-compose">
+          <input id="acCommentDate" type="date" title="Comment date" />
+          <textarea id="acCommentText" placeholder="Add a dated note…" rows="2"></textarea>
+          <button type="button" class="ghost" id="acCommentAdd">+ Add comment</button>
+        </div>
       </div>
       <div style="display:flex; gap:8px; margin-top:6px;">
         <button class="primary" id="acSave">Save</button>
@@ -14701,11 +14721,164 @@
       svg.push('</svg>');
       chart.innerHTML = svg.join('');
     }
+    // Actions from any project that link to this activity via
+    // action.activityId. Each row is clickable to open the action
+    // drawer (via openDrawer). Unlink removes the link.
+    function renderLinkedActions() {
+      const host = $('#acLinkedActions'); if (!host) return;
+      const linked = state.projects.flatMap((pr) =>
+        (pr.actions || []).filter((x) => x.activityId === a.id).map((x) => ({ x, pr })));
+      host.innerHTML = linked.length ? linked.map(({ x, pr }) => `
+        <div class="ac-linked-row" data-action-id="${escapeHTML(x.id)}" data-proj-id="${escapeHTML(pr.id)}">
+          <span class="ac-linked-status status-${escapeHTML(x.status)}" title="${escapeHTML(x.status)}"></span>
+          <span class="ac-linked-title">${escapeHTML(x.title)}</span>
+          <span class="ac-linked-meta muted">${escapeHTML(pr.name)}${x.due ? ' · due ' + escapeHTML(x.due) : ''}${x.owner ? ' · ' + escapeHTML(actorLabel(x.owner)) : ''}</span>
+          <button type="button" class="icon-btn ac-linked-unlink" title="Unlink" aria-label="Unlink action">×</button>
+        </div>`).join('') : '<div class="muted" style="font-size:11px;">No actions linked yet. Use the picker below.</div>';
+      host.querySelectorAll('.ac-linked-row').forEach((row) => {
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('.ac-linked-unlink')) return;
+          state.currentProjectId = row.dataset.projId;
+          openDrawer(row.dataset.actionId);
+        });
+      });
+      host.querySelectorAll('.ac-linked-unlink').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const aid = btn.closest('.ac-linked-row')?.dataset.actionId;
+          if (!aid) return;
+          state.projects.forEach((pr) => (pr.actions || []).forEach((x) => {
+            if (x.id === aid && x.activityId === a.id) x.activityId = null;
+          }));
+          commit('activity-unlink-action');
+          renderLinkedActions();
+          renderLinkedActionPicker();
+        });
+      });
+    }
+    function renderLinkedActionPicker() {
+      const sel = $('#acLinkedAdd'); if (!sel) return;
+      const linkedIds = new Set();
+      state.projects.forEach((pr) => (pr.actions || []).forEach((x) => {
+        if (x.activityId === a.id) linkedIds.add(x.id);
+      }));
+      const candidates = state.projects.flatMap((pr) =>
+        (pr.actions || [])
+          .filter((x) => !x.archivedAt && !linkedIds.has(x.id) && !x.activityId)
+          .map((x) => ({ x, pr })));
+      sel.innerHTML = '<option value="">+ Link an action…</option>' +
+        candidates.map(({ x, pr }) => `<option value="${escapeHTML(pr.id)}|${escapeHTML(x.id)}">${escapeHTML(x.title)} — ${escapeHTML(pr.name)}${x.owner ? ' · ' + escapeHTML(actorLabel(x.owner)) : ''}</option>`).join('');
+    }
+    function renderActivityComments() {
+      const host = $('#acComments'); if (!host) return;
+      const list = (a.comments || []).slice().sort((x, y) => (x.at || '').localeCompare(y.at || ''));
+      host.innerHTML = list.length ? list.map((c) => `
+        <div class="ac-comment-row" data-cmt-id="${escapeHTML(c.id)}">
+          <div class="ac-comment-meta">
+            <input type="date" class="ac-comment-date-edit" value="${escapeHTML((c.at || '').slice(0, 10))}" title="Comment date — click to change" />
+            <span class="ac-comment-by muted">${escapeHTML(actorLabel(c.by) || '—')}</span>
+            <button type="button" class="icon-btn ac-comment-del" title="Delete comment" aria-label="Delete">×</button>
+          </div>
+          <div class="ac-comment-text" contenteditable="plaintext-only" spellcheck="true" title="Click to edit — Enter to save · Esc to cancel">${renderTextWithChips(c.text || '')}</div>
+        </div>`).join('') : '<div class="muted" style="font-size:11px;">No comments yet.</div>';
+      host.querySelectorAll('.ac-comment-del').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const cid = btn.closest('[data-cmt-id]')?.dataset.cmtId;
+          if (!cid) return;
+          if (!confirm('Delete this comment?')) return;
+          a.comments = (a.comments || []).filter((c) => c.id !== cid);
+          a.updatedAt = todayISO();
+          commit('activity-comment-delete');
+          renderActivityComments();
+        });
+      });
+      host.querySelectorAll('.ac-comment-date-edit').forEach((inp) => {
+        const cid = inp.closest('[data-cmt-id]')?.dataset.cmtId;
+        inp.addEventListener('change', () => {
+          const c = (a.comments || []).find((x) => x.id === cid);
+          if (!c) return;
+          c.at = inp.value || c.at;
+          a.updatedAt = todayISO();
+          commit('activity-comment-edit');
+          renderActivityComments();
+        });
+      });
+      host.querySelectorAll('.ac-comment-text[contenteditable]').forEach((el) => {
+        const cid = el.closest('[data-cmt-id]')?.dataset.cmtId;
+        let original = null;
+        el.addEventListener('focus', () => {
+          const c = (a.comments || []).find((x) => x.id === cid);
+          if (!c) return;
+          original = c.text || '';
+          el.textContent = original;
+        });
+        el.addEventListener('blur', () => {
+          if (original == null) return;
+          const c = (a.comments || []).find((x) => x.id === cid);
+          if (!c) return;
+          const next = (el.textContent || '').trim();
+          if (!next || next === original.trim()) {
+            el.innerHTML = renderTextWithChips(original);
+            original = null;
+            return;
+          }
+          c.text = next;
+          a.updatedAt = todayISO();
+          commit('activity-comment-edit');
+          original = null;
+          setTimeout(renderActivityComments, 0);
+        });
+        el.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); el.blur(); }
+          else if (e.key === 'Escape') {
+            e.preventDefault();
+            if (original != null) el.textContent = original;
+            original = null;
+            el.blur();
+          }
+        });
+      });
+    }
     renderStk();
     renderMilestones();
     renderDeliverables();
     renderAllocations();
     renderLoadChart();
+    renderLinkedActions();
+    renderLinkedActionPicker();
+    renderActivityComments();
+    // Default comment date to today.
+    const dateIn = $('#acCommentDate'); if (dateIn) dateIn.value = todayISO();
+    $('#acCommentAdd')?.addEventListener('click', () => {
+      const text = ($('#acCommentText')?.value || '').trim();
+      if (!text) return;
+      a.comments = a.comments || [];
+      a.comments.push({
+        id: uid('cm'),
+        by: state.settings?.localUser || null,
+        at: $('#acCommentDate')?.value || todayISO(),
+        text,
+      });
+      a.updatedAt = todayISO();
+      commit('activity-comment-add');
+      $('#acCommentText').value = '';
+      renderActivityComments();
+    });
+    $('#acLinkedAdd')?.addEventListener('change', (e) => {
+      const v = e.target.value; if (!v) return;
+      const [projId, actionId] = v.split('|');
+      const pr = state.projects.find((p) => p.id === projId);
+      const act = pr?.actions?.find((x) => x.id === actionId);
+      if (act) {
+        act.activityId = a.id;
+        a.updatedAt = todayISO();
+        commit('activity-link-action');
+        renderLinkedActions();
+        renderLinkedActionPicker();
+      }
+      e.target.value = '';
+    });
     // Live-redraw the load profile when window / hours change.
     ['#acPlStart', '#acPlEnd', '#acHours'].forEach((sel) => {
       $(sel)?.addEventListener('input',  renderLoadChart);
@@ -16219,8 +16392,10 @@
     if (!a) return;
     $('#drawerTitle').textContent = 'Action details';
     const body = $('#drawerBody');
+    const parentActivity = a.activityId ? (state.activities || []).find((x) => x.id === a.activityId) : null;
     body.innerHTML = `
       <div class="field"><label>Title</label><input id="dTitle" value="${escapeHTML(a.title)}" /></div>
+      ${parentActivity ? `<div class="action-activity-chip" data-activity-id="${escapeHTML(parentActivity.id)}" title="Part of activity — click to open"><span class="muted">Part of activity:</span> <b>${escapeHTML(parentActivity.title)}</b> <span class="action-activity-unlink" title="Unlink from activity">×</span></div>` : ''}
       <div class="owner-load-strip" id="dOwnerLoad"></div>
       <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
         <div class="field"><label>Owner</label>
@@ -17093,6 +17268,22 @@
       });
     }
     renderCommentsUI();
+
+    // "Part of activity" chip wiring — click opens the activity
+    // editor, × unlinks (clears action.activityId).
+    body.querySelector('.action-activity-chip')?.addEventListener('click', (e) => {
+      const chip = e.currentTarget;
+      const aid = chip.dataset.activityId;
+      if (e.target.classList.contains('action-activity-unlink')) {
+        e.stopPropagation();
+        a.activityId = null;
+        a.updatedAt = todayISO();
+        commit('action-unlink-activity');
+        chip.remove();
+        return;
+      }
+      if (aid) openActivityEditor(aid);
+    });
 
     // ── Effort tracking widget — actuals + baseline ──────────────────
     // Rendered inline so the user can log time and freeze a baseline
@@ -20372,6 +20563,15 @@
         d.date = typeof d.date === 'string' ? d.date : null;
         d.status = ['todo', 'doing', 'done'].includes(d.status) ? d.status : 'todo';
       });
+      // Comments — same shape as action.comments, so any surface that
+      // reads/writes action comments can be reused on activities too.
+      a.comments = Array.isArray(a.comments) ? a.comments : [];
+      a.comments = a.comments.filter((c) => c && typeof c === 'object' && typeof c.text === 'string' && c.text.trim());
+      a.comments.forEach((c) => {
+        c.id = c.id || uid('cm');
+        c.by = c.by || null;
+        c.at = typeof c.at === 'string' ? c.at : todayISO();
+      });
       a.createdAt = a.createdAt || todayISO();
       a.updatedAt = a.updatedAt || a.createdAt;
     });
@@ -20647,6 +20847,10 @@
         a.requiredSkills = Array.isArray(a.requiredSkills)
           ? a.requiredSkills.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.trim())
           : [];
+        // Optional link to a state.activities[] envelope this action
+        // is part of. Enables the Activity editor to list contributing
+        // actions and the Action drawer to show its parent activity.
+        a.activityId = typeof a.activityId === 'string' && a.activityId ? a.activityId : null;
         // Planner anchor — total workload in hours for this action. Null
         // by default; the Planner view initialises it from the current
         // commitment × window on first drag, then preserves it while
