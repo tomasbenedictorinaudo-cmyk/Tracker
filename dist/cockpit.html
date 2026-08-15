@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-14T22:44:06.790Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-15T06:30:15.005Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -10568,9 +10568,6 @@ body.notes-fullscreen { overflow: hidden; }
         <button class="nav-item" data-view="dashboard">
           <span class="nav-icon">◰</span><span>Dashboard</span>
         </button>
-        <button class="nav-item" data-view="planner" hidden>
-          <span class="nav-icon">◱</span><span>Planner</span>
-        </button>
         <button class="nav-item" data-view="review">
           <span class="nav-icon">▶</span><span>Review</span>
         </button>
@@ -13577,7 +13574,9 @@ body.notes-fullscreen { overflow: hidden; }
       // Planner has moved to the person dashboard (each person's
       // workload timeline lives on their own dashboard). Route stale
       // state.currentView === 'planner' to People so old saved states
-      // and deeplinks land somewhere sensible.
+      // and deeplinks land somewhere sensible. The sidebar nav for
+      // 'planner' has been removed, but this fallback keeps deep-
+      // linked users from hitting a blank main pane.
       planner: renderPeople,
     };
     (fns[view] || renderBoard)(main);
@@ -26044,6 +26043,10 @@ body.notes-fullscreen { overflow: hidden; }
           </div>` : ''}
         </div>`;
       })()}
+      <div class="dash-section" id="dashPlannerSection">
+        <div class="dash-section-title">Planner<span class="dash-section-count">workload timeline</span></div>
+        <div id="dashPlannerHost"></div>
+      </div>
       <div class="dash-section is-collapsible${(state.ui?.dashUi?.reviewCollapsed) ? ' is-collapsed' : ''}" id="dashReviewsWrap">
         <button type="button" class="dash-section-title dev-rv-heading" id="devRvToggle" aria-expanded="${!(state.ui?.dashUi?.reviewCollapsed)}">
           <span class="dev-rv-caret">▾</span>
@@ -26154,6 +26157,15 @@ body.notes-fullscreen { overflow: hidden; }
         ]);
       });
     });
+    // Embed the Planner in this person's dashboard. Locked to the
+    // person, uses a local rerender so scope / zoom / hide-done
+    // toggles don't tear the drawer down.
+    (() => {
+      const host = document.querySelector('#dashPlannerHost');
+      if (!host) return;
+      function rerenderPlanner() { renderPlanner(host, { lockedPersonId: personId, onChange: rerenderPlanner }); }
+      rerenderPlanner();
+    })();
     // Development reviews controller. Keeps a local `selected` id
     // pointing at the review currently in the editor. Re-renders on
     // any mutation. Compare mode swaps in a two-column view.

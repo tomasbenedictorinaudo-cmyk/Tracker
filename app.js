@@ -2776,7 +2776,9 @@
       // Planner has moved to the person dashboard (each person's
       // workload timeline lives on their own dashboard). Route stale
       // state.currentView === 'planner' to People so old saved states
-      // and deeplinks land somewhere sensible.
+      // and deeplinks land somewhere sensible. The sidebar nav for
+      // 'planner' has been removed, but this fallback keeps deep-
+      // linked users from hitting a blank main pane.
       planner: renderPeople,
     };
     (fns[view] || renderBoard)(main);
@@ -15243,6 +15245,10 @@
           </div>` : ''}
         </div>`;
       })()}
+      <div class="dash-section" id="dashPlannerSection">
+        <div class="dash-section-title">Planner<span class="dash-section-count">workload timeline</span></div>
+        <div id="dashPlannerHost"></div>
+      </div>
       <div class="dash-section is-collapsible${(state.ui?.dashUi?.reviewCollapsed) ? ' is-collapsed' : ''}" id="dashReviewsWrap">
         <button type="button" class="dash-section-title dev-rv-heading" id="devRvToggle" aria-expanded="${!(state.ui?.dashUi?.reviewCollapsed)}">
           <span class="dev-rv-caret">▾</span>
@@ -15353,6 +15359,15 @@
         ]);
       });
     });
+    // Embed the Planner in this person's dashboard. Locked to the
+    // person, uses a local rerender so scope / zoom / hide-done
+    // toggles don't tear the drawer down.
+    (() => {
+      const host = document.querySelector('#dashPlannerHost');
+      if (!host) return;
+      function rerenderPlanner() { renderPlanner(host, { lockedPersonId: personId, onChange: rerenderPlanner }); }
+      rerenderPlanner();
+    })();
     // Development reviews controller. Keeps a local `selected` id
     // pointing at the review currently in the editor. Re-renders on
     // any mutation. Compare mode swaps in a two-column view.
