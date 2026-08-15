@@ -25039,6 +25039,15 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     pop.className = 'pln-cmt-pop';
     pop.style.left = x + 'px';
     pop.style.top = y + 'px';
+    // Declare close + outsideHandler BEFORE render() so the inner
+    // handlers wired inside render() aren't hitting the temporal
+    // dead zone on the first pass (that was silently breaking the ×
+    // button — the addEventListener call threw at bind time).
+    let outsideHandler;
+    const close = () => {
+      pop.remove();
+      if (outsideHandler) document.removeEventListener('mousedown', outsideHandler);
+    };
     const render = () => {
       const list = (action.comments || []).slice().sort((a, b) => (a.at || '').localeCompare(b.at || ''));
       pop.innerHTML = `
@@ -25106,11 +25115,6 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
     const r = pop.getBoundingClientRect();
     if (r.right > innerWidth)  pop.style.left = Math.max(8, innerWidth  - r.width  - 8) + 'px';
     if (r.bottom > innerHeight) pop.style.top  = Math.max(8, innerHeight - r.height - 8) + 'px';
-    let outsideHandler;
-    const close = () => {
-      pop.remove();
-      if (outsideHandler) document.removeEventListener('mousedown', outsideHandler);
-    };
     outsideHandler = (e) => { if (!pop.contains(e.target)) close(); };
     setTimeout(() => document.addEventListener('mousedown', outsideHandler), 50);
   }
