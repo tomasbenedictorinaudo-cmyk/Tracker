@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-15T06:30:15.005Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-15T14:42:14.022Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -10068,7 +10068,14 @@ body.notes-fullscreen { overflow: hidden; }
 .view.pln-embedded > * { max-width: 100%; min-width: 0; }
 .view.pln-embedded .planner-scroll {
   max-width: 100%;
-  max-height: 300px;
+  /* Resizable pane: default 300px, but the user can drag the
+     handle below the workload chart to pick a different height.
+     Value written on #dashPlannerHost as --dash-planner-h. Must
+     clear the base .planner-scroll max-height so the user isn't
+     silently capped by the viewport-relative rule at low heights. */
+  height: var(--dash-planner-h, 300px);
+  min-height: 160px;
+  max-height: none;
   overflow: auto;
   border: 1px solid var(--line);
   border-top-left-radius: var(--radius-sm);
@@ -10080,9 +10087,35 @@ body.notes-fullscreen { overflow: hidden; }
   max-width: 100%;
   border: 1px solid var(--line);
   border-top: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* Drag handle appended after the planner so users can grow the
+   Gantt pane vertically. Reads as a subtle rounded pill on a
+   full-width strip; the pill turns accent on hover for a "grabbable"
+   affordance. */
+.pln-embed-resize {
+  height: 10px;
+  cursor: ns-resize;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-top: 0;
   border-bottom-left-radius: var(--radius-sm);
   border-bottom-right-radius: var(--radius-sm);
+  user-select: none;
 }
+.pln-embed-resize::before {
+  content: '';
+  width: 44px; height: 3px;
+  background: var(--line-2);
+  border-radius: 2px;
+  transition: background var(--transition);
+}
+.pln-embed-resize:hover::before,
+.pln-embed-resize.dragging::before { background: var(--accent); }
+body.is-plndrag { cursor: ns-resize !important; }
+body.is-plndrag * { cursor: ns-resize !important; }
 .view.pln-embedded .planner-axis   { z-index: 1; }
 .view.pln-embedded .pln-row-label  { z-index: 1; }
 .pln-embed-toolbar {
@@ -26163,7 +26196,61 @@ body.notes-fullscreen { overflow: hidden; }
     (() => {
       const host = document.querySelector('#dashPlannerHost');
       if (!host) return;
-      function rerenderPlanner() { renderPlanner(host, { lockedPersonId: personId, onChange: rerenderPlanner }); }
+      // Restore any user-picked height BEFORE first render so the
+      // pane opens at its remembered size instead of flashing 300px.
+      const savedH = state.settings?.dashboardPlannerHeight;
+      if (savedH && savedH >= 160 && savedH <= 1400) {
+        host.style.setProperty('--dash-planner-h', savedH + 'px');
+      }
+      function rerenderPlanner() {
+        renderPlanner(host, { lockedPersonId: personId, onChange: rerenderPlanner });
+        // renderPlanner() empties the host on each rerender, so the
+        // drag handle needs to be re-appended after every pass.
+        mountResizeHandle();
+      }
+      function mountResizeHandle() {
+        if (host.querySelector(':scope > .pln-embed-resize')) return;
+        const grip = document.createElement('div');
+        grip.className = 'pln-embed-resize';
+        grip.title = 'Drag to resize the planner · double-click to reset';
+        grip.setAttribute('role', 'separator');
+        grip.setAttribute('aria-label', 'Resize planner');
+        host.appendChild(grip);
+        grip.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const scroll = host.querySelector('.planner-scroll');
+          if (!scroll) return;
+          const startY = e.clientY;
+          const startH = scroll.getBoundingClientRect().height;
+          grip.classList.add('dragging');
+          document.body.classList.add('is-plndrag');
+          const onMove = (em) => {
+            const next = Math.max(160, Math.min(1400, startH + (em.clientY - startY)));
+            host.style.setProperty('--dash-planner-h', next + 'px');
+          };
+          const onUp = () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            grip.classList.remove('dragging');
+            document.body.classList.remove('is-plndrag');
+            const sc = host.querySelector('.planner-scroll');
+            if (sc) {
+              const h = Math.round(sc.getBoundingClientRect().height);
+              state.settings = state.settings || {};
+              state.settings.dashboardPlannerHeight = h;
+              saveState();
+            }
+          };
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        });
+        grip.addEventListener('dblclick', () => {
+          host.style.removeProperty('--dash-planner-h');
+          state.settings = state.settings || {};
+          delete state.settings.dashboardPlannerHeight;
+          saveState();
+        });
+      }
       rerenderPlanner();
     })();
     // Development reviews controller. Keeps a local `selected` id

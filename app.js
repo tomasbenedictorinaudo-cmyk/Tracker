@@ -15365,7 +15365,61 @@
     (() => {
       const host = document.querySelector('#dashPlannerHost');
       if (!host) return;
-      function rerenderPlanner() { renderPlanner(host, { lockedPersonId: personId, onChange: rerenderPlanner }); }
+      // Restore any user-picked height BEFORE first render so the
+      // pane opens at its remembered size instead of flashing 300px.
+      const savedH = state.settings?.dashboardPlannerHeight;
+      if (savedH && savedH >= 160 && savedH <= 1400) {
+        host.style.setProperty('--dash-planner-h', savedH + 'px');
+      }
+      function rerenderPlanner() {
+        renderPlanner(host, { lockedPersonId: personId, onChange: rerenderPlanner });
+        // renderPlanner() empties the host on each rerender, so the
+        // drag handle needs to be re-appended after every pass.
+        mountResizeHandle();
+      }
+      function mountResizeHandle() {
+        if (host.querySelector(':scope > .pln-embed-resize')) return;
+        const grip = document.createElement('div');
+        grip.className = 'pln-embed-resize';
+        grip.title = 'Drag to resize the planner · double-click to reset';
+        grip.setAttribute('role', 'separator');
+        grip.setAttribute('aria-label', 'Resize planner');
+        host.appendChild(grip);
+        grip.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          const scroll = host.querySelector('.planner-scroll');
+          if (!scroll) return;
+          const startY = e.clientY;
+          const startH = scroll.getBoundingClientRect().height;
+          grip.classList.add('dragging');
+          document.body.classList.add('is-plndrag');
+          const onMove = (em) => {
+            const next = Math.max(160, Math.min(1400, startH + (em.clientY - startY)));
+            host.style.setProperty('--dash-planner-h', next + 'px');
+          };
+          const onUp = () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            grip.classList.remove('dragging');
+            document.body.classList.remove('is-plndrag');
+            const sc = host.querySelector('.planner-scroll');
+            if (sc) {
+              const h = Math.round(sc.getBoundingClientRect().height);
+              state.settings = state.settings || {};
+              state.settings.dashboardPlannerHeight = h;
+              saveState();
+            }
+          };
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        });
+        grip.addEventListener('dblclick', () => {
+          host.style.removeProperty('--dash-planner-h');
+          state.settings = state.settings || {};
+          delete state.settings.dashboardPlannerHeight;
+          saveState();
+        });
+      }
       rerenderPlanner();
     })();
     // Development reviews controller. Keeps a local `selected` id

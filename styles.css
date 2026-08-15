@@ -10059,7 +10059,14 @@ body.notes-fullscreen { overflow: hidden; }
 .view.pln-embedded > * { max-width: 100%; min-width: 0; }
 .view.pln-embedded .planner-scroll {
   max-width: 100%;
-  max-height: 300px;
+  /* Resizable pane: default 300px, but the user can drag the
+     handle below the workload chart to pick a different height.
+     Value written on #dashPlannerHost as --dash-planner-h. Must
+     clear the base .planner-scroll max-height so the user isn't
+     silently capped by the viewport-relative rule at low heights. */
+  height: var(--dash-planner-h, 300px);
+  min-height: 160px;
+  max-height: none;
   overflow: auto;
   border: 1px solid var(--line);
   border-top-left-radius: var(--radius-sm);
@@ -10071,9 +10078,35 @@ body.notes-fullscreen { overflow: hidden; }
   max-width: 100%;
   border: 1px solid var(--line);
   border-top: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+/* Drag handle appended after the planner so users can grow the
+   Gantt pane vertically. Reads as a subtle rounded pill on a
+   full-width strip; the pill turns accent on hover for a "grabbable"
+   affordance. */
+.pln-embed-resize {
+  height: 10px;
+  cursor: ns-resize;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-top: 0;
   border-bottom-left-radius: var(--radius-sm);
   border-bottom-right-radius: var(--radius-sm);
+  user-select: none;
 }
+.pln-embed-resize::before {
+  content: '';
+  width: 44px; height: 3px;
+  background: var(--line-2);
+  border-radius: 2px;
+  transition: background var(--transition);
+}
+.pln-embed-resize:hover::before,
+.pln-embed-resize.dragging::before { background: var(--accent); }
+body.is-plndrag { cursor: ns-resize !important; }
+body.is-plndrag * { cursor: ns-resize !important; }
 .view.pln-embedded .planner-axis   { z-index: 1; }
 .view.pln-embedded .pln-row-label  { z-index: 1; }
 .pln-embed-toolbar {
