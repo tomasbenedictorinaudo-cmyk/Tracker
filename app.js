@@ -1832,6 +1832,11 @@
           { id: 'ad_tvac_plan',   name: 'TVAC test plan v3',    date: d(-3),  status: 'done'  },
           { id: 'ad_tvac_report', name: 'TVAC campaign report', date: d(56),  status: 'todo'  },
         ],
+        comments: [
+          { id: 'cm_tvac_1', by: 'p_sofia', at: d(-25), text: 'Chamber slot confirmed by IABG for the +10..+42 window.' },
+          { id: 'cm_tvac_2', by: 'p_lena',  at: d(-10), text: 'Hot-case rehearsal scenarios drafted — need Diego to review AOCS interlocks before kickoff.' },
+          { id: 'cm_tvac_3', by: 'p_diego', at: d(-4),  text: 'AOCS interlocks OK. One caveat: safe-mode entry threshold still uses the CDR baseline — revisit after post-hot data.' },
+        ],
         createdAt: d(-35), updatedAt: d(-1),
       },
       {
@@ -1851,6 +1856,10 @@
         deliverables: [
           { id: 'ad_review_out', name: 'Review findings report', date: d(35), status: 'todo' },
         ],
+        comments: [
+          { id: 'cm_review_1', by: 'p_sofia', at: d(-12), text: 'Anaïs confirmed availability. Kick-off briefing agenda to circulate 3 days ahead.' },
+          { id: 'cm_review_2', by: 'p_marie', at: d(-3),  text: 'Data-pack draft is at 80%. Blocking: harness FMEA still pending.' },
+        ],
         createdAt: d(-14), updatedAt: d(-5),
       },
       {
@@ -1869,9 +1878,31 @@
           { id: 'am_cover_hand', name: 'Handover complete', date: d(42) },
         ],
         deliverables: [],
+        comments: [
+          { id: 'cm_cover_1', by: 'p_kira',  at: d(-5), text: 'Handover doc drafted, walking Yuki through the release checklist next week.' },
+        ],
         createdAt: d(-7), updatedAt: d(-1),
       },
     ];
+
+    // ── Link a handful of actions to each activity ──────────────────
+    // Picks the earliest thermal / test / pm / sw actions from each
+    // project. Runs after action generation but before the return —
+    // silently no-ops if a project has fewer matches than expected.
+    (function linkActionsToActivities() {
+      const linkFirstN = (proj, componentKeys, activityId, n) => {
+        const pool = (proj.actions || []).filter((a) =>
+          componentKeys.some((k) => a.component && a.component.includes(k))
+        );
+        pool.slice(0, n).forEach((a) => { a.activityId = activityId; });
+      };
+      // TVAC campaign — pull thermal + test actions from Orbit-7.
+      linkFirstN(proj1, ['thermal', 'test'], 'act_tvac', 6);
+      // Independent PDR review — pull PM actions from Orbit-7.
+      linkFirstN(proj1, ['pm'], 'act_review', 4);
+      // Sabbatical coverage — pull SW actions from Helios-2.
+      linkFirstN(proj2, ['sw', 'be'], 'act_cover', 5);
+    })();
 
     // ── Enrich the project notes with semantic highlights ─────────────
     // The highlight buttons produce <mark class="nt-hl nt-hl-{ok|warn|bad}">
