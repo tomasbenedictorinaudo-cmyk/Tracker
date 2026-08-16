@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-16T02:04:21.267Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-16T02:07:54.798Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -26541,6 +26541,18 @@ body.is-plndrag * { cursor: ns-resize !important; }
       paintGroup(Math.round((x - offsetPx) / pxPerDay));
     });
     cfg.scrollEl.addEventListener('mouseleave', hideGroup);
+    // When the scroll container scrolls vertically (planner does),
+    // push the label down so it stays pinned to the top of the
+    // VISIBLE viewport instead of the top of the content (which
+    // scrolls out of frame). Only the label moves; the vertical
+    // line stays anchored to its date column.
+    if (cfg.pinLabelToScrollTop) {
+      const applyScrollTop = () => {
+        label.style.top = (cfg.scrollEl.scrollTop + 4) + 'px';
+      };
+      applyScrollTop();
+      cfg.scrollEl.addEventListener('scroll', applyScrollTop);
+    }
   }
 
   /* ---------------------- Phase I: Person dashboard -------------------- */
@@ -36339,6 +36351,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           getWindowStartMs: () => winStartMs,
           offsetPx: LABEL_COL_W + LABEL_GAP,
           syncGroup: groupKey,
+          // Planner scrolls vertically; keep the date label visible
+          // at the top of the visible viewport as rows scroll past.
+          pinLabelToScrollTop: true,
         });
       }
       if (wlScrollEl && wlHost) {

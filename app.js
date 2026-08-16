@@ -15461,6 +15461,18 @@
       paintGroup(Math.round((x - offsetPx) / pxPerDay));
     });
     cfg.scrollEl.addEventListener('mouseleave', hideGroup);
+    // When the scroll container scrolls vertically (planner does),
+    // push the label down so it stays pinned to the top of the
+    // VISIBLE viewport instead of the top of the content (which
+    // scrolls out of frame). Only the label moves; the vertical
+    // line stays anchored to its date column.
+    if (cfg.pinLabelToScrollTop) {
+      const applyScrollTop = () => {
+        label.style.top = (cfg.scrollEl.scrollTop + 4) + 'px';
+      };
+      applyScrollTop();
+      cfg.scrollEl.addEventListener('scroll', applyScrollTop);
+    }
   }
 
   /* ---------------------- Phase I: Person dashboard -------------------- */
@@ -25259,6 +25271,9 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
           getWindowStartMs: () => winStartMs,
           offsetPx: LABEL_COL_W + LABEL_GAP,
           syncGroup: groupKey,
+          // Planner scrolls vertically; keep the date label visible
+          // at the top of the visible viewport as rows scroll past.
+          pinLabelToScrollTop: true,
         });
       }
       if (wlScrollEl && wlHost) {
