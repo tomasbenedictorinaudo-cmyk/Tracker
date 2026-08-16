@@ -15163,6 +15163,18 @@
         }).join('')}
       </svg>`;
     host.innerHTML = `<div class="act-gantt-scroll">${svg}</div>`;
+    // Register this Gantt SVG with the shared hover crosshair —
+    // the workload chart below registers too, so the vertical line
+    // runs across both plots. See _syncActivityHover().
+    _registerActivityHoverPlot({
+      svgSelector: '#actGantt .act-gantt',
+      scrollSelector: '#actGantt .act-gantt-scroll',
+      yTop: 30,
+      yBottom: totalH - 10,
+      totalW,
+      dayW,
+      winStart,
+    });
     // Click activity bar → open editor
     host.querySelectorAll('.act-bar').forEach((g) => g.addEventListener('click', () => openActivityEditor(g.dataset.actId)));
     // Click milestone / deliverable → prompt for new date
@@ -15343,6 +15355,101 @@
     });
     svg.push('</svg>');
     host.innerHTML = `<div class="act-wl-scroll">${svg.join('')}</div>`;
+    // Register the workload SVG with the shared crosshair — extends
+    // the Gantt's vertical line down into this plot on hover.
+    _registerActivityHoverPlot({
+      svgSelector: '#actWorkload .act-wl',
+      scrollSelector: '#actWorkload .act-wl-scroll',
+      yTop: 0,
+      yBottom: H,
+      totalW,
+      dayW,
+      winStart,
+      hideLabel: true,  // Gantt already shows the date pill — no duplicate here
+    });
+  }
+
+  // ── Shared activity-chart hover crosshair ────────────────────
+  // The Gantt (top) and Workload (bottom) share the same time axis
+  // (winStart, dayW, totalW). Rather than each plot managing its
+  // own crosshair, both register with this helper: mouse-move on
+  // either scroll container updates the vertical line on BOTH
+  // plots, so the user reads a single continuous crosshair.
+  //
+  // Each plot contributes its own SVG + scroll container + y bounds.
+  // The date-pill label is drawn on the FIRST plot to register
+  // (the Gantt) unless the caller opts out via hideLabel.
+  const _actHoverPlots = new Set();
+  function _registerActivityHoverPlot(cfg) {
+    const svgEl = document.querySelector(cfg.svgSelector);
+    const scrollEl = document.querySelector(cfg.scrollSelector);
+    if (!svgEl || !scrollEl) return;
+    const NS = 'http://www.w3.org/2000/svg';
+    const mkEl = (tag, attrs) => {
+      const el = document.createElementNS(NS, tag);
+      for (const k in attrs) el.setAttribute(k, attrs[k]);
+      return el;
+    };
+    // Fresh crosshair group per registration — re-renders replace
+    // the SVG contents, so old lines are wiped naturally.
+    const hoverGroup = mkEl('g', { class: 'act-hover-crosshair', 'pointer-events': 'none' });
+    hoverGroup.style.display = 'none';
+    const hoverLine = mkEl('line', {
+      x1: 0, x2: 0, y1: cfg.yTop, y2: cfg.yBottom,
+      stroke: '#fbbf24', 'stroke-width': '1', 'stroke-dasharray': '3 3', opacity: '0.9',
+    });
+    hoverGroup.appendChild(hoverLine);
+    let labelBg = null, labelText = null;
+    if (!cfg.hideLabel) {
+      labelBg = mkEl('rect', {
+        x: 0, y: 2, width: 84, height: 15, rx: 3, ry: 3,
+        fill: '#fbbf24', stroke: '#0a0a0a', 'stroke-width': '0.5',
+      });
+      labelText = mkEl('text', {
+        x: 0, y: 13, 'text-anchor': 'middle',
+        'font-size': '10.5', 'font-family': 'sans-serif', 'font-weight': '700',
+        fill: '#0a0a0a',
+      });
+      hoverGroup.appendChild(labelBg);
+      hoverGroup.appendChild(labelText);
+    }
+    svgEl.appendChild(hoverGroup);
+    const winStartMs = new Date(cfg.winStart).getTime();
+    const plot = { cfg, svgEl, scrollEl, hoverGroup, hoverLine, labelBg, labelText, winStartMs };
+    _actHoverPlots.add(plot);
+    // Attach mouse listeners once per plot — moves are broadcast
+    // through _syncActivityHover so every plot updates together.
+    scrollEl.addEventListener('mousemove', (e) => {
+      const rect = svgEl.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      if (x < 0 || x > cfg.totalW) { _syncActivityHover(null); return; }
+      _syncActivityHover(x);
+    });
+    scrollEl.addEventListener('mouseleave', () => { _syncActivityHover(null); });
+  }
+  function _syncActivityHover(x) {
+    _actHoverPlots.forEach((p) => {
+      // Ignore plots whose DOM was replaced by a later render.
+      if (!document.body.contains(p.svgEl)) { _actHoverPlots.delete(p); return; }
+      if (x == null) { p.hoverGroup.style.display = 'none'; return; }
+      const dayIdx = Math.round(x / p.cfg.dayW);
+      const snappedX = dayIdx * p.cfg.dayW;
+      p.hoverLine.setAttribute('x1', snappedX);
+      p.hoverLine.setAttribute('x2', snappedX);
+      if (p.labelText) {
+        const date = new Date(p.winStartMs + dayIdx * dayMs);
+        p.labelText.textContent = date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        const tw = Math.max(60, p.labelText.getBBox().width + 14);
+        const half = tw / 2;
+        let lx = snappedX;
+        if (lx - half < 2) lx = half + 2;
+        if (lx + half > p.cfg.totalW - 2) lx = p.cfg.totalW - half - 2;
+        p.labelBg.setAttribute('x', lx - half);
+        p.labelBg.setAttribute('width', tw);
+        p.labelText.setAttribute('x', lx);
+      }
+      p.hoverGroup.style.display = '';
+    });
   }
 
   /* ---------------------- Phase I: Person dashboard -------------------- */
