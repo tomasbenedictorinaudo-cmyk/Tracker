@@ -7594,6 +7594,20 @@
     // they sit above the grid lines, but pointer-events: none so bars stay
     // interactive.
     drawDependencyArrows(actions, gridEl, criticalSet);
+    // Hover crosshair — same .tl-hover-marker template as the
+    // calendar timeline. Mounts into #tlGrid (which is the
+    // full-content-width element that scrolls with the timeline).
+    (() => {
+      const wrap = $('#tlGridWrap');
+      if (!wrap || !gridEl) return;
+      const windowStartMs = start.getTime();
+      wireHoverCrosshair({
+        scrollEl: wrap,
+        stageEl: gridEl,
+        getPxPerDay: () => tlState.dayWidth,
+        getWindowStartMs: () => windowStartMs,
+      });
+    })();
   }
 
   // Walk back from every open milestone through dependsOn to flag the
@@ -15162,19 +15176,21 @@
             ${delivMarks}`;
         }).join('')}
       </svg>`;
-    host.innerHTML = `<div class="act-gantt-scroll">${svg}</div>`;
-    // Register this Gantt SVG with the shared hover crosshair —
-    // the workload chart below registers too, so the vertical line
-    // runs across both plots. See _syncActivityHover().
-    _registerActivityHoverPlot({
-      svgSelector: '#actGantt .act-gantt',
-      scrollSelector: '#actGantt .act-gantt-scroll',
-      yTop: 30,
-      yBottom: totalH - 10,
-      totalW,
-      dayW,
-      winStart,
-    });
+    // Wrap SVG in a full-width `.hover-stage` so the .tl-hover-marker
+    // (a plain <div>) can be a sibling of the SVG and use the same
+    // content-space coord system.
+    host.innerHTML = `<div class="act-gantt-scroll"><div class="hover-stage" style="width:${totalW}px; position:relative;">${svg}</div></div>`;
+    (() => {
+      const scrollEl = host.querySelector('.act-gantt-scroll');
+      const stageEl  = host.querySelector('.act-gantt-scroll .hover-stage');
+      const winStartMs = new Date(winStart).getTime();
+      wireHoverCrosshair({
+        scrollEl, stageEl,
+        getPxPerDay: () => dayW,
+        getWindowStartMs: () => winStartMs,
+        syncGroup: 'activities',
+      });
+    })();
     // Click activity bar → open editor
     host.querySelectorAll('.act-bar').forEach((g) => g.addEventListener('click', () => openActivityEditor(g.dataset.actId)));
     // Click milestone / deliverable → prompt for new date
@@ -15354,102 +15370,97 @@
       lx += 14 + groupLabel(k).length * 6 + 12;
     });
     svg.push('</svg>');
-    host.innerHTML = `<div class="act-wl-scroll">${svg.join('')}</div>`;
-    // Register the workload SVG with the shared crosshair — extends
-    // the Gantt's vertical line down into this plot on hover.
-    _registerActivityHoverPlot({
-      svgSelector: '#actWorkload .act-wl',
-      scrollSelector: '#actWorkload .act-wl-scroll',
-      yTop: 0,
-      yBottom: H,
-      totalW,
-      dayW,
-      winStart,
-      hideLabel: true,  // Gantt already shows the date pill — no duplicate here
-    });
+    host.innerHTML = `<div class="act-wl-scroll"><div class="hover-stage" style="width:${totalW}px; position:relative;">${svg.join('')}</div></div>`;
+    (() => {
+      const scrollEl = host.querySelector('.act-wl-scroll');
+      const stageEl  = host.querySelector('.act-wl-scroll .hover-stage');
+      const winStartMs = new Date(winStart).getTime();
+      wireHoverCrosshair({
+        scrollEl, stageEl,
+        getPxPerDay: () => dayW,
+        getWindowStartMs: () => winStartMs,
+        syncGroup: 'activities',
+      });
+    })();
   }
 
-  // ── Shared activity-chart hover crosshair ────────────────────
-  // The Gantt (top) and Workload (bottom) share the same time axis
-  // (winStart, dayW, totalW). Rather than each plot managing its
-  // own crosshair, both register with this helper: mouse-move on
-  // either scroll container updates the vertical line on BOTH
-  // plots, so the user reads a single continuous crosshair.
+  // ── Shared Gantt hover crosshair ─────────────────────────────
+  // Reuses the same .tl-hover-marker / .tl-hover-line / .tl-hover-label
+  // template as the calendar timeline. Mount into any scroll container
+  // where the content width equals `windowDays × pxPerDay` and where
+  // (offset px) / pxPerDay + windowStartMs gives the date under the
+  // pointer.
   //
-  // Each plot contributes its own SVG + scroll container + y bounds.
-  // The date-pill label is drawn on the FIRST plot to register
-  // (the Gantt) unless the caller opts out via hideLabel.
-  const _actHoverPlots = new Set();
-  function _registerActivityHoverPlot(cfg) {
-    const svgEl = document.querySelector(cfg.svgSelector);
-    const scrollEl = document.querySelector(cfg.scrollSelector);
-    if (!svgEl || !scrollEl) return;
-    const NS = 'http://www.w3.org/2000/svg';
-    const mkEl = (tag, attrs) => {
-      const el = document.createElementNS(NS, tag);
-      for (const k in attrs) el.setAttribute(k, attrs[k]);
-      return el;
-    };
-    // Fresh crosshair group per registration — re-renders replace
-    // the SVG contents, so old lines are wiped naturally.
-    const hoverGroup = mkEl('g', { class: 'act-hover-crosshair', 'pointer-events': 'none' });
-    hoverGroup.style.display = 'none';
-    const hoverLine = mkEl('line', {
-      x1: 0, x2: 0, y1: cfg.yTop, y2: cfg.yBottom,
-      stroke: '#fbbf24', 'stroke-width': '1', 'stroke-dasharray': '3 3', opacity: '0.9',
-    });
-    hoverGroup.appendChild(hoverLine);
-    let labelBg = null, labelText = null;
-    if (!cfg.hideLabel) {
-      labelBg = mkEl('rect', {
-        x: 0, y: 2, width: 84, height: 15, rx: 3, ry: 3,
-        fill: '#fbbf24', stroke: '#0a0a0a', 'stroke-width': '0.5',
-      });
-      labelText = mkEl('text', {
-        x: 0, y: 13, 'text-anchor': 'middle',
-        'font-size': '10.5', 'font-family': 'sans-serif', 'font-weight': '700',
-        fill: '#0a0a0a',
-      });
-      hoverGroup.appendChild(labelBg);
-      hoverGroup.appendChild(labelText);
+  // cfg = {
+  //   scrollEl, stageEl,          // required
+  //   getPxPerDay: () => Number,  // required
+  //   getWindowStartMs: () => Number, // required
+  //   top?: Number,   height?: Number,  // marker geometry (optional)
+  //   syncGroup?: string,  // plots with the same key mirror each other
+  //   isSuppressed?: () => bool,   // e.g. don't show mid-drag
+  // }
+  const _hoverCrossSyncGroups = new Map(); // groupKey → Set<plot>
+  function wireHoverCrosshair(cfg) {
+    if (!cfg.scrollEl || !cfg.stageEl) return;
+    // Marker must sit inside a positioned ancestor. Make the stage
+    // relative if it isn't already.
+    if (getComputedStyle(cfg.stageEl).position === 'static') {
+      cfg.stageEl.style.position = 'relative';
     }
-    svgEl.appendChild(hoverGroup);
-    const winStartMs = new Date(cfg.winStart).getTime();
-    const plot = { cfg, svgEl, scrollEl, hoverGroup, hoverLine, labelBg, labelText, winStartMs };
-    _actHoverPlots.add(plot);
-    // Attach mouse listeners once per plot — moves are broadcast
-    // through _syncActivityHover so every plot updates together.
-    scrollEl.addEventListener('mousemove', (e) => {
-      const rect = svgEl.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      if (x < 0 || x > cfg.totalW) { _syncActivityHover(null); return; }
-      _syncActivityHover(x);
-    });
-    scrollEl.addEventListener('mouseleave', () => { _syncActivityHover(null); });
-  }
-  function _syncActivityHover(x) {
-    _actHoverPlots.forEach((p) => {
-      // Ignore plots whose DOM was replaced by a later render.
-      if (!document.body.contains(p.svgEl)) { _actHoverPlots.delete(p); return; }
-      if (x == null) { p.hoverGroup.style.display = 'none'; return; }
-      const dayIdx = Math.round(x / p.cfg.dayW);
-      const snappedX = dayIdx * p.cfg.dayW;
-      p.hoverLine.setAttribute('x1', snappedX);
-      p.hoverLine.setAttribute('x2', snappedX);
-      if (p.labelText) {
-        const date = new Date(p.winStartMs + dayIdx * dayMs);
-        p.labelText.textContent = date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-        const tw = Math.max(60, p.labelText.getBBox().width + 14);
-        const half = tw / 2;
-        let lx = snappedX;
-        if (lx - half < 2) lx = half + 2;
-        if (lx + half > p.cfg.totalW - 2) lx = p.cfg.totalW - half - 2;
-        p.labelBg.setAttribute('x', lx - half);
-        p.labelBg.setAttribute('width', tw);
-        p.labelText.setAttribute('x', lx);
+    const marker = document.createElement('div');
+    marker.className = 'tl-hover-marker';
+    marker.innerHTML = '<div class="tl-hover-line"></div><div class="tl-hover-label"></div>';
+    marker.style.display = 'none';
+    if (cfg.top != null)    marker.style.top = cfg.top + 'px';
+    if (cfg.height != null) marker.style.height = cfg.height + 'px';
+    cfg.stageEl.appendChild(marker);
+    const label = marker.querySelector('.tl-hover-label');
+    const plot = { marker, label, cfg };
+    if (cfg.syncGroup) {
+      if (!_hoverCrossSyncGroups.has(cfg.syncGroup)) _hoverCrossSyncGroups.set(cfg.syncGroup, new Set());
+      _hoverCrossSyncGroups.get(cfg.syncGroup).add(plot);
+    }
+    const paintPlot = (p, dayOffset) => {
+      if (!document.body.contains(p.marker)) {
+        if (p.cfg.syncGroup) _hoverCrossSyncGroups.get(p.cfg.syncGroup)?.delete(p);
+        return;
       }
-      p.hoverGroup.style.display = '';
+      const pxPerDay = p.cfg.getPxPerDay?.() ?? p.cfg.pxPerDay;
+      const winStart = p.cfg.getWindowStartMs?.() ?? p.cfg.windowStartMs;
+      const offsetPx = p.cfg.offsetPx || 0;
+      if (!pxPerDay || winStart == null || dayOffset == null) { p.marker.style.display = 'none'; return; }
+      const snappedX = offsetPx + dayOffset * pxPerDay;
+      p.marker.style.left = snappedX + 'px';
+      const d = new Date(winStart + dayOffset * dayMs);
+      p.label.textContent = d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+      p.marker.style.display = 'block';
+    };
+    const paintGroup = (dayOffset) => {
+      if (cfg.syncGroup) {
+        _hoverCrossSyncGroups.get(cfg.syncGroup).forEach((p) => paintPlot(p, dayOffset));
+      } else {
+        paintPlot(plot, dayOffset);
+      }
+    };
+    const hideGroup = () => {
+      if (cfg.syncGroup) {
+        _hoverCrossSyncGroups.get(cfg.syncGroup).forEach((p) => { p.marker.style.display = 'none'; });
+      } else {
+        plot.marker.style.display = 'none';
+      }
+    };
+    cfg.scrollEl.addEventListener('mousemove', (e) => {
+      if (cfg.isSuppressed?.()) { hideGroup(); return; }
+      const stageRect = cfg.stageEl.getBoundingClientRect();
+      const x = e.clientX - stageRect.left;
+      const stageW = cfg.stageEl.clientWidth || stageRect.width;
+      if (x < 0 || x > stageW) { hideGroup(); return; }
+      const pxPerDay = cfg.getPxPerDay?.() ?? cfg.pxPerDay;
+      if (!pxPerDay) { hideGroup(); return; }
+      const offsetPx = cfg.offsetPx || 0;
+      paintGroup(Math.round((x - offsetPx) / pxPerDay));
     });
+    cfg.scrollEl.addEventListener('mouseleave', hideGroup);
   }
 
   /* ---------------------- Phase I: Person dashboard -------------------- */
@@ -25228,6 +25239,39 @@ ${(!data.next.milestones.length && !data.next.deliverables.length && !data.next.
       ${person ? renderPlannerGantt(person, visibleActions, weeklyCapHours, capacityPct, s, _plannerChartSizing(span, s.zoomStep)) : `<div class="empty">No team members yet — add one from the People page.</div>`}
     `;
     root.appendChild(view);
+    // Hover crosshair — same .tl-hover-marker template. Two plots
+    // (Gantt + workload) sync-grouped so the vertical line spans both.
+    if (person) {
+      const chartSizing = _plannerChartSizing(span, s.zoomStep);
+      const winStartMs = chartSizing.winStart.getTime();
+      const dayW = chartSizing.dayW;
+      const ganttScroll = view.querySelector('#plnScroll');
+      const ganttGrid   = view.querySelector('#plnScroll .planner-grid');
+      const wlScrollEl  = view.querySelector('#plnWorkloadScroll');
+      const wlHost      = view.querySelector('#plnWorkloadScroll .planner-workload');
+      const groupKey = 'planner:' + (opts.lockedPersonId || 'top');
+      _hoverCrossSyncGroups.delete(groupKey);
+      if (ganttScroll && ganttGrid) {
+        wireHoverCrosshair({
+          scrollEl: ganttScroll,
+          stageEl: ganttGrid,
+          getPxPerDay: () => dayW,
+          getWindowStartMs: () => winStartMs,
+          offsetPx: LABEL_COL_W + LABEL_GAP,
+          syncGroup: groupKey,
+        });
+      }
+      if (wlScrollEl && wlHost) {
+        wireHoverCrosshair({
+          scrollEl: wlScrollEl,
+          stageEl: wlHost,
+          getPxPerDay: () => dayW,
+          getWindowStartMs: () => winStartMs,
+          offsetPx: LABEL_COL_W + LABEL_GAP,
+          syncGroup: groupKey,
+        });
+      }
+    }
 
     // Auto-scroll centers today whenever the selection signature
     // (person / scope / zoom / hide-done) changes — so switching person
