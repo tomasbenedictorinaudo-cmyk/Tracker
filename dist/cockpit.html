@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-16T02:44:00.304Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-16T02:54:42.839Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -10942,6 +10942,115 @@ body.is-plndrag * { cursor: ns-resize !important; }
 .tp-text:focus { background: rgba(96, 165, 250, .10); }
 .tp-text-past { font-size: 13px; padding: 2px 4px; }
 .tp-meta { font-size: 10px; white-space: nowrap; }
+
+/* Pulse cycle controls (panel header) ───────────────────────── */
+.pulse-panel-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap;
+}
+.pulse-cycle-controls { display: inline-flex; align-items: center; gap: 6px; }
+.pulse-cycle-btn {
+  cursor: pointer; padding: 3px 10px;
+  border-radius: 6px; border: 1px solid var(--line);
+  background: transparent; color: var(--fg);
+  font-size: 11.5px; line-height: 1.2;
+  transition: background .12s, border-color .12s;
+}
+.pulse-cycle-btn:hover:not(:disabled) { background: rgba(148,163,184,.14); border-color: var(--fg); }
+.pulse-cycle-btn.primary { background: rgba(96, 165, 250, .15); border-color: rgba(96, 165, 250, .55); color: rgba(147, 197, 253, 1); font-weight: 600; }
+.pulse-cycle-btn.primary:hover { background: rgba(96, 165, 250, .28); }
+:root[data-theme="light"] .pulse-cycle-btn.primary { color: rgba(29, 78, 216, 1); }
+.pulse-cycle-btn:disabled { opacity: .4; cursor: not-allowed; }
+.pulse-cycle-badge {
+  padding: 3px 10px; border-radius: 999px;
+  background: rgba(148,163,184,.10); border: 1px solid var(--line);
+  font-size: 11px; color: var(--muted); white-space: nowrap;
+}
+
+/* Team topics inline + dialog ───────────────────────────────── */
+.tt-inline { display: flex; flex-direction: column; gap: 4px; }
+.tt-add-row { display: flex; gap: 8px; margin-bottom: 6px; }
+.tt-add-input { flex: 1; }
+.tt-item {
+  display: grid;
+  grid-template-columns: 26px 1fr auto 26px;
+  gap: 8px;
+  align-items: start;
+  padding: 6px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+.tt-item:hover { background: rgba(148,163,184,.08); border-color: var(--line); }
+.tt-item.is-past { opacity: .70; }
+.tt-item.is-past .tt-text-past { text-decoration: line-through; text-decoration-color: rgba(148,163,184,.6); }
+.tt-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.tt-text {
+  font-size: 13px; padding: 2px 4px; outline: none; border-radius: 4px;
+  word-wrap: break-word;
+}
+.tt-text:focus { background: rgba(96, 165, 250, .10); }
+.tt-text-past { font-size: 13px; padding: 2px 4px; }
+.tt-meta { font-size: 10px; white-space: nowrap; padding-top: 3px; }
+.tt-raise-btn, .tt-unraise-btn, .tt-del-btn {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: transparent;
+  border-radius: 4px;
+  width: 22px; height: 22px;
+  font-size: 12px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.tt-raise-btn:hover { background: rgba(74, 222, 128, .18); color: rgba(74, 222, 128, 1); }
+.tt-unraise-btn { color: rgba(74, 222, 128, 1); }
+.tt-del-btn:hover { background: rgba(248, 113, 121, .18); color: rgba(248, 113, 121, 1); }
+
+.tt-atts { display: flex; flex-wrap: wrap; gap: 4px; }
+.tt-att {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(148,163,184,.10);
+  font-size: 11px;
+  color: var(--fg);
+  text-decoration: none;
+  cursor: pointer;
+  max-width: 280px;
+}
+.tt-att:hover { background: rgba(148,163,184,.20); }
+.tt-att-del {
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  margin-left: 2px;
+}
+.tt-att-del:hover { color: rgba(248, 113, 121, 1); }
+.tt-att-add {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding-top: 2px;
+}
+.tt-att-add button {
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px dashed var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.tt-att-add button:hover { border-style: solid; color: var(--fg); background: rgba(148,163,184,.10); }
+.link-btn {
+  cursor: pointer; border: 0; background: transparent;
+  color: var(--brand, #60a5fa); padding: 0; font-size: 11px;
+  text-decoration: underline;
+}
+
+.tt-dialog { width: min(720px, 100%); }
 
 /* Activity health picker (editor) ───────────────────────────── */
 .ac-health-picker { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -25306,44 +25415,61 @@ body.is-plndrag * { cursor: ns-resize !important; }
   // competency picture. People page: individual load. Team page:
   // skills matrix + coverage. Both draw from the same state.people
   // and state.stakeholders arrays.
-  // ── Weekly team pulse helpers ────────────────────────────────
-  // A pulse is one entry per (personId, weekStart) where weekStart is
-  // the Monday of that ISO week. Callers pass a Date or ISO to get
-  // the normalised Monday.
-  const PULSE_TREND_WEEKS = 10;
-  function mondayISOOf(dateOrIso) {
-    const d = typeof dateOrIso === 'string' ? parseDate(dateOrIso) : new Date(dateOrIso);
-    if (!d) return null;
-    const nd = new Date(d);
-    nd.setHours(0, 0, 0, 0);
-    const dow = (nd.getDay() + 6) % 7; // Mon=0
-    nd.setDate(nd.getDate() - dow);
-    return fmtISO(nd);
+  // ── Team pulse helpers ───────────────────────────────────────
+  // Pulse cadence is manager-driven, not calendar-driven. Each entry
+  // belongs to a "cycle" — one opens when the manager clicks
+  // "▶ Start next cycle" in the pulse panel; state.pulseCycles is the
+  // sorted list of cycle-start ISO dates and its last entry is the
+  // current cycle.
+  const PULSE_TREND_CYCLES = 10;
+  function currentPulseCycle() {
+    if (!Array.isArray(state.pulseCycles) || !state.pulseCycles.length) {
+      state.pulseCycles = [todayISO()];
+    }
+    return state.pulseCycles[state.pulseCycles.length - 1];
   }
-  function personPulseFor(p, mondayIso) {
-    return (p.pulses || []).find((x) => x.week === mondayIso) || null;
+  function previousPulseCycle() {
+    const c = state.pulseCycles || [];
+    return c.length >= 2 ? c[c.length - 2] : null;
   }
-  function setPersonPulse(p, mondayIso, mood, note) {
+  function advancePulseCycle() {
+    const today = todayISO();
+    state.pulseCycles = state.pulseCycles || [];
+    // If today already IS the current cycle, don't stack duplicates —
+    // clicking twice in one day is a no-op.
+    if (state.pulseCycles[state.pulseCycles.length - 1] === today) return false;
+    state.pulseCycles.push(today);
+    return true;
+  }
+  function rewindPulseCycle() {
+    // Rolls back the last "start next cycle" — useful when clicked by
+    // mistake. Only allowed if the current cycle has no entries yet.
+    const c = state.pulseCycles || [];
+    if (c.length <= 1) return false;
+    const cur = c[c.length - 1];
+    const inUse = (state.people || []).some((p) => (p.pulses || []).some((x) => x.cycleStart === cur));
+    if (inUse) return false;
+    c.pop();
+    return true;
+  }
+  function personPulseFor(p, cycleStart) {
+    return (p.pulses || []).find((x) => x.cycleStart === cycleStart) || null;
+  }
+  function setPersonPulse(p, cycleStart, mood, note) {
     p.pulses = p.pulses || [];
-    const existing = p.pulses.find((x) => x.week === mondayIso);
+    const existing = p.pulses.find((x) => x.cycleStart === cycleStart);
     if (existing) {
       existing.mood = mood;
       if (note != null) existing.note = note;
       existing.at = todayISO();
     } else {
-      p.pulses.push({ id: uid('pl'), week: mondayIso, mood, note: note || '', at: todayISO() });
+      p.pulses.push({ id: uid('pl'), cycleStart, mood, note: note || '', at: todayISO() });
     }
-    p.pulses.sort((a, b) => (a.week || '').localeCompare(b.week || ''));
+    p.pulses.sort((a, b) => (a.cycleStart || '').localeCompare(b.cycleStart || ''));
   }
-  function pulseTrendWeeks(anchorIso, n) {
-    const anchor = parseDate(anchorIso);
-    const weeks = [];
-    for (let i = n - 1; i >= 0; i--) {
-      const d = new Date(anchor);
-      d.setDate(d.getDate() - i * 7);
-      weeks.push(mondayISOOf(fmtISO(d)));
-    }
-    return weeks;
+  function pulseTrendCycles(n) {
+    const c = state.pulseCycles || [];
+    return c.slice(-n);
   }
   const DEV_REVIEW_TARGET_DAYS = 90;
   function daysSinceLastReview(p) {
@@ -25366,18 +25492,23 @@ body.is-plndrag * { cursor: ns-resize !important; }
     const proj = curProject();
     const skillCount = allTeamSkills().size;
     const holderCount = (state.people || []).filter((p) => (p.skills || []).length).length;
-    const currentMonday = mondayISOOf(todayISO());
-    const trendWeeks = pulseTrendWeeks(currentMonday, PULSE_TREND_WEEKS);
+    const currentCycle = currentPulseCycle();
+    const prevCycle = previousPulseCycle();
+    const trendCycles = pulseTrendCycles(PULSE_TREND_CYCLES);
     const monthLabel = (iso) => {
       const d = parseDate(iso);
       return d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
     };
+    const cycleDurationDays = prevCycle ? dayDiff(currentCycle, prevCycle) : null;
+    const openCurrentCount = (state.people || []).filter((p) => personPulseFor(p, currentCycle)).length;
+    const totalPeople = (state.people || []).length;
+    const canRewind = state.pulseCycles.length > 1 && !(state.people || []).some((p) => (p.pulses || []).some((x) => x.cycleStart === currentCycle));
     const pulseRow = (p) => {
-      const cur = personPulseFor(p, currentMonday);
-      const cells = trendWeeks.map((wk) => {
-        const px = personPulseFor(p, wk);
-        const isNow = wk === currentMonday;
-        return `<button type="button" class="pulse-cell ${px ? 'has-' + px.mood : 'has-none'}${isNow ? ' is-now' : ''}" data-person-id="${escapeHTML(p.id)}" data-week="${escapeHTML(wk)}" title="${escapeHTML(monthLabel(wk))}${px ? ' · ' + px.mood + (px.note ? ' — ' + px.note : '') : ' · no pulse'}">${isNow ? '<span class="pulse-now-dot"></span>' : ''}</button>`;
+      const cur = personPulseFor(p, currentCycle);
+      const cells = trendCycles.map((cyc) => {
+        const px = personPulseFor(p, cyc);
+        const isNow = cyc === currentCycle;
+        return `<button type="button" class="pulse-cell ${px ? 'has-' + px.mood : 'has-none'}${isNow ? ' is-now' : ''}" data-person-id="${escapeHTML(p.id)}" data-cycle="${escapeHTML(cyc)}" title="Cycle opened ${escapeHTML(monthLabel(cyc))}${px ? ' · ' + px.mood + (px.note ? ' — ' + px.note : '') : ' · no pulse yet'}">${isNow ? '<span class="pulse-now-dot"></span>' : ''}</button>`;
       }).join('');
       const cadence = reviewCadenceMeta(p);
       const openTP = (p.talkingPoints || []).filter((t) => !t.raisedAt).length;
@@ -25391,13 +25522,13 @@ body.is-plndrag * { cursor: ns-resize !important; }
             </span>
           </div>
           <div class="tp-pulse-current">
-            <div class="pulse-picker" data-person-id="${escapeHTML(p.id)}" data-week="${escapeHTML(currentMonday)}">
+            <div class="pulse-picker" data-person-id="${escapeHTML(p.id)}" data-cycle="${escapeHTML(currentCycle)}">
               <button type="button" class="pulse-btn ${cur?.mood === 'green' ? 'is-set' : ''}" data-mood="green" title="On top of things">🟢</button>
               <button type="button" class="pulse-btn ${cur?.mood === 'amber' ? 'is-set' : ''}" data-mood="amber" title="Something on my mind">🟡</button>
               <button type="button" class="pulse-btn ${cur?.mood === 'red' ? 'is-set' : ''}" data-mood="red" title="Struggling — needs attention">🔴</button>
             </div>
           </div>
-          <div class="tp-trend" title="${PULSE_TREND_WEEKS}-week pulse trend (oldest → most recent)">${cells}</div>
+          <div class="tp-trend" title="Last ${trendCycles.length} pulse cycle${trendCycles.length === 1 ? '' : 's'} (oldest → most recent)">${cells}</div>
           <div class="tp-cadence">
             <span class="cadence-chip ${cadence.class}" title="Target: dev review every ${DEV_REVIEW_TARGET_DAYS} days">${escapeHTML(cadence.label)}</span>
           </div>
@@ -25406,6 +25537,7 @@ body.is-plndrag * { cursor: ns-resize !important; }
           </div>
         </div>`;
     };
+    const openTeamTopics = (state.teamTopics || []).filter((t) => !t.raisedAt).length;
     view.innerHTML = `
       <div class="page-head">
         <div>
@@ -25415,17 +25547,34 @@ body.is-plndrag * { cursor: ns-resize !important; }
       </div>
       <div class="panel">
         <div class="panel-title panel-title-stack">
-          <span>Team pulse & cadence</span>
-          <span class="panel-desc">Weekly 🟢🟡🔴 per person — click a colour to set this week's pulse. The strip beside it shows the last ${PULSE_TREND_WEEKS} weeks (oldest on the left). <b>Dev-review cadence</b> chip warns past ${DEV_REVIEW_TARGET_DAYS} days since the last review. <b>💬 N open</b> opens the talking-points log for that person.</span>
+          <span class="pulse-panel-head">
+            <span>Team pulse & cadence</span>
+            <span class="pulse-cycle-controls">
+              <button type="button" class="pulse-cycle-btn ghost" id="pulseCycleRewind" title="Undo last cycle (only if it has no entries)" ${canRewind ? '' : 'disabled'} aria-label="Rewind">◀</button>
+              <span class="pulse-cycle-badge" title="Manager-driven cadence — click ▶ to open a new cycle when you've finished this round of check-ins">Cycle opened ${escapeHTML(monthLabel(currentCycle))} · ${openCurrentCount}/${totalPeople} in${prevCycle ? ' · previous cycle was ' + cycleDurationDays + 'd ago' : ''}</span>
+              <button type="button" class="pulse-cycle-btn primary" id="pulseCycleAdvance" title="Close this cycle and open a new pulse round (dated today)" aria-label="Start next cycle">▶ Next cycle</button>
+            </span>
+          </span>
+          <span class="panel-desc">🟢🟡🔴 per person — click a colour to set this cycle's pulse. Cadence is <b>up to you</b>: click <b>▶ Next cycle</b> after a round of check-ins to open the next one. The strip shows the last ${PULSE_TREND_CYCLES} cycles (oldest on the left). <b>Dev-review cadence</b> chip warns past ${DEV_REVIEW_TARGET_DAYS} days since the last review. <b>💬 N open</b> opens the per-person talking-points log.</span>
         </div>
         <div class="tp-grid-head">
           <div class="tp-name">Person</div>
-          <div class="tp-pulse-current">This week</div>
-          <div class="tp-trend">Trend · ${PULSE_TREND_WEEKS}w</div>
+          <div class="tp-pulse-current">Current cycle</div>
+          <div class="tp-trend">Trend · last ${PULSE_TREND_CYCLES}</div>
           <div class="tp-cadence">Last review</div>
           <div class="tp-talking">Talking points</div>
         </div>
         <div id="teamPulseGrid">${(state.people || []).map(pulseRow).join('')}</div>
+      </div>
+      <div class="panel">
+        <div class="panel-title panel-title-stack">
+          <span class="pulse-panel-head">
+            <span>Team topics & messages <span class="muted" style="font-size:11px;">— to raise with the whole team</span></span>
+            <button type="button" class="btn ghost" id="teamTopicOpen" title="Open the team topics log">Open · 💬 ${openTeamTopics} pending</button>
+          </span>
+          <span class="panel-desc">A single team-wide list: things to raise in the next standup, all-hands, or team message. Attach the email or file that gives context. Mark ✓ once raised to move it to the history.</span>
+        </div>
+        <div id="teamTopicsInline">${renderTeamTopicsInlineHTML()}</div>
       </div>
       <div class="panel" id="pnlSkillsMatrix">
         <div class="panel-title panel-title-stack">
@@ -25680,62 +25829,88 @@ body.is-plndrag * { cursor: ns-resize !important; }
     // Pulse & talking-point interactions on the pulse grid.
     const pulseGrid = view.querySelector('#teamPulseGrid');
     if (pulseGrid) {
-      // Set / clear this week's pulse.
       pulseGrid.addEventListener('click', (e) => {
         const setBtn = e.target.closest('.pulse-btn');
         if (setBtn) {
           const picker = setBtn.closest('.pulse-picker');
           const personId = picker.dataset.personId;
-          const week = picker.dataset.week;
+          const cycle = picker.dataset.cycle;
           const mood = setBtn.dataset.mood;
           const p = (state.people || []).find((x) => x.id === personId);
           if (!p) return;
-          const already = personPulseFor(p, week);
+          const already = personPulseFor(p, cycle);
           if (already && already.mood === mood) {
-            // Toggle off — click same mood removes the entry.
-            p.pulses = p.pulses.filter((x) => x.week !== week);
+            p.pulses = p.pulses.filter((x) => x.cycleStart !== cycle);
           } else {
             const note = mood === 'red'
-              ? prompt(`${p.name} · red pulse for the week of ${week}. Anything to add? (optional)`, already?.note || '')
+              ? prompt(`${p.name} · red pulse for the cycle opened ${cycle}. Anything to add? (optional)`, already?.note || '')
               : (already?.note || '');
-            if (mood === 'red' && note === null) return; // cancel
-            setPersonPulse(p, week, mood, note || '');
+            if (mood === 'red' && note === null) return;
+            setPersonPulse(p, cycle, mood, note || '');
           }
-          commit('Set weekly pulse');
+          commit('Set pulse');
           renderTeam(root);
           return;
         }
-        // Click on a trend cell → prompt to set/edit that week.
         const cell = e.target.closest('.pulse-cell');
         if (cell) {
           const personId = cell.dataset.personId;
-          const week = cell.dataset.week;
+          const cycle = cell.dataset.cycle;
           const p = (state.people || []).find((x) => x.id === personId);
           if (!p) return;
-          const cur = personPulseFor(p, week);
-          const val = prompt(`${p.name} · week of ${week}\nEnter g / a / r for green/amber/red, blank to clear.\nCurrent: ${cur ? cur.mood + (cur.note ? ' — ' + cur.note : '') : 'none'}`, cur?.mood?.[0] || '');
+          const cur = personPulseFor(p, cycle);
+          const val = prompt(`${p.name} · cycle opened ${cycle}\nEnter g / a / r for green/amber/red, blank to clear.\nCurrent: ${cur ? cur.mood + (cur.note ? ' — ' + cur.note : '') : 'none'}`, cur?.mood?.[0] || '');
           if (val === null) return;
           const trimmed = val.trim().toLowerCase();
           if (!trimmed) {
-            p.pulses = p.pulses.filter((x) => x.week !== week);
+            p.pulses = p.pulses.filter((x) => x.cycleStart !== cycle);
           } else {
             const moodMap = { g: 'green', a: 'amber', r: 'red' };
             const mood = moodMap[trimmed[0]];
             if (!mood) return;
-            const note = prompt('Optional note for this week (blank to skip):', cur?.note || '') || '';
-            setPersonPulse(p, week, mood, note);
+            const note = prompt('Optional note for this cycle (blank to skip):', cur?.note || '') || '';
+            setPersonPulse(p, cycle, mood, note);
           }
-          commit('Edit weekly pulse');
+          commit('Edit pulse');
           renderTeam(root);
           return;
         }
-        // Open talking-points panel.
         const tpBtn = e.target.closest('.tp-talking-open');
         if (tpBtn) {
           openTalkingPointsDialog(tpBtn.dataset.personId, () => renderTeam(root));
         }
       });
     }
+    // Advance / rewind cycle.
+    view.querySelector('#pulseCycleAdvance')?.addEventListener('click', () => {
+      const openCount = (state.people || []).filter((p) => personPulseFor(p, currentPulseCycle())).length;
+      const missing = totalPeople - openCount;
+      const msg = missing > 0
+        ? `Start a new pulse cycle now?\n\n${missing} of ${totalPeople} people still have no entry in the current cycle. Those entries stay empty — you can fill them later from the trend strip.\n\nThe new cycle will be dated today (${todayISO()}).`
+        : `Start a new pulse cycle now?\n\nEveryone has an entry in the current cycle. The new cycle will be dated today (${todayISO()}).`;
+      if (!confirm(msg)) return;
+      if (advancePulseCycle()) {
+        commit('Advance pulse cycle');
+        renderTeam(root);
+      }
+    });
+    view.querySelector('#pulseCycleRewind')?.addEventListener('click', () => {
+      if (!confirm('Rewind — remove the current empty cycle and reopen the previous one?')) return;
+      if (rewindPulseCycle()) {
+        commit('Rewind pulse cycle');
+        renderTeam(root);
+      } else {
+        alert('Cannot rewind: the current cycle already has entries, or there is no previous cycle.');
+      }
+    });
+    // Team topics — inline actions + open dialog.
+    const inline = view.querySelector('#teamTopicsInline');
+    if (inline) {
+      wireTeamTopicsInline(inline, () => renderTeam(root));
+    }
+    view.querySelector('#teamTopicOpen')?.addEventListener('click', () => {
+      openTeamTopicsDialog(() => renderTeam(root));
+    });
   }
 
   // ── Talking-points dialog ────────────────────────────────────
@@ -25847,6 +26022,246 @@ body.is-plndrag * { cursor: ns-resize !important; }
         }
       }
     }, true);
+  }
+
+  // ── Team topics — shared list, with email/file/link attachments ─
+  function attachmentIcon(a) {
+    if (a.kind === 'url')  return '🔗';
+    if (a.kind === 'text') return '✉️';
+    const mime = (a.mime || '').toLowerCase();
+    if (mime.startsWith('image/')) return '🖼️';
+    if (mime.includes('pdf')) return '📄';
+    if (mime.includes('rfc822') || (a.name || '').toLowerCase().endsWith('.eml')) return '✉️';
+    return '📎';
+  }
+  function renderAttachmentsHTML(topic) {
+    if (!topic.attachments || !topic.attachments.length) return '';
+    return `<div class="tt-atts">${topic.attachments.map((a) => {
+      const label = escapeHTML(a.name || '');
+      const icon = attachmentIcon(a);
+      const dataAttr = `data-att-id="${escapeHTML(a.id)}" data-topic-id="${escapeHTML(topic.id)}"`;
+      if (a.kind === 'url') {
+        return `<a class="tt-att tt-att-link" ${dataAttr} href="${escapeHTML(a.url)}" target="_blank" rel="noopener">${icon} ${label}<button type="button" class="tt-att-del" title="Remove">×</button></a>`;
+      }
+      if (a.kind === 'file' && a.data) {
+        return `<a class="tt-att tt-att-file" ${dataAttr} href="${escapeHTML(a.data)}" download="${label}" target="_blank" rel="noopener">${icon} ${label}<button type="button" class="tt-att-del" title="Remove">×</button></a>`;
+      }
+      // text (paste of email content or note)
+      return `<button type="button" class="tt-att tt-att-text" ${dataAttr} title="Click to view">${icon} ${label}<span class="tt-att-del">×</span></button>`;
+    }).join('')}</div>`;
+  }
+  function renderTeamTopicItemHTML(t, opts) {
+    opts = opts || {};
+    const past = !!t.raisedAt;
+    return `
+      <div class="tt-item ${past ? 'is-past' : ''}" data-id="${escapeHTML(t.id)}">
+        <button type="button" class="${past ? 'tt-unraise-btn' : 'tt-raise-btn'}" title="${past ? 'Move back to open' : 'Mark as raised'}">${past ? '✓' : '☐'}</button>
+        <div class="tt-body">
+          ${past
+            ? `<div class="tt-text-past">${escapeHTML(t.text)}</div>`
+            : `<div class="tt-text" contenteditable="plaintext-only" data-id="${escapeHTML(t.id)}">${escapeHTML(t.text)}</div>`}
+          ${renderAttachmentsHTML(t)}
+          ${opts.showAdd ? `
+          <div class="tt-att-add" data-topic-id="${escapeHTML(t.id)}">
+            <button type="button" class="tt-att-add-file">📎 File / email</button>
+            <button type="button" class="tt-att-add-url">🔗 Link</button>
+            <button type="button" class="tt-att-add-text">✉️ Paste email…</button>
+          </div>` : ''}
+        </div>
+        <div class="tt-meta muted">${past ? 'raised ' + escapeHTML(t.raisedAt || '') : escapeHTML(t.createdAt || '')}${t.createdAt && past ? ' · added ' + escapeHTML(t.createdAt) : ''}</div>
+        <button type="button" class="tt-del-btn" title="Delete">×</button>
+      </div>`;
+  }
+  function renderTeamTopicsInlineHTML() {
+    const topics = state.teamTopics || [];
+    const open = topics.filter((t) => !t.raisedAt).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const preview = open.slice(0, 3);
+    return `
+      <div class="tt-inline">
+        <div class="tt-add-row">
+          <input type="text" class="input tt-add-input" placeholder="Add a topic to raise with the team next time (e.g., customer email about GNC anomaly)" />
+          <button type="button" class="btn primary tt-add-btn">Add</button>
+        </div>
+        ${preview.length ? preview.map((t) => renderTeamTopicItemHTML(t, { showAdd: true })).join('') : '<div class="muted" style="font-size:12px; padding:4px 2px;">No pending topics — add one above.</div>'}
+        ${open.length > preview.length ? `<div class="muted" style="font-size:11px; margin-top:6px;">+${open.length - preview.length} more pending — <button type="button" class="link-btn tt-more">open full log</button></div>` : ''}
+      </div>`;
+  }
+  // Prompt the user to attach an email/file/url/paste to a given
+  // topic. Kind is 'file' | 'url' | 'text'.
+  function addAttachmentToTopic(topicId, kind) {
+    const t = (state.teamTopics || []).find((x) => x.id === topicId);
+    if (!t) return Promise.resolve(false);
+    t.attachments = t.attachments || [];
+    if (kind === 'url') {
+      const url = (prompt('Paste a link (email permalink, doc URL, ticket, etc.):') || '').trim();
+      if (!url) return Promise.resolve(false);
+      const name = (prompt('Short label for this link (blank to use the URL):', '') || '').trim() || url;
+      t.attachments.push({ id: uid('att'), kind: 'url', name, url });
+      commit('Attach link to topic');
+      return Promise.resolve(true);
+    }
+    if (kind === 'text') {
+      const subject = (prompt('Subject / short label:', '') || '').trim();
+      if (!subject) return Promise.resolve(false);
+      const body = (prompt('Paste the email body (or any note):', '') || '').trim();
+      t.attachments.push({ id: uid('att'), kind: 'text', name: subject, text: body });
+      commit('Attach note to topic');
+      return Promise.resolve(true);
+    }
+    // file — trigger a hidden file picker.
+    return new Promise((resolve) => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.eml,.msg,.pdf,.txt,.docx,.xlsx,image/*';
+      input.style.display = 'none';
+      document.body.appendChild(input);
+      input.addEventListener('change', () => {
+        const file = input.files?.[0];
+        input.remove();
+        if (!file) return resolve(false);
+        if (file.size > 4 * 1024 * 1024) {
+          alert(`File is ${(file.size/1024/1024).toFixed(1)} MB — keep attachments under 4 MB (they are embedded in the JSON export).`);
+          return resolve(false);
+        }
+        const reader = new FileReader();
+        reader.onload = () => {
+          t.attachments.push({ id: uid('att'), kind: 'file', name: file.name, mime: file.type || '', data: reader.result });
+          commit('Attach file to topic');
+          resolve(true);
+        };
+        reader.onerror = () => resolve(false);
+        reader.readAsDataURL(file);
+      });
+      input.click();
+    });
+  }
+  function wireTeamTopicsCommon(root, onChange) {
+    // Common handlers shared by inline and dialog.
+    root.addEventListener('click', async (e) => {
+      const addBtn = e.target.closest('.tt-add-btn');
+      if (addBtn) {
+        const input = root.querySelector('.tt-add-input');
+        const text = (input?.value || '').trim();
+        if (!text) return;
+        state.teamTopics = state.teamTopics || [];
+        state.teamTopics.push({ id: uid('tt'), text, createdAt: todayISO(), raisedAt: null, attachments: [] });
+        commit('Add team topic');
+        input.value = '';
+        onChange();
+        return;
+      }
+      const raiseBtn = e.target.closest('.tt-raise-btn');
+      if (raiseBtn) {
+        const id = raiseBtn.closest('.tt-item').dataset.id;
+        const t = state.teamTopics.find((x) => x.id === id);
+        if (t) { t.raisedAt = todayISO(); commit('Raise team topic'); onChange(); }
+        return;
+      }
+      const unraiseBtn = e.target.closest('.tt-unraise-btn');
+      if (unraiseBtn) {
+        const id = unraiseBtn.closest('.tt-item').dataset.id;
+        const t = state.teamTopics.find((x) => x.id === id);
+        if (t) { t.raisedAt = null; commit('Reopen team topic'); onChange(); }
+        return;
+      }
+      const delBtn = e.target.closest('.tt-del-btn');
+      if (delBtn) {
+        const id = delBtn.closest('.tt-item').dataset.id;
+        state.teamTopics = state.teamTopics.filter((x) => x.id !== id);
+        commit('Delete team topic');
+        onChange();
+        return;
+      }
+      const attDel = e.target.closest('.tt-att-del');
+      if (attDel) {
+        e.preventDefault();
+        e.stopPropagation();
+        const att = attDel.closest('[data-att-id]');
+        const topicId = att.dataset.topicId;
+        const attId = att.dataset.attId;
+        const t = state.teamTopics.find((x) => x.id === topicId);
+        if (t) {
+          t.attachments = t.attachments.filter((a) => a.id !== attId);
+          commit('Remove attachment');
+          onChange();
+        }
+        return;
+      }
+      const textAtt = e.target.closest('.tt-att-text');
+      if (textAtt) {
+        const topicId = textAtt.dataset.topicId;
+        const attId = textAtt.dataset.attId;
+        const t = state.teamTopics.find((x) => x.id === topicId);
+        const a = t?.attachments?.find((x) => x.id === attId);
+        if (a) {
+          const next = prompt(`${a.name}\n\nEdit the pasted content:`, a.text || '');
+          if (next !== null) { a.text = next; commit('Edit pasted note'); onChange(); }
+        }
+        return;
+      }
+      const addFile = e.target.closest('.tt-att-add-file');
+      if (addFile) { await addAttachmentToTopic(addFile.closest('[data-topic-id]').dataset.topicId, 'file'); onChange(); return; }
+      const addUrl = e.target.closest('.tt-att-add-url');
+      if (addUrl)  { await addAttachmentToTopic(addUrl.closest('[data-topic-id]').dataset.topicId, 'url'); onChange(); return; }
+      const addTxt = e.target.closest('.tt-att-add-text');
+      if (addTxt)  { await addAttachmentToTopic(addTxt.closest('[data-topic-id]').dataset.topicId, 'text'); onChange(); return; }
+    });
+    root.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.classList.contains('tt-add-input')) {
+        e.preventDefault();
+        root.querySelector('.tt-add-btn')?.click();
+      }
+    });
+    root.addEventListener('blur', (e) => {
+      if (e.target.classList.contains('tt-text')) {
+        const id = e.target.dataset.id;
+        const t = state.teamTopics.find((x) => x.id === id);
+        const newText = e.target.textContent.trim();
+        if (t && newText && newText !== t.text) { t.text = newText; commit('Edit team topic'); }
+      }
+    }, true);
+  }
+  function wireTeamTopicsInline(root, onChange) {
+    wireTeamTopicsCommon(root, onChange);
+    root.querySelector('.tt-more')?.addEventListener('click', () => openTeamTopicsDialog(onChange));
+  }
+  function openTeamTopicsDialog(onChange) {
+    const overlay = document.createElement('div');
+    overlay.className = 'tp-dialog-mask';
+    const dlg = document.createElement('div');
+    dlg.className = 'tp-dialog tt-dialog';
+    const build = () => {
+      const topics = state.teamTopics || [];
+      const open = topics.filter((t) => !t.raisedAt).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      const past = topics.filter((t) => t.raisedAt).sort((a, b) => (b.raisedAt || '').localeCompare(a.raisedAt || ''));
+      dlg.innerHTML = `
+        <div class="tp-dialog-head">
+          <div>
+            <div style="font-weight:700; font-size:14px;">Team topics &amp; messages</div>
+            <div class="muted" style="font-size:11px;">Team-wide list — things to raise in the next standup / all-hands / team message. Attach the email or file that gives context.</div>
+          </div>
+          <button type="button" class="btn ghost tp-dialog-close" aria-label="Close">×</button>
+        </div>
+        <div class="tp-dialog-body">
+          <div class="tt-add-row">
+            <input type="text" class="input tt-add-input" placeholder="Add a topic to raise with the team next time" />
+            <button type="button" class="btn primary tt-add-btn">Add</button>
+          </div>
+          <div class="tp-section-title">Open (${open.length})</div>
+          ${open.length ? open.map((t) => renderTeamTopicItemHTML(t, { showAdd: true })).join('') : '<div class="muted" style="font-size:12px; padding:6px 2px;">Nothing pending — add a topic above.</div>'}
+          <div class="tp-section-title">History (${past.length})</div>
+          ${past.length ? past.slice(0, 40).map((t) => renderTeamTopicItemHTML(t)).join('') : '<div class="muted" style="font-size:12px; padding:6px 2px;">No history yet.</div>'}
+        </div>`;
+      dlg.querySelector('.tt-add-input')?.focus();
+    };
+    build();
+    overlay.appendChild(dlg);
+    document.body.appendChild(overlay);
+    const close = () => { overlay.remove(); if (typeof onChange === 'function') onChange(); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    dlg.querySelector('.tp-dialog-close')?.addEventListener('click', close);
+    wireTeamTopicsCommon(dlg, build);
+    dlg.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
   }
 
   // ── Activities view — request → plan → allocate → track ─────
@@ -26769,6 +27184,10 @@ body.is-plndrag * { cursor: ns-resize !important; }
             <rect width="6" height="6" fill="rgba(148,163,184,.12)" />
             <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(148,163,184,.5)" stroke-width="1"/>
           </pattern>
+          <pattern id="actBlockedHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+            <rect width="6" height="6" fill="rgba(248, 113, 121, .10)" />
+            <line x1="0" y1="0" x2="0" y2="6" stroke="rgba(248, 113, 121, .55)" stroke-width="1.5"/>
+          </pattern>
         </defs>
         ${weekLines.map((x) => `<line x1="${x}" y1="30" x2="${x}" y2="${totalH - 10}" stroke="rgba(148,163,184,.12)" stroke-width="1" />`).join('')}
         ${monthMarks.map((mk) => `<text x="${mk.x + 4}" y="20" fill="var(--text-faint)" font-size="10.5" font-family="sans-serif">${escapeHTML(mk.label)}</text>`).join('')}
@@ -26817,13 +27236,36 @@ body.is-plndrag * { cursor: ns-resize !important; }
             const by = y + 6 + laneIdx * laneH;
             const textY = by + barH / 2 + 4;
             const labelHTML = showLabel
-              ? `<text x="${x + 6}" y="${textY}" fill="#fff" font-size="11" font-family="sans-serif" pointer-events="none">${escapeHTML(label.length > Math.floor(w / 6) ? label.slice(0, Math.floor(w / 6) - 1) + '…' : label)}</text>`
+              ? `<text x="${x + 6 + (act.health ? 12 : 0)}" y="${textY}" fill="#fff" font-size="11" font-family="sans-serif" pointer-events="none">${escapeHTML(label.length > Math.floor((w - (act.health ? 12 : 0)) / 6) ? label.slice(0, Math.floor((w - (act.health ? 12 : 0)) / 6) - 1) + '…' : label)}</text>`
+              : '';
+            // Health decoration: left stripe + glyph. Colour matches
+            // the health-chip palette so it is legible against any
+            // activity hue. Blocked also gets a subtle diagonal-stripe
+            // overlay so it screams even at zoomed-out widths.
+            const healthColors = { ok: 'rgba(74, 222, 128, .95)', 'at-risk': 'rgba(251, 191, 36, .95)', blocked: 'rgba(248, 113, 121, .95)', done: 'rgba(148, 163, 184, .70)' };
+            const healthGlyphs = { ok: '🟢', 'at-risk': '🟡', blocked: '🔴', done: '✔' };
+            const hCol = act.health ? healthColors[act.health] : null;
+            const hGly = act.health ? healthGlyphs[act.health] : null;
+            const healthStripe = hCol
+              ? `<rect x="${x}" y="${by}" width="4" height="${barH}" fill="${hCol}" />`
+              : '';
+            const healthOverlay = act.health === 'blocked' && w > 16
+              ? `<rect x="${x + 4}" y="${by}" width="${w - 4}" height="${barH}" fill="url(#actBlockedHatch)" pointer-events="none" />`
+              : '';
+            const healthGlyph = hGly && showLabel && w > 20
+              ? `<text x="${x + 6}" y="${textY}" font-size="10" pointer-events="none">${hGly}</text>`
+              : '';
+            const healthTitle = act.health
+              ? ` · health: ${act.health}${act.healthNote ? ' — ' + act.healthNote : ''}`
               : '';
             return `
               <g class="act-bar" data-act-id="${escapeHTML(act.id)}">
-                <title>${escapeHTML(label + (al.tentative ? ' (tentative)' : '') + (laneCount > 1 ? ` · lane ${laneIdx + 1}/${laneCount}` : ''))}</title>
+                <title>${escapeHTML(label + (al.tentative ? ' (tentative)' : '') + (laneCount > 1 ? ` · lane ${laneIdx + 1}/${laneCount}` : '') + healthTitle)}</title>
                 <rect x="${x}" y="${by}" width="${w}" height="${barH}" rx="${Math.min(4, barH / 2)}" ry="${Math.min(4, barH / 2)}"
                       fill="${color}" fill-opacity="${opacity}" ${stroke} stroke-width="1" />
+                ${healthOverlay}
+                ${healthStripe}
+                ${healthGlyph}
                 ${labelHTML}
               </g>`;
           }).join('');
@@ -32508,16 +32950,25 @@ body.is-plndrag * { cursor: ns-resize !important; }
       });
       // Sort newest-first so the dashboard defaults to the latest review.
       p.reviews.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-      // Weekly pulse — 🟢/🟡/🔴 + optional note per ISO week.
-      // Shape: [{ id, week: 'YYYY-MM-DD' Monday, mood: 'green'|'amber'|'red', note?, at }]
+      // Pulse — 🟢/🟡/🔴 + optional note per manager-driven cycle.
+      // Shape: [{ id, cycleStart: 'YYYY-MM-DD' when this cycle opened,
+      // mood: 'green'|'amber'|'red', note?, at }].
+      // Cycles are advanced by the manager via the "▶ Start next
+      // cycle" arrow in the team pulse panel — the tool no longer
+      // assumes weekly cadence. Migration: any legacy `week` field is
+      // treated as the cycleStart and copied over.
       if (!Array.isArray(p.pulses)) p.pulses = [];
-      p.pulses = p.pulses.filter((x) => x && typeof x.week === 'string' && ['green','amber','red'].includes(x.mood));
+      p.pulses.forEach((x) => {
+        if (x && !x.cycleStart && typeof x.week === 'string') x.cycleStart = x.week;
+      });
+      p.pulses = p.pulses.filter((x) => x && typeof x.cycleStart === 'string' && ['green','amber','red'].includes(x.mood));
       p.pulses.forEach((x) => {
         x.id = x.id || uid('pl');
         x.note = typeof x.note === 'string' ? x.note : '';
         x.at = typeof x.at === 'string' ? x.at : todayISO();
+        delete x.week;
       });
-      p.pulses.sort((a, b) => (a.week || '').localeCompare(b.week || ''));
+      p.pulses.sort((a, b) => (a.cycleStart || '').localeCompare(b.cycleStart || ''));
       // Talking points — persistent list of things to raise next time.
       // Shape: [{ id, text, createdAt, raisedAt? }]. Raised items
       // become the person's talking-point history.
@@ -32537,6 +32988,35 @@ body.is-plndrag * { cursor: ns-resize !important; }
       st.name = st.name || 'Unnamed stakeholder';
       st.role = st.role || '';
       st.organization = st.organization || '';
+    });
+    // Pulse cycles — list of ISO dates when the manager opened a new
+    // pulse-taking round. Cadence is manager-driven, not calendar-
+    // driven: click "▶ Start next cycle" in the team pulse panel to
+    // append a new one. The last entry is always the current cycle;
+    // if the list is empty, today's date is seeded lazily so first
+    // render always has a target cycle for the picker.
+    if (!Array.isArray(s.pulseCycles)) s.pulseCycles = [];
+    s.pulseCycles = s.pulseCycles.filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
+    s.pulseCycles = [...new Set(s.pulseCycles)].sort();
+    if (!s.pulseCycles.length) s.pulseCycles.push(todayISO());
+    // Team topics — team-wide "things to raise next time we see the
+    // team" list, with optional attached emails / files / links.
+    // Distinct from p.talkingPoints[] which is one-on-one.
+    // Shape: [{ id, text, createdAt, raisedAt?, attachments: [
+    //   { id, kind: 'file'|'url'|'text', name, mime?, data?, url?, text? }
+    // ] }]
+    if (!Array.isArray(s.teamTopics)) s.teamTopics = [];
+    s.teamTopics = s.teamTopics.filter((t) => t && typeof t.text === 'string' && t.text.trim());
+    s.teamTopics.forEach((t) => {
+      t.id = t.id || uid('tt');
+      t.createdAt = t.createdAt || todayISO();
+      t.raisedAt = typeof t.raisedAt === 'string' ? t.raisedAt : null;
+      if (!Array.isArray(t.attachments)) t.attachments = [];
+      t.attachments = t.attachments.filter((a) => a && ['file','url','text'].includes(a.kind));
+      t.attachments.forEach((a) => {
+        a.id = a.id || uid('att');
+        a.name = typeof a.name === 'string' ? a.name : (a.kind === 'url' ? (a.url || 'link') : 'attachment');
+      });
     });
     s.settings = s.settings || {};
     s.settings.theme = s.settings.theme || 'dark';
