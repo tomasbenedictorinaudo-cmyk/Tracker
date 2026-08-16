@@ -15061,23 +15061,60 @@
 
   function renderActivityList() {
     const host = $('#actList'); if (!host) return;
-    const acts = state.activities || [];
-    if (!acts.length) {
+    const raw = state.activities || [];
+    if (!raw.length) {
       host.innerHTML = '<div class="empty" style="padding:24px; text-align:center;">No activities yet — click <b>+ New activity</b> to create one.</div>';
       return;
     }
     const projName = (id) => (state.projects || []).find((p) => p.id === id)?.name || '—';
+    // Sort state — persisted in state.ui.act.sort. col = column key,
+    // dir = 'asc' | 'desc'. Third click on a header clears the sort
+    // (back to insertion order).
+    state.ui = state.ui || {}; state.ui.act = state.ui.act || {};
+    const sort = state.ui.act.sort || { col: '', dir: 'asc' };
+    // Rank helpers so multi-state fields sort in meaningful order
+    // instead of alphabetically. Health: OK best → blocked worst →
+    // done → none last. Status: workflow position.
+    const healthRank = { 'ok': 0, 'at-risk': 1, 'blocked': 2, 'done': 3 };
+    const statusIdx  = Object.fromEntries(ACT_STATUSES.map((s, i) => [s.id, i]));
+    const keyFor = (a, col) => {
+      switch (col) {
+        case 'title':      return (a.title || '').toLowerCase();
+        case 'health':     return a.health == null ? 99 : healthRank[a.health];
+        case 'originator': return actorLabel(a.originator).toLowerCase();
+        case 'project':    return projName(a.projectId).toLowerCase();
+        case 'hours':      return Number(a.totalHours) || 0;
+        case 'alloc':      return a.totalHours ? (firmAllocatedHours(a) + tentAllocatedHours(a)) / a.totalHours : -1;
+        case 'status':     return statusIdx[a.status] ?? 99;
+        default:           return 0;
+      }
+    };
+    let acts = raw.slice();
+    if (sort.col) {
+      const dir = sort.dir === 'desc' ? -1 : 1;
+      acts.sort((a, b) => {
+        const ka = keyFor(a, sort.col), kb = keyFor(b, sort.col);
+        if (ka < kb) return -1 * dir;
+        if (ka > kb) return  1 * dir;
+        return (a.title || '').localeCompare(b.title || '');
+      });
+    }
+    const th = (col, label, extraCls) => {
+      const isSorted = sort.col === col;
+      const arrow = !isSorted ? '<span class="sort-arrow">↕</span>' : (sort.dir === 'asc' ? '<span class="sort-arrow is-active">▲</span>' : '<span class="sort-arrow is-active">▼</span>');
+      return `<th class="sortable ${isSorted ? 'is-sorted' : ''}${extraCls ? ' ' + extraCls : ''}" data-col="${escapeHTML(col)}" title="Click to sort by ${escapeHTML(label)} (third click clears)">${escapeHTML(label)} ${arrow}</th>`;
+    };
     host.innerHTML = `
       <table class="act-list">
         <thead>
           <tr>
-            <th>Activity</th>
-            <th>Health</th>
-            <th>Originator</th>
-            <th>Project</th>
-            <th class="num">Hours</th>
-            <th>Allocation</th>
-            <th>Status</th>
+            ${th('title', 'Activity')}
+            ${th('health', 'Health')}
+            ${th('originator', 'Originator')}
+            ${th('project', 'Project')}
+            ${th('hours', 'Hours', 'num')}
+            ${th('alloc', 'Allocation')}
+            ${th('status', 'Status')}
           </tr>
         </thead>
         <tbody>
@@ -15122,6 +15159,19 @@
         // Health chip is stop-target — don't open editor when cycling.
         if (e.target.closest('.act-health')) return;
         openActivityEditor(r.dataset.actId);
+      });
+    });
+    // Sortable column headers — click cycles asc → desc → clear.
+    host.querySelectorAll('th.sortable').forEach((h) => {
+      h.addEventListener('click', () => {
+        const col = h.dataset.col;
+        const cur = state.ui.act.sort || { col: '', dir: 'asc' };
+        let next;
+        if (cur.col !== col)            next = { col, dir: 'asc' };
+        else if (cur.dir === 'asc')     next = { col, dir: 'desc' };
+        else                             next = { col: '', dir: 'asc' }; // clear
+        state.ui.act.sort = next;
+        renderActivityList();
       });
     });
     // Health cycle click.

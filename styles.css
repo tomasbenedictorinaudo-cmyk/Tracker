@@ -11043,6 +11043,24 @@ body.is-plndrag * { cursor: ns-resize !important; }
 
 .tt-dialog { width: min(720px, 100%); }
 
+/* Sortable table headers (Activities list, etc.) ────────────── */
+.act-list th.sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: background .12s;
+}
+.act-list th.sortable:hover { background: rgba(148,163,184,.10); }
+.act-list th.sortable.is-sorted { color: var(--fg); }
+.act-list th .sort-arrow {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 10px;
+  color: var(--muted);
+  opacity: .5;
+}
+.act-list th .sort-arrow.is-active { opacity: 1; color: var(--brand, #60a5fa); }
+
 /* Activity health picker (editor) ───────────────────────────── */
 .ac-health-picker { display: flex; flex-wrap: wrap; gap: 6px; }
 .ac-health-picker .act-health.is-set { outline: 2px solid var(--brand, #60a5fa); outline-offset: 1px; }
