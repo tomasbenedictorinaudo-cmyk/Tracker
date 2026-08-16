@@ -14026,18 +14026,126 @@
   // competency picture. People page: individual load. Team page:
   // skills matrix + coverage. Both draw from the same state.people
   // and state.stakeholders arrays.
+  // ── Weekly team pulse helpers ────────────────────────────────
+  // A pulse is one entry per (personId, weekStart) where weekStart is
+  // the Monday of that ISO week. Callers pass a Date or ISO to get
+  // the normalised Monday.
+  const PULSE_TREND_WEEKS = 10;
+  function mondayISOOf(dateOrIso) {
+    const d = typeof dateOrIso === 'string' ? parseDate(dateOrIso) : new Date(dateOrIso);
+    if (!d) return null;
+    const nd = new Date(d);
+    nd.setHours(0, 0, 0, 0);
+    const dow = (nd.getDay() + 6) % 7; // Mon=0
+    nd.setDate(nd.getDate() - dow);
+    return fmtISO(nd);
+  }
+  function personPulseFor(p, mondayIso) {
+    return (p.pulses || []).find((x) => x.week === mondayIso) || null;
+  }
+  function setPersonPulse(p, mondayIso, mood, note) {
+    p.pulses = p.pulses || [];
+    const existing = p.pulses.find((x) => x.week === mondayIso);
+    if (existing) {
+      existing.mood = mood;
+      if (note != null) existing.note = note;
+      existing.at = todayISO();
+    } else {
+      p.pulses.push({ id: uid('pl'), week: mondayIso, mood, note: note || '', at: todayISO() });
+    }
+    p.pulses.sort((a, b) => (a.week || '').localeCompare(b.week || ''));
+  }
+  function pulseTrendWeeks(anchorIso, n) {
+    const anchor = parseDate(anchorIso);
+    const weeks = [];
+    for (let i = n - 1; i >= 0; i--) {
+      const d = new Date(anchor);
+      d.setDate(d.getDate() - i * 7);
+      weeks.push(mondayISOOf(fmtISO(d)));
+    }
+    return weeks;
+  }
+  const DEV_REVIEW_TARGET_DAYS = 90;
+  function daysSinceLastReview(p) {
+    const reviews = (p.reviews || []).slice().sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    const latest = reviews[0];
+    if (!latest?.date) return null;
+    return dayDiff(todayISO(), latest.date);
+  }
+  function reviewCadenceMeta(p) {
+    const days = daysSinceLastReview(p);
+    if (days == null) return { class: 'none', label: 'No review yet', days: null };
+    if (days <= DEV_REVIEW_TARGET_DAYS * 0.75) return { class: 'ok',    label: `${days}d ago`, days };
+    if (days <= DEV_REVIEW_TARGET_DAYS)         return { class: 'warn',  label: `${days}d ago`, days };
+    return { class: 'bad', label: `${days}d ago · overdue`, days };
+  }
+
   function renderTeam(root) {
     const view = document.createElement('div');
     view.className = 'view';
     const proj = curProject();
     const skillCount = allTeamSkills().size;
     const holderCount = (state.people || []).filter((p) => (p.skills || []).length).length;
+    const currentMonday = mondayISOOf(todayISO());
+    const trendWeeks = pulseTrendWeeks(currentMonday, PULSE_TREND_WEEKS);
+    const monthLabel = (iso) => {
+      const d = parseDate(iso);
+      return d ? d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '';
+    };
+    const pulseRow = (p) => {
+      const cur = personPulseFor(p, currentMonday);
+      const cells = trendWeeks.map((wk) => {
+        const px = personPulseFor(p, wk);
+        const isNow = wk === currentMonday;
+        return `<button type="button" class="pulse-cell ${px ? 'has-' + px.mood : 'has-none'}${isNow ? ' is-now' : ''}" data-person-id="${escapeHTML(p.id)}" data-week="${escapeHTML(wk)}" title="${escapeHTML(monthLabel(wk))}${px ? ' · ' + px.mood + (px.note ? ' — ' + px.note : '') : ' · no pulse'}">${isNow ? '<span class="pulse-now-dot"></span>' : ''}</button>`;
+      }).join('');
+      const cadence = reviewCadenceMeta(p);
+      const openTP = (p.talkingPoints || []).filter((t) => !t.raisedAt).length;
+      return `
+        <div class="tp-row" data-person-id="${escapeHTML(p.id)}">
+          <div class="tp-name">
+            <span class="avatar xs">${initials(p.name)}</span>
+            <span>
+              <b>${escapeHTML(p.name)}</b>
+              <span class="muted" style="font-size:11px;">${escapeHTML(p.role || '')}</span>
+            </span>
+          </div>
+          <div class="tp-pulse-current">
+            <div class="pulse-picker" data-person-id="${escapeHTML(p.id)}" data-week="${escapeHTML(currentMonday)}">
+              <button type="button" class="pulse-btn ${cur?.mood === 'green' ? 'is-set' : ''}" data-mood="green" title="On top of things">🟢</button>
+              <button type="button" class="pulse-btn ${cur?.mood === 'amber' ? 'is-set' : ''}" data-mood="amber" title="Something on my mind">🟡</button>
+              <button type="button" class="pulse-btn ${cur?.mood === 'red' ? 'is-set' : ''}" data-mood="red" title="Struggling — needs attention">🔴</button>
+            </div>
+          </div>
+          <div class="tp-trend" title="${PULSE_TREND_WEEKS}-week pulse trend (oldest → most recent)">${cells}</div>
+          <div class="tp-cadence">
+            <span class="cadence-chip ${cadence.class}" title="Target: dev review every ${DEV_REVIEW_TARGET_DAYS} days">${escapeHTML(cadence.label)}</span>
+          </div>
+          <div class="tp-talking">
+            <button type="button" class="tp-talking-open" data-person-id="${escapeHTML(p.id)}" title="Open talking-points log">💬 ${openTP} open</button>
+          </div>
+        </div>`;
+    };
     view.innerHTML = `
       <div class="page-head">
         <div>
           <div class="page-title">Team</div>
           <div class="page-sub">${holderCount} of ${(state.people || []).length} people with competencies declared · ${skillCount} distinct skill${skillCount === 1 ? '' : 's'} across the team</div>
         </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title panel-title-stack">
+          <span>Team pulse & cadence</span>
+          <span class="panel-desc">Weekly 🟢🟡🔴 per person — click a colour to set this week's pulse. The strip beside it shows the last ${PULSE_TREND_WEEKS} weeks (oldest on the left). <b>Dev-review cadence</b> chip warns past ${DEV_REVIEW_TARGET_DAYS} days since the last review. <b>💬 N open</b> opens the talking-points log for that person.</span>
+        </div>
+        <div class="tp-grid-head">
+          <div class="tp-name">Person</div>
+          <div class="tp-pulse-current">This week</div>
+          <div class="tp-trend">Trend · ${PULSE_TREND_WEEKS}w</div>
+          <div class="tp-cadence">Last review</div>
+          <div class="tp-talking">Talking points</div>
+        </div>
+        <div id="teamPulseGrid">${(state.people || []).map(pulseRow).join('')}</div>
       </div>
       <div class="panel" id="pnlSkillsMatrix">
         <div class="panel-title panel-title-stack">
@@ -14288,6 +14396,177 @@
     singleChk?.addEventListener('change', () => { state.ui.skMtx.single = singleChk.checked; renderSkillsMatrix(); });
     gapsChk?.addEventListener('change', () => { state.ui.skMtx.gaps = gapsChk.checked; renderSkillsMatrix(); });
     renderSkillsMatrix();
+
+    // Pulse & talking-point interactions on the pulse grid.
+    const pulseGrid = view.querySelector('#teamPulseGrid');
+    if (pulseGrid) {
+      // Set / clear this week's pulse.
+      pulseGrid.addEventListener('click', (e) => {
+        const setBtn = e.target.closest('.pulse-btn');
+        if (setBtn) {
+          const picker = setBtn.closest('.pulse-picker');
+          const personId = picker.dataset.personId;
+          const week = picker.dataset.week;
+          const mood = setBtn.dataset.mood;
+          const p = (state.people || []).find((x) => x.id === personId);
+          if (!p) return;
+          const already = personPulseFor(p, week);
+          if (already && already.mood === mood) {
+            // Toggle off — click same mood removes the entry.
+            p.pulses = p.pulses.filter((x) => x.week !== week);
+          } else {
+            const note = mood === 'red'
+              ? prompt(`${p.name} · red pulse for the week of ${week}. Anything to add? (optional)`, already?.note || '')
+              : (already?.note || '');
+            if (mood === 'red' && note === null) return; // cancel
+            setPersonPulse(p, week, mood, note || '');
+          }
+          commit('Set weekly pulse');
+          renderTeam(root);
+          return;
+        }
+        // Click on a trend cell → prompt to set/edit that week.
+        const cell = e.target.closest('.pulse-cell');
+        if (cell) {
+          const personId = cell.dataset.personId;
+          const week = cell.dataset.week;
+          const p = (state.people || []).find((x) => x.id === personId);
+          if (!p) return;
+          const cur = personPulseFor(p, week);
+          const val = prompt(`${p.name} · week of ${week}\nEnter g / a / r for green/amber/red, blank to clear.\nCurrent: ${cur ? cur.mood + (cur.note ? ' — ' + cur.note : '') : 'none'}`, cur?.mood?.[0] || '');
+          if (val === null) return;
+          const trimmed = val.trim().toLowerCase();
+          if (!trimmed) {
+            p.pulses = p.pulses.filter((x) => x.week !== week);
+          } else {
+            const moodMap = { g: 'green', a: 'amber', r: 'red' };
+            const mood = moodMap[trimmed[0]];
+            if (!mood) return;
+            const note = prompt('Optional note for this week (blank to skip):', cur?.note || '') || '';
+            setPersonPulse(p, week, mood, note);
+          }
+          commit('Edit weekly pulse');
+          renderTeam(root);
+          return;
+        }
+        // Open talking-points panel.
+        const tpBtn = e.target.closest('.tp-talking-open');
+        if (tpBtn) {
+          openTalkingPointsDialog(tpBtn.dataset.personId, () => renderTeam(root));
+        }
+      });
+    }
+  }
+
+  // ── Talking-points dialog ────────────────────────────────────
+  // A lightweight modal listing open + past talking points for a
+  // person. Prevents the "I meant to mention that in the 1:1"
+  // problem: capture during the week, then mark raised when done.
+  function openTalkingPointsDialog(personId, onChange) {
+    const p = (state.people || []).find((x) => x.id === personId);
+    if (!p) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'tp-dialog-mask';
+    const dlg = document.createElement('div');
+    dlg.className = 'tp-dialog';
+    const build = () => {
+      const open = (p.talkingPoints || []).filter((t) => !t.raisedAt).sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+      const past = (p.talkingPoints || []).filter((t) => t.raisedAt).sort((a, b) => (b.raisedAt || '').localeCompare(a.raisedAt || ''));
+      dlg.innerHTML = `
+        <div class="tp-dialog-head">
+          <div>
+            <div style="font-weight:700; font-size:14px;">${escapeHTML(p.name)} · Talking points</div>
+            <div class="muted" style="font-size:11px;">Things to raise the next time you speak — persistent list. Mark them ✓ once raised to move them to the history.</div>
+          </div>
+          <button type="button" class="btn ghost tp-dialog-close" aria-label="Close">×</button>
+        </div>
+        <div class="tp-dialog-body">
+          <div class="tp-add-row">
+            <input type="text" class="input tp-add-input" placeholder="Add a talking point — anything to raise next time (e.g., recognise their pull request review this week)" />
+            <button type="button" class="btn primary tp-add-btn">Add</button>
+          </div>
+          <div class="tp-section-title">Open (${open.length})</div>
+          <div class="tp-list">
+            ${open.length ? open.map((t) => `
+              <div class="tp-item" data-id="${escapeHTML(t.id)}">
+                <button type="button" class="tp-raise-btn" title="Mark as raised">☐</button>
+                <div class="tp-text" contenteditable="plaintext-only" data-id="${escapeHTML(t.id)}">${escapeHTML(t.text)}</div>
+                <div class="tp-meta muted">${escapeHTML(t.createdAt || '')}</div>
+                <button type="button" class="tp-del-btn" title="Delete">×</button>
+              </div>`).join('') : '<div class="muted" style="font-size:12px; padding:6px 2px;">Nothing pending — add a point above.</div>'}
+          </div>
+          <div class="tp-section-title">History (${past.length})</div>
+          <div class="tp-list tp-list-past">
+            ${past.length ? past.slice(0, 40).map((t) => `
+              <div class="tp-item is-past" data-id="${escapeHTML(t.id)}">
+                <button type="button" class="tp-unraise-btn" title="Move back to open">✓</button>
+                <div class="tp-text-past">${escapeHTML(t.text)}</div>
+                <div class="tp-meta muted">raised ${escapeHTML(t.raisedAt || '')}${t.createdAt ? ' · added ' + escapeHTML(t.createdAt) : ''}</div>
+                <button type="button" class="tp-del-btn" title="Delete">×</button>
+              </div>`).join('') : '<div class="muted" style="font-size:12px; padding:6px 2px;">No history yet.</div>'}
+          </div>
+        </div>`;
+      dlg.querySelector('.tp-add-input')?.focus();
+    };
+    build();
+    overlay.appendChild(dlg);
+    document.body.appendChild(overlay);
+    const close = () => { overlay.remove(); if (typeof onChange === 'function') onChange(); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    dlg.addEventListener('click', (e) => {
+      if (e.target.classList.contains('tp-dialog-close')) { close(); return; }
+      const addBtn = e.target.closest('.tp-add-btn');
+      if (addBtn) {
+        const input = dlg.querySelector('.tp-add-input');
+        const text = (input?.value || '').trim();
+        if (!text) return;
+        p.talkingPoints = p.talkingPoints || [];
+        p.talkingPoints.push({ id: uid('tp'), text, createdAt: todayISO(), raisedAt: null });
+        commit('Add talking point');
+        build();
+        return;
+      }
+      const raiseBtn = e.target.closest('.tp-raise-btn');
+      if (raiseBtn) {
+        const id = raiseBtn.closest('.tp-item').dataset.id;
+        const t = p.talkingPoints.find((x) => x.id === id);
+        if (t) { t.raisedAt = todayISO(); commit('Mark talking point raised'); build(); }
+        return;
+      }
+      const unraiseBtn = e.target.closest('.tp-unraise-btn');
+      if (unraiseBtn) {
+        const id = unraiseBtn.closest('.tp-item').dataset.id;
+        const t = p.talkingPoints.find((x) => x.id === id);
+        if (t) { t.raisedAt = null; commit('Reopen talking point'); build(); }
+        return;
+      }
+      const delBtn = e.target.closest('.tp-del-btn');
+      if (delBtn) {
+        const id = delBtn.closest('.tp-item').dataset.id;
+        p.talkingPoints = p.talkingPoints.filter((x) => x.id !== id);
+        commit('Delete talking point');
+        build();
+        return;
+      }
+    });
+    dlg.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && e.target.classList.contains('tp-add-input')) {
+        e.preventDefault();
+        dlg.querySelector('.tp-add-btn')?.click();
+      }
+      if (e.key === 'Escape') close();
+    });
+    dlg.addEventListener('blur', (e) => {
+      if (e.target.classList.contains('tp-text')) {
+        const id = e.target.dataset.id;
+        const t = p.talkingPoints.find((x) => x.id === id);
+        const newText = e.target.textContent.trim();
+        if (t && newText && newText !== t.text) {
+          t.text = newText;
+          commit('Edit talking point');
+        }
+      }
+    }, true);
   }
 
   // ── Activities view — request → plan → allocate → track ─────
@@ -14305,6 +14584,52 @@
     { id: 'done',        label: 'Done',        color: 'rgba(148, 163, 184, .35)' },
   ];
   function actStatusMeta(id) { return ACT_STATUSES.find((s) => s.id === id) || ACT_STATUSES[0]; }
+  // Activity health — orthogonal to workflow status. Status answers
+  // "where are we in the process?" (requested → planning → …); health
+  // answers "how are things actually going?" A blocked planning
+  // activity is a very different signal from an OK planning activity.
+  const ACT_HEALTHS = [
+    { id: null,        label: 'Set status',  icon: '·',  cls: 'h-none' },
+    { id: 'ok',        label: 'OK',          icon: '🟢', cls: 'h-ok' },
+    { id: 'at-risk',   label: 'At risk',     icon: '🟡', cls: 'h-at-risk' },
+    { id: 'blocked',   label: 'Blocked',     icon: '🔴', cls: 'h-blocked' },
+    { id: 'done',      label: 'Done',        icon: '✔',  cls: 'h-done' },
+  ];
+  function actHealthMeta(id) { return ACT_HEALTHS.find((h) => h.id === id) || ACT_HEALTHS[0]; }
+  function nextHealth(cur) {
+    const cycle = [null, 'ok', 'at-risk', 'blocked', 'done'];
+    const i = cycle.indexOf(cur == null ? null : cur);
+    return cycle[(i + 1) % cycle.length];
+  }
+  // Set health with the blocked-requires-comment rule enforced here so
+  // every call site respects it uniformly.
+  function setActivityHealth(a, next, opts) {
+    opts = opts || {};
+    if (next === 'blocked') {
+      const existing = a.healthNote || '';
+      const promptNote = opts.suppressPrompt ? existing
+        : (window.prompt(`Blocked — describe the blocker so it's actionable:`, existing) || '').trim();
+      if (!promptNote) return false; // user cancelled or gave empty note
+      a.health = 'blocked';
+      a.healthAt = todayISO();
+      a.healthNote = promptNote;
+      // Also append to activity comments so it lands in the timeline.
+      a.comments = a.comments || [];
+      a.comments.push({ id: uid('cm'), at: todayISO(), text: `[blocked] ${promptNote}` });
+      return true;
+    }
+    a.health = next;
+    a.healthAt = next ? todayISO() : null;
+    // Do NOT clear healthNote — history matters. Only overwrite on
+    // an explicit new blocked note.
+    return true;
+  }
+  function activityHealthChipHTML(a, options) {
+    options = options || {};
+    const meta = actHealthMeta(a.health);
+    const label = options.compact ? (a.health || 'set') : meta.label;
+    return `<button type="button" class="act-health ${meta.cls}" data-act-id="${escapeHTML(a.id)}" title="${escapeHTML(meta.label)}${a.healthNote ? ' — ' + a.healthNote : ''}${a.healthAt ? ' · ' + a.healthAt : ''}\nClick to cycle · right-click for full menu">${meta.icon} <span>${escapeHTML(label)}</span></button>`;
+  }
   // Deterministic hue per activity so the gantt gets a stable
   // rainbow instead of a random one per render.
   function actColor(id) {
@@ -14441,6 +14766,7 @@
         <thead>
           <tr>
             <th>Activity</th>
+            <th>Health</th>
             <th>Originator</th>
             <th>Project</th>
             <th class="num">Hours</th>
@@ -14467,8 +14793,9 @@
               <tr class="act-row" data-act-id="${escapeHTML(a.id)}">
                 <td>
                   <div class="act-row-title">${escapeHTML(a.title)}</div>
-                  <div class="act-row-sub">${owners !== '—' ? '→ ' + escapeHTML(owners) : '<span class="muted">unassigned</span>'}${(a.milestones || []).length ? ' · ' + (a.milestones || []).length + '▲' : ''}${(a.deliverables || []).length ? ' · ' + (a.deliverables || []).length + '◆' : ''}${linkedActionCount ? ' · ' + linkedActionCount + ' action' + (linkedActionCount === 1 ? '' : 's') : ''}${commentCount ? ' · 💬 ' + commentCount : ''}</div>
+                  <div class="act-row-sub">${owners !== '—' ? '→ ' + escapeHTML(owners) : '<span class="muted">unassigned</span>'}${(a.milestones || []).length ? ' · ' + (a.milestones || []).length + '▲' : ''}${(a.deliverables || []).length ? ' · ' + (a.deliverables || []).length + '◆' : ''}${linkedActionCount ? ' · ' + linkedActionCount + ' action' + (linkedActionCount === 1 ? '' : 's') : ''}${commentCount ? ' · 💬 ' + commentCount : ''}${a.healthNote ? '<div class="act-row-blocked-note muted" style="font-size:10.5px; font-style:italic;">↳ ' + escapeHTML(a.healthNote) + '</div>' : ''}</div>
                 </td>
+                <td class="act-health-cell">${activityHealthChipHTML(a, { compact: true })}</td>
                 <td>${escapeHTML(actorLabel(a.originator))}<div class="muted" style="font-size:10.5px;">${escapeHTML(a.originatedAt || '')}</div></td>
                 <td>${escapeHTML(projName(a.projectId))}</td>
                 <td class="num"><b>${a.totalHours}</b><div class="muted" style="font-size:10.5px;">${firm}f · ${tent}t${need ? ' · '+need+' gap' : ''}</div></td>
@@ -14484,7 +14811,51 @@
           }).join('')}
         </tbody>
       </table>`;
-    host.querySelectorAll('.act-row').forEach((r) => r.addEventListener('click', () => openActivityEditor(r.dataset.actId)));
+    host.querySelectorAll('.act-row').forEach((r) => {
+      r.addEventListener('click', (e) => {
+        // Health chip is stop-target — don't open editor when cycling.
+        if (e.target.closest('.act-health')) return;
+        openActivityEditor(r.dataset.actId);
+      });
+    });
+    // Health cycle click.
+    host.querySelectorAll('.act-health').forEach((chip) => {
+      chip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const id = chip.dataset.actId;
+        const a = (state.activities || []).find((x) => x.id === id);
+        if (!a) return;
+        const next = nextHealth(a.health);
+        if (setActivityHealth(a, next)) {
+          commit('Set activity health');
+          renderActivityList();
+        }
+      });
+      // Right-click for direct-jump menu.
+      chip.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const id = chip.dataset.actId;
+        const a = (state.activities || []).find((x) => x.id === id);
+        if (!a) return;
+        const items = ACT_HEALTHS.map((h) => ({
+          label: `${h.icon} ${h.label}${a.health === h.id ? ' ✓' : ''}`,
+          onClick: () => {
+            if (setActivityHealth(a, h.id)) { commit('Set activity health'); renderActivityList(); }
+          },
+        }));
+        if (a.healthNote) {
+          items.push({ separator: true });
+          items.push({ label: 'Edit note…', onClick: () => {
+            const note = window.prompt('Health note:', a.healthNote || '') || '';
+            a.healthNote = note.trim();
+            commit('Edit health note');
+            renderActivityList();
+          } });
+        }
+        showContextMenu(e.clientX, e.clientY, items);
+      });
+    });
   }
 
   // ── Activity editor drawer ────────────────────────────────────
@@ -14519,8 +14890,16 @@
       </div>
       <div class="field-row" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
         <div class="field"><label>Project</label><select id="acProj"><option value="">— None</option>${projects.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === a.projectId ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select></div>
-        <div class="field"><label>Status</label><select id="acStatus">${ACT_STATUSES.map((s) => `<option value="${s.id}" ${s.id === a.status ? 'selected' : ''}>${escapeHTML(s.label)}</option>`).join('')}</select></div>
+        <div class="field"><label>Status <span class="muted">— workflow</span></label><select id="acStatus">${ACT_STATUSES.map((s) => `<option value="${s.id}" ${s.id === a.status ? 'selected' : ''}>${escapeHTML(s.label)}</option>`).join('')}</select></div>
         <div class="field"><label>Total load (h)</label><input id="acHours" type="number" min="0" step="1" value="${a.totalHours}" /></div>
+      </div>
+      <div class="field">
+        <label>Health <span class="muted">— how are things going? Orthogonal to workflow status. Blocked requires a note.</span></label>
+        <div class="ac-health-picker" id="acHealthPicker">
+          ${ACT_HEALTHS.map((h) => `<button type="button" class="act-health ${h.cls} ${(a.health || null) === h.id ? 'is-set' : ''}" data-health="${escapeHTML(String(h.id))}">${h.icon} <span>${escapeHTML(h.label)}</span></button>`).join('')}
+        </div>
+        <textarea id="acHealthNote" class="input" rows="2" placeholder="${a.health === 'blocked' ? 'Required for blocked — describe what needs to unstick this.' : 'Optional note about the current health.'}" style="width:100%; margin-top:6px;">${escapeHTML(a.healthNote || '')}</textarea>
+        <div class="muted" style="font-size:10.5px; margin-top:4px;">${a.healthAt ? 'Last change: ' + escapeHTML(a.healthAt) : ''}</div>
       </div>
       <div class="field">
         <label>Predicted load over time <span class="muted">— same anchor as the person planner: total hours + window drives the weekly profile below</span></label>
@@ -14893,6 +15272,38 @@
     renderLinkedActions();
     renderLinkedActionPicker();
     renderActivityComments();
+    // Health picker: clicking a button sets health; note is required
+    // for 'blocked'. Selection state visualised via .is-set.
+    const healthPicker = $('#acHealthPicker');
+    if (healthPicker) {
+      healthPicker.addEventListener('click', (e) => {
+        const btn = e.target.closest('.act-health');
+        if (!btn) return;
+        const raw = btn.dataset.health;
+        const next = raw === 'null' ? null : raw;
+        const noteEl = $('#acHealthNote');
+        // For blocked, keep the currently-typed note if any; otherwise
+        // let setActivityHealth prompt. Use suppressPrompt when the
+        // textarea already contains something.
+        if (next === 'blocked') {
+          const noteVal = (noteEl?.value || '').trim();
+          if (noteVal) {
+            a.healthNote = noteVal;
+            setActivityHealth(a, 'blocked', { suppressPrompt: true });
+          } else {
+            if (!setActivityHealth(a, 'blocked')) return;
+            if (noteEl) noteEl.value = a.healthNote || '';
+          }
+        } else {
+          setActivityHealth(a, next);
+        }
+        // Reflect selection.
+        healthPicker.querySelectorAll('.act-health').forEach((b) => {
+          b.classList.toggle('is-set', (b.dataset.health === 'null' ? null : b.dataset.health) === (a.health || null));
+        });
+        commit('Set activity health');
+      });
+    }
     // Default comment date to today.
     const dateIn = $('#acCommentDate'); if (dateIn) dateIn.value = todayISO();
     $('#acCommentAdd')?.addEventListener('click', () => {
@@ -14971,6 +15382,15 @@
       if (a.plannedStart && a.plannedEnd && a.plannedEnd < a.plannedStart) {
         const t = a.plannedStart; a.plannedStart = a.plannedEnd; a.plannedEnd = t;
       }
+      // Health note — save whatever's in the textarea. For blocked,
+      // block save if the note is empty (the invariant we advertise).
+      const noteVal = ($('#acHealthNote')?.value || '').trim();
+      if (a.health === 'blocked' && !noteVal) {
+        alert('A blocked activity needs a note describing the blocker. Add one or change the health.');
+        $('#acHealthNote')?.focus();
+        return;
+      }
+      a.healthNote = noteVal;
       a.description = serializeChipsToText($('#acDesc'));
       a.updatedAt = todayISO();
       commit('activity-save');
@@ -20733,6 +21153,19 @@
         c.by = c.by || null;
         c.at = typeof c.at === 'string' ? c.at : todayISO();
       });
+      // Health status — orthogonal to workflow status (`a.status`).
+      // Answers "how are things going?" independently of "where are
+      // we in the process?" Values:
+      //   ok       — on track, no help needed
+      //   at-risk  — trending late, watch it
+      //   blocked  — cannot progress until X is resolved; a comment
+      //              is required so the block is legible
+      //   done     — finished (mirrors workflow status='done')
+      // Nullable so brand-new activities don't force a decision.
+      const validHealth = ['ok', 'at-risk', 'blocked', 'done'];
+      a.health = validHealth.includes(a.health) ? a.health : null;
+      a.healthAt = typeof a.healthAt === 'string' ? a.healthAt : null;
+      a.healthNote = typeof a.healthNote === 'string' ? a.healthNote : '';
       a.createdAt = a.createdAt || todayISO();
       a.updatedAt = a.updatedAt || a.createdAt;
     });
@@ -20795,6 +21228,26 @@
       });
       // Sort newest-first so the dashboard defaults to the latest review.
       p.reviews.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+      // Weekly pulse — 🟢/🟡/🔴 + optional note per ISO week.
+      // Shape: [{ id, week: 'YYYY-MM-DD' Monday, mood: 'green'|'amber'|'red', note?, at }]
+      if (!Array.isArray(p.pulses)) p.pulses = [];
+      p.pulses = p.pulses.filter((x) => x && typeof x.week === 'string' && ['green','amber','red'].includes(x.mood));
+      p.pulses.forEach((x) => {
+        x.id = x.id || uid('pl');
+        x.note = typeof x.note === 'string' ? x.note : '';
+        x.at = typeof x.at === 'string' ? x.at : todayISO();
+      });
+      p.pulses.sort((a, b) => (a.week || '').localeCompare(b.week || ''));
+      // Talking points — persistent list of things to raise next time.
+      // Shape: [{ id, text, createdAt, raisedAt? }]. Raised items
+      // become the person's talking-point history.
+      if (!Array.isArray(p.talkingPoints)) p.talkingPoints = [];
+      p.talkingPoints = p.talkingPoints.filter((t) => t && typeof t.text === 'string' && t.text.trim());
+      p.talkingPoints.forEach((t) => {
+        t.id = t.id || uid('tp');
+        t.createdAt = t.createdAt || todayISO();
+        t.raisedAt = typeof t.raisedAt === 'string' ? t.raisedAt : null;
+      });
     });
     // Stakeholders — external contacts (customer POCs, regulators, sister
     // projects). No capacity, no hourly rate. Still ownable so we can
