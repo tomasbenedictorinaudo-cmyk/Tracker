@@ -2077,15 +2077,48 @@
     if (!id) return '—';
     return peopleMap().get(id)?.name || '—';
   }
+  // Whether a person is "on" a given project. Membership is derived
+  // from `person.assignments[]`: any entry with commitment > 0 for the
+  // project counts. Special cases:
+  //   • projectId is null / '__all__' → true (portfolio view sees all)
+  //   • person.assignments missing or empty → true (legacy: person not
+  //     yet triaged into projects behaves as team-wide)
+  function personIsOnProject(person, projectId) {
+    if (!person) return false;
+    if (!projectId || projectId === '__all__') return true;
+    const asg = person.assignments;
+    if (!Array.isArray(asg) || !asg.length) return true;
+    return asg.some((a) => a && a.projectId === projectId && (Number(a.commitment) || 0) > 0);
+  }
+  // People assigned to a project (see personIsOnProject).
+  function projectMembers(projectId) {
+    return (state.people || []).filter((p) => personIsOnProject(p, projectId));
+  }
   // Return the `<option>` markup for a select that must pick an actor
   // (owner or originator). Team members first, then a separator, then
   // external stakeholders. The `includeBlank` flag adds a "— same as owner"
-  // top row for originator pickers.
-  function actorOptionsHTML(selectedId, includeBlank = false) {
-    const team = state.people || [];
+  // top row for originator pickers. `scope: 'project'` (the default when
+  // a real project is open) filters people to project members only; a
+  // person already selected who's off the project is kept and flagged.
+  function actorOptionsHTML(selectedId, includeBlank = false, opts) {
+    opts = opts || {};
+    const projectId = opts.projectId != null
+      ? opts.projectId
+      : (curProjectIsMerged() ? null : (curProject()?.id || null));
+    const allTeam = state.people || [];
     const ext  = state.stakeholders || [];
+    let team = allTeam;
+    if (projectId && projectId !== '__all__') {
+      team = allTeam.filter((p) => personIsOnProject(p, projectId));
+      // Keep an already-selected person visible even if they've been
+      // removed from the project — flagged, so the user sees why.
+      if (selectedId && !team.some((p) => p.id === selectedId) && allTeam.some((p) => p.id === selectedId)) {
+        const orphan = allTeam.find((p) => p.id === selectedId);
+        team = [{ ...orphan, __offProject: true }, ...team];
+      }
+    }
     let html = includeBlank ? '<option value="">— same as owner</option>' : '';
-    html += team.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === selectedId ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('');
+    html += team.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === selectedId ? 'selected' : ''}>${p.__offProject ? '⚠ ' : ''}${escapeHTML(p.name)}${p.__offProject ? ' (not on this project)' : ''}</option>`).join('');
     if (ext.length) {
       html += `<option value="" disabled>── External stakeholders ──</option>`;
       html += ext.map((s) => `<option value="${escapeHTML(s.id)}" ${s.id === selectedId ? 'selected' : ''}>◇ ${escapeHTML(s.name)}${s.organization ? ' (' + escapeHTML(s.organization) + ')' : ''}</option>`).join('');
@@ -2826,12 +2859,28 @@
     head.className = 'page-head';
     const liveActions = (proj.actions || []).filter((a) => !a.archivedAt);
     const archivedCount = (proj.actions || []).filter((a) => a.archivedAt).length;
+    state.ui = state.ui || {};
+    state.ui.board = state.ui.board || { sort: 'rank', dir: 'asc' };
+    const boardSort = state.ui.board;
+    const sortOptions = [
+      { id: 'rank',     label: 'Manual (drag order)' },
+      { id: 'category', label: 'Category / component' },
+      { id: 'owner',    label: 'Owner name' },
+      { id: 'due',      label: 'Due date' },
+      { id: 'updated',  label: 'Last updated' },
+      { id: 'priority', label: 'Priority level' },
+    ];
     head.innerHTML = `
       <div>
         <div class="page-title">${escapeHTML(proj.name)}</div>
         <div class="page-sub">${liveActions.length} actions • ${proj.deliverables?.length || 0} deliverables • ${proj.milestones?.length || 0} milestones</div>
       </div>
       <div class="page-actions">
+        <label class="board-sort" title="Applies to every column">
+          <span class="muted" style="font-size:11px;">Sort</span>
+          <select id="boardSortCol">${sortOptions.map((o) => `<option value="${o.id}" ${boardSort.sort === o.id ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('')}</select>
+          <button type="button" class="ghost board-sort-dir" id="boardSortDir" title="${boardSort.dir === 'asc' ? 'Ascending — click to switch' : 'Descending — click to switch'}" ${boardSort.sort === 'rank' ? 'disabled' : ''}>${boardSort.dir === 'asc' ? '▲' : '▼'}</button>
+        </label>
         <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${archivedCount ? ` <span class="badge-count">${archivedCount}</span>` : ''}</button>
         <button class="ghost" id="btnAddAction">+ Action</button>
       </div>`;
@@ -2870,10 +2919,33 @@
         rows,
       };
     });
+    // Sort key for a card according to the board-wide sort selector.
+    // Manual (rank) keeps drag order; the others produce a comparable
+    // primitive per card.
+    const cardSortKey = (a) => {
+      switch (boardSort.sort) {
+        case 'category': return (findComponent(proj, a.component)?.name || '￿').toLowerCase();
+        case 'owner':    return (personName(a.owner) || '￿').toLowerCase();
+        case 'due':      return a.due || '￿';
+        case 'updated':  return a.updatedAt || a.createdAt || '';
+        case 'priority': return PRIORITY_LEVELS.findIndex((p) => p.id === (a.priorityLevel || 'med'));
+        case 'rank':
+        default:         return a.priority || 0;
+      }
+    };
+    const cardCmp = (a, b) => {
+      const ka = cardSortKey(a), kb = cardSortKey(b);
+      if (ka < kb) return boardSort.dir === 'desc' ? 1 : -1;
+      if (ka > kb) return boardSort.dir === 'desc' ? -1 : 1;
+      // Stable tiebreaker: manual rank, then title.
+      const ra = a.priority || 0, rb = b.priority || 0;
+      if (ra !== rb) return ra - rb;
+      return (a.title || '').localeCompare(b.title || '');
+    };
     STATUSES.forEach((s) => {
       const items = (proj.actions || [])
         .filter((a) => a.status === s.id && actionMatchesFilters(a))
-        .sort((a, b) => (a.priority || 0) - (b.priority || 0));
+        .sort(cardCmp);
       // Every status column always renders, even when empty — they
       // need to remain valid drop targets for drag-and-drop. (An
       // earlier version hid the Cancelled column when empty but that
@@ -2908,6 +2980,17 @@
     $('#btnAddAction').addEventListener('click', () => openQuickAdd('action'));
     $('#btnOpenArchive').addEventListener('click', () => {
       state.currentView = 'archive';
+      saveState(); render();
+    });
+    // Board sort selector — applies to every column.
+    $('#boardSortCol')?.addEventListener('change', (e) => {
+      state.ui.board.sort = e.target.value;
+      if (state.ui.board.sort === 'rank') state.ui.board.dir = 'asc';
+      saveState(); render();
+    });
+    $('#boardSortDir')?.addEventListener('click', () => {
+      if (state.ui.board.sort === 'rank') return;
+      state.ui.board.dir = state.ui.board.dir === 'asc' ? 'desc' : 'asc';
       saveState(); render();
     });
 
@@ -10666,6 +10749,399 @@
     });
   }
 
+  // ── Risk & Opportunity import from XLSX / CSV / TSV ──────────
+  // Robust to a wide range of header names via fuzzy synonym matching.
+  // The pipeline is: file → 2D array → detect header row → map headers
+  // to canonical fields → coerce values → confirm dialog → append to
+  // curProject().risks.
+  const RO_FIELD_SYNONYMS = {
+    identifier:  ['id','identifier','ref','code','#','ref id','risk id','opportunity id','ro id','no','number','item'],
+    kind:        ['kind','risk/opportunity','type of risk','ro','r/o','category type'],
+    title:       ['title','risk','opportunity','risk title','opportunity title','opp title','summary','name','short description','headline','event'],
+    description: ['description','details','notes','narrative','context','long description','cause','trigger'],
+    category:    ['category','area','type','domain','component','subsystem','wp','work package'],
+    probability: ['probability','likelihood','p','prob','likelihood (1-5)','inherent p','inherent probability','initial p','initial probability','raw p','probability (1-5)'],
+    impact:      ['impact','consequence','severity','i','impact (1-5)','inherent i','inherent impact','initial i','initial impact','raw i','severity (1-5)'],
+    residualP:   ['residual p','residual probability','post-mitigation p','residual likelihood','after mitigation p','post p'],
+    residualI:   ['residual i','residual impact','post-mitigation i','residual severity','after mitigation i','post i'],
+    mitigation:  ['mitigation','response','action','capture','treatment','plan','mitigation plan','response plan','mitigation action','handling'],
+    owner:       ['owner','responsible','assignee','raci-a','r','risk owner','responsable'],
+  };
+  function _normHeader(s) {
+    return String(s == null ? '' : s).toLowerCase().replace(/[^a-z0-9]+/g, '').trim();
+  }
+  function _matchROField(header) {
+    const nh = _normHeader(header);
+    if (!nh) return null;
+    // Exact normalized match first.
+    for (const [field, syns] of Object.entries(RO_FIELD_SYNONYMS)) {
+      if (syns.some((s) => _normHeader(s) === nh)) return field;
+    }
+    // Substring — normalized header contains a synonym or vice versa.
+    // Length-guard so very short synonyms ('p','i','r') don't overmatch.
+    for (const [field, syns] of Object.entries(RO_FIELD_SYNONYMS)) {
+      for (const s of syns) {
+        const ns = _normHeader(s);
+        if (ns.length >= 4 && (nh.includes(ns) || ns.includes(nh))) return field;
+      }
+    }
+    return null;
+  }
+  // Score a candidate header row by how many cells map to canonical
+  // fields — the row with the highest score wins.
+  function _scoreHeaderRow(row) {
+    if (!Array.isArray(row)) return 0;
+    let n = 0;
+    for (const cell of row) if (_matchROField(cell)) n++;
+    return n;
+  }
+  function _detectHeaderRow(rows) {
+    // Prefer the first row with score >= 2 in the first 5 rows.
+    const scan = Math.min(rows.length, 5);
+    let bestIdx = 0, bestScore = _scoreHeaderRow(rows[0]);
+    for (let i = 1; i < scan; i++) {
+      const s = _scoreHeaderRow(rows[i]);
+      if (s > bestScore) { bestScore = s; bestIdx = i; }
+    }
+    return bestScore >= 2 ? bestIdx : 0;
+  }
+  // Coerce a cell value to the shape a given field expects.
+  function _coerceROValue(field, raw) {
+    if (raw == null) return null;
+    const s = String(raw).trim();
+    if (!s) return null;
+    if (field === 'probability' || field === 'impact' || field === 'residualP' || field === 'residualI') {
+      // Accept 1..5 numbers, "very high" wordings, and percentages.
+      const n = Number(s);
+      if (Number.isFinite(n)) return Math.min(5, Math.max(1, Math.round(n <= 1 ? n * 5 : n <= 5 ? n : n / 20)));
+      const low = s.toLowerCase();
+      const wordMap = { 'very low': 1, 'low': 2, 'medium': 3, 'moderate': 3, 'med': 3, 'high': 4, 'very high': 5, 'critical': 5 };
+      return wordMap[low] ?? 3;
+    }
+    if (field === 'kind') {
+      const low = s.toLowerCase();
+      if (/oppor|upside|positive|benefit|chance/.test(low)) return 'opportunity';
+      return 'risk';
+    }
+    return s;
+  }
+  // CSV / TSV parser — handles quoted fields, escaped quotes, CRLF/LF.
+  function _parseDelimited(text, delim) {
+    if (!delim) delim = (text.includes('\t') && text.split('\t').length > text.split(',').length) ? '\t' : ',';
+    const rows = [];
+    let cur = '', inQ = false, row = [];
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (inQ) {
+        if (c === '"' && text[i + 1] === '"') { cur += '"'; i++; }
+        else if (c === '"') inQ = false;
+        else cur += c;
+      } else {
+        if (c === '"') inQ = true;
+        else if (c === delim) { row.push(cur); cur = ''; }
+        else if (c === '\n' || c === '\r') {
+          if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+          cur = ''; row = [];
+          if (c === '\r' && text[i + 1] === '\n') i++;
+        } else cur += c;
+      }
+    }
+    if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+    return rows;
+  }
+  // Minimal XLSX reader — extracts sheet1's rows as strings. Uses
+  // native DecompressionStream for DEFLATE. Handles the two common
+  // ZIP compression methods (0 = store, 8 = deflate).
+  async function _unzipEntries(u8) {
+    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+    // Find End of Central Directory record — signature 0x06054b50 in the last 65558 bytes.
+    let eocd = -1;
+    const start = Math.max(0, u8.length - 65558);
+    for (let i = u8.length - 22; i >= start; i--) {
+      if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error('Not a valid .xlsx (no EOCD).');
+    const entries = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const files = {};
+    const dec = new TextDecoder('utf-8');
+    for (let i = 0; i < entries; i++) {
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const method   = dv.getUint16(p + 10, true);
+      const compSize = dv.getUint32(p + 20, true);
+      const nameLen  = dv.getUint16(p + 28, true);
+      const extraLen = dv.getUint16(p + 30, true);
+      const commLen  = dv.getUint16(p + 32, true);
+      const lhOff    = dv.getUint32(p + 42, true);
+      const name = dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+      p += 46 + nameLen + extraLen + commLen;
+      if (dv.getUint32(lhOff, true) !== 0x04034b50) continue;
+      const lhNameLen  = dv.getUint16(lhOff + 26, true);
+      const lhExtraLen = dv.getUint16(lhOff + 28, true);
+      const dataStart = lhOff + 30 + lhNameLen + lhExtraLen;
+      const data = u8.subarray(dataStart, dataStart + compSize);
+      let out;
+      if (method === 0) {
+        out = data;
+      } else if (method === 8) {
+        const ds = new DecompressionStream('deflate-raw');
+        const stream = new Blob([data]).stream().pipeThrough(ds);
+        out = new Uint8Array(await new Response(stream).arrayBuffer());
+      } else {
+        continue;
+      }
+      files[name] = out;
+    }
+    return files;
+  }
+  function _parseSharedStrings(u8) {
+    if (!u8) return [];
+    const xml = new TextDecoder('utf-8').decode(u8);
+    const strs = [];
+    // Match each <si>…</si> block and gather all <t>…</t> inside
+    // (Excel splits rich-text runs into multiple <t> elements).
+    const siRE = /<si\b[^>]*>([\s\S]*?)<\/si>/g;
+    const tRE  = /<t\b[^>]*>([\s\S]*?)<\/t>/g;
+    let m;
+    while ((m = siRE.exec(xml)) !== null) {
+      const body = m[1];
+      let acc = '', t;
+      tRE.lastIndex = 0;
+      while ((t = tRE.exec(body)) !== null) acc += _decodeXMLEntities(t[1]);
+      strs.push(acc);
+    }
+    return strs;
+  }
+  function _decodeXMLEntities(s) {
+    return String(s)
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+      .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+      .replace(/&#x([0-9a-fA-F]+);/g, (_, n) => String.fromCharCode(parseInt(n, 16)))
+      .replace(/&amp;/g, '&');
+  }
+  function _colToIdx(ref) {
+    // "AB12" → column index (0-based) for column part.
+    const m = /^([A-Z]+)/.exec(ref);
+    if (!m) return 0;
+    let n = 0;
+    for (const c of m[1]) n = n * 26 + (c.charCodeAt(0) - 64);
+    return n - 1;
+  }
+  function _parseSheet(u8, sharedStrings) {
+    const xml = new TextDecoder('utf-8').decode(u8);
+    const rows = [];
+    const rowRE = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
+    const cellRE = /<c\b([^>]*)>([\s\S]*?)<\/c>|<c\b([^>]*)\/>/g;
+    let m;
+    while ((m = rowRE.exec(xml)) !== null) {
+      const rowBody = m[1];
+      const row = [];
+      let c;
+      cellRE.lastIndex = 0;
+      while ((c = cellRE.exec(rowBody)) !== null) {
+        const attrs = c[1] || c[3] || '';
+        const body  = c[2] || '';
+        const refM = /r="([A-Z]+\d+)"/.exec(attrs);
+        const typeM = /t="([^"]+)"/.exec(attrs);
+        const type = typeM ? typeM[1] : 'n';
+        const col = refM ? _colToIdx(refM[1]) : row.length;
+        while (row.length < col) row.push('');
+        const vM = /<v\b[^>]*>([\s\S]*?)<\/v>/.exec(body);
+        const isM = /<is\b[^>]*>([\s\S]*?)<\/is>/.exec(body);
+        let val = '';
+        if (type === 's' && vM) val = sharedStrings[Number(vM[1])] || '';
+        else if (type === 'inlineStr' && isM) {
+          const t = /<t\b[^>]*>([\s\S]*?)<\/t>/.exec(isM[1]);
+          val = t ? _decodeXMLEntities(t[1]) : '';
+        } else if (vM) {
+          val = _decodeXMLEntities(vM[1]);
+        }
+        row[col] = val;
+      }
+      rows.push(row);
+    }
+    return rows;
+  }
+  async function _parseXLSX(file) {
+    const buf = await file.arrayBuffer();
+    const files = await _unzipEntries(new Uint8Array(buf));
+    // Case-insensitive lookup.
+    const findFile = (needle) => {
+      const low = needle.toLowerCase();
+      const key = Object.keys(files).find((k) => k.toLowerCase() === low);
+      return key ? files[key] : null;
+    };
+    const sharedStrings = _parseSharedStrings(findFile('xl/sharedStrings.xml'));
+    // Pick the first worksheet.
+    const sheetKey = Object.keys(files).find((k) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(k));
+    if (!sheetKey) throw new Error('No worksheet found in .xlsx.');
+    return _parseSheet(files[sheetKey], sharedStrings);
+  }
+  // Open the R&O import dialog. Presents mapping + preview, then
+  // creates risk objects on confirm.
+  async function openRiskImportDialog() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.csv,.tsv,.txt';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      input.remove();
+      if (!file) return;
+      let rows = [];
+      try {
+        if (/\.xlsx$/i.test(file.name)) {
+          rows = await _parseXLSX(file);
+        } else {
+          const text = await file.text();
+          rows = _parseDelimited(text);
+        }
+      } catch (err) {
+        alert(`Failed to parse the file: ${err.message}\n\nSupported formats: .xlsx, .csv, .tsv`);
+        return;
+      }
+      rows = rows.filter((r) => r.some((c) => String(c || '').trim()));
+      if (!rows.length) { alert('File appears to be empty.'); return; }
+      _showRiskImportPreview(file.name, rows);
+    });
+    input.click();
+  }
+  function _showRiskImportPreview(fileName, rows) {
+    const headerIdx = _detectHeaderRow(rows);
+    const headerRow = rows[headerIdx] || [];
+    const dataRows = rows.slice(headerIdx + 1);
+    // Column → field mapping, editable.
+    const mapping = headerRow.map((h) => _matchROField(h) || '');
+    const overlay = document.createElement('div');
+    overlay.className = 'tp-dialog-mask';
+    const dlg = document.createElement('div');
+    dlg.className = 'tp-dialog tt-dialog';
+    dlg.style.width = 'min(880px, 96vw)';
+    const fieldOptions = [
+      { id: '', label: '— Ignore —' },
+      { id: 'identifier', label: 'Identifier' },
+      { id: 'kind', label: 'Kind (risk / opportunity)' },
+      { id: 'title', label: 'Title' },
+      { id: 'description', label: 'Description' },
+      { id: 'category', label: 'Category' },
+      { id: 'probability', label: 'Inherent Probability (1-5)' },
+      { id: 'impact', label: 'Inherent Impact (1-5)' },
+      { id: 'residualP', label: 'Residual Probability (1-5)' },
+      { id: 'residualI', label: 'Residual Impact (1-5)' },
+      { id: 'mitigation', label: 'Mitigation / Capture' },
+      { id: 'owner', label: 'Owner (matched by name)' },
+    ];
+    const build = () => {
+      const previewRows = dataRows.slice(0, 5);
+      dlg.innerHTML = `
+        <div class="tp-dialog-head">
+          <div>
+            <div style="font-weight:700; font-size:14px;">Import risks &amp; opportunities</div>
+            <div class="muted" style="font-size:11px;">Source: <b>${escapeHTML(fileName)}</b> · Detected header row: ${headerIdx + 1} · ${dataRows.length} data row${dataRows.length === 1 ? '' : 's'}. Review the column mapping below and click Import.</div>
+          </div>
+          <button type="button" class="btn ghost tp-dialog-close" aria-label="Close">×</button>
+        </div>
+        <div class="tp-dialog-body">
+          <div class="ri-mapping">
+            <div class="ri-mapping-head">
+              <div>Column</div><div>Header cell</div><div>Map to field</div>
+            </div>
+            ${headerRow.map((h, i) => `
+              <div class="ri-mapping-row">
+                <div class="muted">${String.fromCharCode(65 + i)}</div>
+                <div><b>${escapeHTML(String(h || ''))}</b></div>
+                <div>
+                  <select class="ri-map-sel" data-col="${i}">
+                    ${fieldOptions.map((o) => `<option value="${o.id}" ${mapping[i] === o.id ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('')}
+                  </select>
+                </div>
+              </div>`).join('')}
+          </div>
+          <div class="tp-section-title">Preview (first 5 rows)</div>
+          <div style="overflow:auto; border:1px solid var(--line); border-radius:6px;">
+            <table class="ri-preview">
+              <thead><tr>${headerRow.map((h, i) => `<th>${escapeHTML(String(h || ''))}<div class="muted" style="font-size:10px;">${escapeHTML(fieldOptions.find((o) => o.id === mapping[i])?.label || '—')}</div></th>`).join('')}</tr></thead>
+              <tbody>${previewRows.map((r) => `<tr>${headerRow.map((_, i) => `<td>${escapeHTML(String(r[i] == null ? '' : r[i]))}</td>`).join('')}</tr>`).join('')}</tbody>
+            </table>
+          </div>
+          <div class="ri-footer">
+            <label class="ri-opt"><input type="checkbox" id="riDefaultRisk" checked /> Rows without a "Kind" column are treated as <b>risks</b> (uncheck for opportunities)</label>
+            <div style="flex:1;"></div>
+            <button type="button" class="btn ghost" id="riCancel">Cancel</button>
+            <button type="button" class="btn primary" id="riImport">Import ${dataRows.length} row${dataRows.length === 1 ? '' : 's'}</button>
+          </div>
+        </div>`;
+      dlg.querySelectorAll('.ri-map-sel').forEach((sel) => {
+        sel.addEventListener('change', (e) => {
+          mapping[Number(sel.dataset.col)] = e.target.value;
+          build();
+        });
+      });
+      dlg.querySelector('#riCancel')?.addEventListener('click', close);
+      dlg.querySelector('.tp-dialog-close')?.addEventListener('click', close);
+      dlg.querySelector('#riImport')?.addEventListener('click', () => doImport());
+    };
+    const close = () => overlay.remove();
+    overlay.appendChild(dlg);
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    build();
+    function doImport() {
+      const titleCol = mapping.indexOf('title');
+      if (titleCol < 0) { alert('Please map at least one column to "Title" — it identifies each row.'); return; }
+      const defaultRisk = !!dlg.querySelector('#riDefaultRisk')?.checked;
+      const proj = curProject();
+      if (curProjectIsMerged()) {
+        alert('Select a real project first (not "All projects") — imports need to know where to write.');
+        return;
+      }
+      proj.risks = proj.risks || [];
+      const peopleByName = new Map((state.people || []).map((p) => [p.name.toLowerCase().trim(), p.id]));
+      let imported = 0, skipped = 0;
+      for (const row of dataRows) {
+        const get = (field) => {
+          const idx = mapping.indexOf(field);
+          if (idx < 0) return null;
+          return _coerceROValue(field, row[idx]);
+        };
+        const title = String(get('title') || '').trim();
+        if (!title) { skipped++; continue; }
+        const kindRaw = get('kind');
+        const kind = kindRaw === 'opportunity' ? 'opportunity' : (kindRaw === 'risk' ? 'risk' : (defaultRisk ? 'risk' : 'opportunity'));
+        const p = get('probability') || 3;
+        const impact = get('impact') || 3;
+        const rp = get('residualP');
+        const ri = get('residualI');
+        const ownerName = String(get('owner') || '').trim().toLowerCase();
+        const owner = ownerName ? (peopleByName.get(ownerName) || null) : null;
+        const risk = {
+          id: uid('rk'),
+          identifier: String(get('identifier') || '').trim() || generateRiskIdentifier(proj, kind),
+          kind,
+          title,
+          description: String(get('description') || '').trim(),
+          category: String(get('category') || '').trim(),
+          inherent: { probability: p, impact },
+          residual: { probability: rp || p, impact: ri || impact },
+          mitigation: String(get('mitigation') || '').trim(),
+          owner,
+          actionId: null,
+          createdAt: todayISO(),
+          updatedAt: todayISO(),
+        };
+        ensureRiskShape(risk);
+        proj.risks.push(risk);
+        imported++;
+      }
+      commit('import-risks');
+      close();
+      toast(`Imported ${imported} row${imported === 1 ? '' : 's'}${skipped ? ` · ${skipped} skipped (missing title)` : ''}`);
+      render();
+    }
+  }
+
   // Helpers — work for both new schema (inherent/residual) and legacy (probability/impact)
   function getInherent(r) {
     if (r.inherent && typeof r.inherent.probability === 'number') return r.inherent;
@@ -10918,10 +11394,12 @@
           </div>
           <button class="ghost" id="btnAddRisk">+ Risk</button>
           <button class="ghost" id="btnAddOpp">+ Opportunity</button>
+          <button class="ghost" id="btnImportRisks" title="Import risks &amp; opportunities from an Excel (.xlsx) or CSV file">⤓ Import…</button>
         </div>
       </div>
       <div id="roBody"></div>`;
     root.appendChild(view);
+    view.querySelector('#btnImportRisks')?.addEventListener('click', () => openRiskImportDialog());
 
     function draw() {
       const body = $('#roBody');
@@ -13867,7 +14345,17 @@
   function renderPeople(root) {
     const view = document.createElement('div');
     view.className = 'view';
-    const wl = state.people.map((p) => {
+    // Filter to project members when a real project is active — but
+    // let the user opt out with the "Show all people" toggle so they
+    // can (re)assign someone who's currently not on the project.
+    state.ui = state.ui || {}; state.ui.people = state.ui.people || {};
+    const scopedToProject = !curProjectIsMerged();
+    const showAllPeople = !!state.ui.people.showAll;
+    const curProjId = curProject()?.id || null;
+    const visible = (scopedToProject && !showAllPeople)
+      ? state.people.filter((p) => personIsOnProject(p, curProjId))
+      : state.people;
+    const wl = visible.map((p) => {
       const open = state.projects.flatMap((pr) => pr.actions || []).filter((a) => a.owner === p.id && a.status !== 'done').length;
       const series = weeklyLoad(p.id, 12);
       const peakWeek = series.reduce((mx, s) => s.count > mx.count ? s : mx, series[0] || { count: 0 });
@@ -13878,10 +14366,19 @@
       const owned = state.projects.flatMap((pr) => pr.actions || []).filter((a) => a.owner === s.id).length;
       return { s, open, owned };
     });
+    const membersLabel = scopedToProject
+      ? `${visible.length} of ${state.people.length} team members on <b>${escapeHTML(curProject()?.name || '')}</b>`
+      : `${state.people.length} team members`;
+    const projScopeChip = scopedToProject
+      ? `<label class="ppl-scope-chip" title="Uncheck to show every teammate — useful when you want to assign someone to this project">
+           <input type="checkbox" id="pplShowAll" ${showAllPeople ? 'checked' : ''} /> Show all people
+         </label>`
+      : '';
     view.innerHTML = `
       <div class="page-head">
-        <div><div class="page-title">People</div><div class="page-sub">${state.people.length} team members${externals.length ? ` · ${externals.length} external stakeholder${externals.length === 1 ? '' : 's'}` : ''} • capacity in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year) • workload across all projects, projected over the next 12 weeks</div></div>
+        <div><div class="page-title">People</div><div class="page-sub">${membersLabel}${externals.length ? ` · ${externals.length} external stakeholder${externals.length === 1 ? '' : 's'}` : ''} • capacity in % of FTE (1 FTE = 8h/day × 5 days/week, 212 working days/year) • workload across all projects, projected over the next 12 weeks</div></div>
         <div class="page-actions">
+          ${projScopeChip}
           <button class="ghost" id="btnNewPerson">+ Person</button>
           <button class="ghost" id="btnNewStakeholder" title="Add an external stakeholder — customer POC, vendor rep, sister-project SE. Ownable but doesn't consume team capacity.">+ Stakeholder</button>
         </div>
@@ -13963,6 +14460,12 @@
     root.appendChild(view);
     $('#btnNewPerson').addEventListener('click', () => openQuickAdd('person'));
     $('#btnNewStakeholder').addEventListener('click', () => openStakeholderInlineDialog());
+    $('#pplShowAll')?.addEventListener('change', (e) => {
+      state.ui.people = state.ui.people || {};
+      state.ui.people.showAll = !!e.target.checked;
+      saveState();
+      render();
+    });
     // External-stakeholder rows: click to filter the Register to that
     // stakeholder; right-click to delete.
     $$('.ext-row', view).forEach((row) => {
@@ -20069,16 +20572,32 @@
   function _gmailChipHTML({ url, subject, threadId }) {
     const label = subject && subject.trim() ? subject.trim() : 'Gmail thread';
     const idHint = threadId ? threadId.slice(0, 6) : '';
-    return `<a class="gm-chip" href="${escapeHTML(url)}" data-gmail-thread="${escapeHTML(threadId)}" data-gmail-subject="${escapeHTML(subject || '')}" target="_blank" rel="noopener noreferrer" title="Double-click to open in Gmail — ${escapeHTML(url)}" contenteditable="false">
+    return `<a class="gm-chip" href="${escapeHTML(url)}" data-gmail-thread="${escapeHTML(threadId)}" data-gmail-subject="${escapeHTML(subject || '')}" target="_blank" rel="noopener noreferrer" title="Click to open in Gmail — ${escapeHTML(url)}" contenteditable="false">
       <span class="gm-chip-icon" aria-hidden="true"><svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M4 6h16a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2Zm0 2v.4l8 5 8-5V8H4Zm16 2.4-7.4 4.6a1.2 1.2 0 0 1-1.2 0L4 10.4V16h16v-5.6Z"/></svg></span>
       <span class="gm-chip-body">
         <span class="gm-chip-subject">${escapeHTML(label)}</span>
-        <span class="gm-chip-meta">${subject ? 'Gmail — double-click to open' : 'Gmail thread — double-click to open'}${idHint ? ' · ' + escapeHTML(idHint) : ''}</span>
+        <span class="gm-chip-meta">${subject ? 'Gmail — click to open' : 'Gmail thread — click to open'}${idHint ? ' · ' + escapeHTML(idHint) : ''}</span>
       </span>
       <span class="gm-chip-open" aria-hidden="true">↗</span>
       <button type="button" class="gm-chip-del" title="Remove this Gmail chip" aria-label="Remove" contenteditable="false">×</button>
     </a>`;
   }
+  // Global click delegate — anchors inside contenteditable containers
+  // don't navigate on click (the browser places the caret instead), so
+  // gm-chip clicks never opened Gmail. Intercept and force a new-tab
+  // open. Skip if the click was on the delete button or on a text
+  // node inside a plain-text (non-editable) anchor — those handle
+  // themselves fine.
+  document.addEventListener('click', (e) => {
+    const chip = e.target.closest('.gm-chip');
+    if (!chip) return;
+    if (e.target.closest('.gm-chip-del')) return; // let the ×-remove handler win
+    const url = chip.getAttribute('href');
+    if (!url) return;
+    e.preventDefault();
+    e.stopPropagation();
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }, true);
   // Walk a contenteditable's DOM and rebuild the token-bearing plain-text
   // form (chips → `[gmail:s|<enc-subj>|<url>]`, <br> → \n, block boundaries
   // → \n). Used to serialize rich compose fields back to `a.notes` /

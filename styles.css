@@ -11043,6 +11043,55 @@ body.is-plndrag * { cursor: ns-resize !important; }
 
 .tt-dialog { width: min(720px, 100%); }
 
+/* Risk/Opp import dialog ────────────────────────────────────── */
+.ri-mapping {
+  display: flex; flex-direction: column; gap: 3px;
+  border: 1px solid var(--line); border-radius: 6px;
+  padding: 6px; margin-bottom: 10px;
+  max-height: 260px; overflow: auto;
+}
+.ri-mapping-head, .ri-mapping-row {
+  display: grid; grid-template-columns: 30px 1fr 240px; gap: 8px;
+  align-items: center;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.ri-mapping-head { font-weight: 700; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+.ri-map-sel { width: 100%; font-size: 12px; padding: 3px 6px; }
+
+.ri-preview { border-collapse: collapse; font-size: 11.5px; width: 100%; }
+.ri-preview th, .ri-preview td { border: 1px solid var(--line); padding: 4px 6px; text-align: left; vertical-align: top; max-width: 180px; overflow: hidden; text-overflow: ellipsis; }
+.ri-preview th { background: rgba(148,163,184,.08); font-weight: 700; }
+
+.ri-footer { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.ri-opt { font-size: 11.5px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+
+/* Per-project people scope chip ─────────────────────────────── */
+.ppl-scope-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--muted);
+  padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--line); background: rgba(148,163,184,.10);
+  cursor: pointer; user-select: none;
+}
+.ppl-scope-chip:hover { background: rgba(148,163,184,.18); color: var(--fg); }
+.ppl-scope-chip input { margin: 0; }
+
+.board-sort {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px; border-radius: 999px;
+  border: 1px solid var(--line); background: transparent;
+}
+.board-sort select {
+  border: 0; background: transparent; color: var(--fg);
+  font-size: 12px; padding: 2px 4px; cursor: pointer;
+}
+.board-sort-dir {
+  padding: 2px 6px !important; font-size: 11px !important;
+  min-width: auto !important;
+}
+.board-sort-dir:disabled { opacity: .35; cursor: not-allowed; }
+
 /* Sortable table headers (Activities list, etc.) ────────────── */
 .act-list th.sortable {
   cursor: pointer;
