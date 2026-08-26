@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-08-26T22:03:07.698Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-08-26T22:21:57.647Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -11052,6 +11052,80 @@ body.is-plndrag * { cursor: ns-resize !important; }
 
 .tt-dialog { width: min(720px, 100%); }
 
+/* People × projects allocation matrix ───────────────────────── */
+.alx-scroll { overflow: auto; max-height: 560px; border: 1px solid var(--line); border-radius: 6px; }
+table.alx {
+  border-collapse: separate; border-spacing: 0;
+  font-size: 12px; width: 100%;
+}
+table.alx th, table.alx td {
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  padding: 4px 6px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+table.alx th {
+  background: var(--surface-2, rgba(148,163,184,.08));
+  position: sticky; top: 0; z-index: 2;
+  font-weight: 700; text-align: center;
+  color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .3px;
+}
+table.alx .alx-name-h, table.alx .alx-cap-h { text-align: left; }
+table.alx .alx-name { position: sticky; left: 0; background: var(--bg); z-index: 1; min-width: 180px; }
+table.alx .alx-name b { font-size: 12.5px; }
+table.alx .alx-cap { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); min-width: 72px; }
+table.alx .alx-cell { padding: 2px 4px; }
+table.alx .alx-cell.has { background: rgba(96, 165, 250, .06); }
+table.alx .alx-cell.over { background: rgba(248, 113, 121, .10); }
+table.alx .alx-input {
+  width: 60px; text-align: right;
+  padding: 3px 6px;
+  border: 1px solid var(--line); border-radius: 4px;
+  background: transparent; color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+table.alx .alx-input:focus { outline: 1px solid var(--brand, #60a5fa); background: rgba(96, 165, 250, .06); }
+table.alx .alx-sum { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+table.alx .alx-sum.under { color: var(--muted); }
+table.alx .alx-sum.full  { color: rgba(74, 222, 128, 1); }
+table.alx .alx-sum.over  { color: rgba(248, 113, 121, 1); }
+table.alx .alx-proj-h-txt {
+  display: inline-block;
+  transform: rotate(-30deg); transform-origin: bottom left;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis;
+}
+table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min-width: 70px; }
+
+/* Risk register — dual-score chips (inh → res) ─────────────── */
+.ro-score { display: inline-flex; align-items: center; gap: 4px; }
+.ro-score-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.ro-score-chip .ro-score-lbl {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-right: 2px;
+  border-right: 1px solid var(--line);
+}
+.ro-score-chip.sev-low  { background: rgba(74, 222, 128, .14); border-color: rgba(74, 222, 128, .45); color: rgba(74, 222, 128, 1); }
+.ro-score-chip.sev-mid  { background: rgba(251, 191, 36, .14); border-color: rgba(251, 191, 36, .45); color: rgba(251, 191, 36, 1); }
+.ro-score-chip.sev-high { background: rgba(248, 113, 121, .18); border-color: rgba(248, 113, 121, .55); color: rgba(248, 113, 121, 1); }
+.ro-score-chip.res.unchanged { opacity: .60; }
+:root[data-theme="light"] .ro-score-chip.sev-low  { color: rgba(22, 101, 52, 1); }
+:root[data-theme="light"] .ro-score-chip.sev-mid  { color: rgba(146, 64, 14, 1); }
+:root[data-theme="light"] .ro-score-chip.sev-high { color: rgba(153, 27, 27, 1); }
+.ro-score .ro-arrow { color: var(--muted); font-size: 12px; }
+
 /* Risk/Opp import dialog ────────────────────────────────────── */
 .ri-mapping {
   display: flex; flex-direction: column; gap: 3px;
@@ -14316,8 +14390,11 @@ body.is-plndrag * { cursor: ns-resize !important; }
     const liveActions = (proj.actions || []).filter((a) => !a.archivedAt);
     const archivedCount = (proj.actions || []).filter((a) => a.archivedAt).length;
     state.ui = state.ui || {};
-    state.ui.board = state.ui.board || { sort: 'rank', dir: 'asc' };
+    state.ui.board = state.ui.board || { sort: 'rank', dir: 'asc', sort2: '', dir2: 'asc' };
+    // Retro-fit any older state that lacks the secondary keys.
     const boardSort = state.ui.board;
+    if (typeof boardSort.sort2 !== 'string') boardSort.sort2 = '';
+    if (boardSort.dir2 !== 'desc') boardSort.dir2 = 'asc';
     const sortOptions = [
       { id: 'rank',     label: 'Manual (drag order)' },
       { id: 'category', label: 'Category / component' },
@@ -14325,6 +14402,13 @@ body.is-plndrag * { cursor: ns-resize !important; }
       { id: 'due',      label: 'Due date' },
       { id: 'updated',  label: 'Last updated' },
       { id: 'priority', label: 'Priority level' },
+    ];
+    // Secondary sort options: same list, plus a "no secondary" entry.
+    // Rank isn't useful as a secondary (it's essentially the fallback),
+    // so it's dropped from this list.
+    const sort2Options = [
+      { id: '',         label: '(no secondary)' },
+      ...sortOptions.filter((o) => o.id !== 'rank'),
     ];
     head.innerHTML = `
       <div>
@@ -14336,6 +14420,9 @@ body.is-plndrag * { cursor: ns-resize !important; }
           <span class="muted" style="font-size:11px;">Sort</span>
           <select id="boardSortCol">${sortOptions.map((o) => `<option value="${o.id}" ${boardSort.sort === o.id ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('')}</select>
           <button type="button" class="ghost board-sort-dir" id="boardSortDir" title="${boardSort.dir === 'asc' ? 'Ascending — click to switch' : 'Descending — click to switch'}" ${boardSort.sort === 'rank' ? 'disabled' : ''}>${boardSort.dir === 'asc' ? '▲' : '▼'}</button>
+          <span class="muted" style="font-size:11px;">then</span>
+          <select id="boardSortCol2" title="Secondary sort — applies when the primary sort ties">${sort2Options.map((o) => `<option value="${o.id}" ${boardSort.sort2 === o.id ? 'selected' : ''}>${escapeHTML(o.label)}</option>`).join('')}</select>
+          <button type="button" class="ghost board-sort-dir" id="boardSortDir2" title="${boardSort.dir2 === 'asc' ? 'Ascending — click to switch' : 'Descending — click to switch'}" ${!boardSort.sort2 ? 'disabled' : ''}>${boardSort.dir2 === 'asc' ? '▲' : '▼'}</button>
         </label>
         <button class="ghost" id="btnOpenArchive" title="Open the Archive view">⌫ Archive${archivedCount ? ` <span class="badge-count">${archivedCount}</span>` : ''}</button>
         <button class="ghost" id="btnAddAction">+ Action</button>
@@ -14389,11 +14476,29 @@ body.is-plndrag * { cursor: ns-resize !important; }
         default:         return a.priority || 0;
       }
     };
+    // Keyer for the secondary sort — inline sibling of cardSortKey so
+    // both can share the switch without a helper.
+    const cardSortKey2 = (a) => {
+      switch (boardSort.sort2) {
+        case 'category': return (findComponent(proj, a.component)?.name || '￿').toLowerCase();
+        case 'owner':    return (personName(a.owner) || '￿').toLowerCase();
+        case 'due':      return a.due || '￿';
+        case 'updated':  return a.updatedAt || a.createdAt || '';
+        case 'priority': return PRIORITY_LEVELS.findIndex((p) => p.id === (a.priorityLevel || 'med'));
+        default:         return 0;
+      }
+    };
     const cardCmp = (a, b) => {
       const ka = cardSortKey(a), kb = cardSortKey(b);
       if (ka < kb) return boardSort.dir === 'desc' ? 1 : -1;
       if (ka > kb) return boardSort.dir === 'desc' ? -1 : 1;
-      // Stable tiebreaker: manual rank, then title.
+      // Secondary sort on tie.
+      if (boardSort.sort2) {
+        const ka2 = cardSortKey2(a), kb2 = cardSortKey2(b);
+        if (ka2 < kb2) return boardSort.dir2 === 'desc' ? 1 : -1;
+        if (ka2 > kb2) return boardSort.dir2 === 'desc' ? -1 : 1;
+      }
+      // Final stable tiebreaker: manual rank, then title.
       const ra = a.priority || 0, rb = b.priority || 0;
       if (ra !== rb) return ra - rb;
       return (a.title || '').localeCompare(b.title || '');
@@ -14438,7 +14543,7 @@ body.is-plndrag * { cursor: ns-resize !important; }
       state.currentView = 'archive';
       saveState(); render();
     });
-    // Board sort selector — applies to every column.
+    // Board sort selectors — primary and optional secondary.
     $('#boardSortCol')?.addEventListener('change', (e) => {
       state.ui.board.sort = e.target.value;
       if (state.ui.board.sort === 'rank') state.ui.board.dir = 'asc';
@@ -14447,6 +14552,16 @@ body.is-plndrag * { cursor: ns-resize !important; }
     $('#boardSortDir')?.addEventListener('click', () => {
       if (state.ui.board.sort === 'rank') return;
       state.ui.board.dir = state.ui.board.dir === 'asc' ? 'desc' : 'asc';
+      saveState(); render();
+    });
+    $('#boardSortCol2')?.addEventListener('change', (e) => {
+      state.ui.board.sort2 = e.target.value;
+      if (!state.ui.board.sort2) state.ui.board.dir2 = 'asc';
+      saveState(); render();
+    });
+    $('#boardSortDir2')?.addEventListener('click', () => {
+      if (!state.ui.board.sort2) return;
+      state.ui.board.dir2 = state.ui.board.dir2 === 'asc' ? 'desc' : 'asc';
       saveState(); render();
     });
 
@@ -22598,6 +22713,56 @@ body.is-plndrag * { cursor: ns-resize !important; }
     }
   }
 
+  // R&O export — same column set the importer accepts, so a round-trip
+  // (export → open in Excel → tweak → re-import) is idempotent. Uses
+  // the shared _buildXLSX writer that Cockpit already ships for the
+  // project export.
+  function exportRisksXLSX() {
+    const proj = curProject();
+    if (curProjectIsMerged()) {
+      alert('Select a real project first — the portfolio view has no single register.');
+      return;
+    }
+    const risks = (proj?.risks || []).slice();
+    if (!risks.length) {
+      alert('No risks or opportunities to export in this project.');
+      return;
+    }
+    const headers = ['Identifier','Kind','Title','Description','Category','Inherent P','Inherent I','Residual P','Residual I','Mitigation','Owner','Linked action','Created','Updated'];
+    const rows = risks.map((r) => {
+      const inh = getInherent(r);
+      const res = getResidual(r);
+      const linked = r.actionId
+        ? (state.projects.flatMap((p) => p.actions || []).find((a) => a.id === r.actionId)?.title || '')
+        : '';
+      return [
+        r.identifier || '',
+        r.kind || 'risk',
+        r.title || '',
+        r.description || '',
+        r.category || '',
+        inh.probability, inh.impact,
+        res.probability, res.impact,
+        r.mitigation || '',
+        r.owner ? personName(r.owner) : '',
+        linked,
+        r.createdAt || '',
+        r.updatedAt || '',
+      ];
+    });
+    const sheetName = 'Risks_Opportunities';
+    const bytes = _buildXLSX([{ name: sheetName, headers, rows }]);
+    const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const label = (proj?.name || 'project').replace(/\s+/g, '_');
+    a.href = url;
+    a.download = `${label}-risks-${todayISO()}.xlsx`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast(`Exported ${risks.length} risk${risks.length === 1 ? '' : 's'} & opportunit${risks.length === 1 ? 'y' : 'ies'} → ${a.download}`);
+  }
+
   // Helpers — work for both new schema (inherent/residual) and legacy (probability/impact)
   function getInherent(r) {
     if (r.inherent && typeof r.inherent.probability === 'number') return r.inherent;
@@ -22851,11 +23016,13 @@ body.is-plndrag * { cursor: ns-resize !important; }
           <button class="ghost" id="btnAddRisk">+ Risk</button>
           <button class="ghost" id="btnAddOpp">+ Opportunity</button>
           <button class="ghost" id="btnImportRisks" title="Import risks &amp; opportunities from an Excel (.xlsx) or CSV file">⤓ Import…</button>
+          <button class="ghost" id="btnExportRisks" title="Export this project's risks &amp; opportunities as an Excel file">⤒ Export</button>
         </div>
       </div>
       <div id="roBody"></div>`;
     root.appendChild(view);
     view.querySelector('#btnImportRisks')?.addEventListener('click', () => openRiskImportDialog());
+    view.querySelector('#btnExportRisks')?.addEventListener('click', () => exportRisksXLSX());
 
     function draw() {
       const body = $('#roBody');
@@ -22913,14 +23080,20 @@ body.is-plndrag * { cursor: ns-resize !important; }
           // needs a capture plan). Quiet "0 risk" rows don't get noise.
           mitChip = `<span class="ro-mit-add clickable" data-link-add="${r.id}" title="Link a ${kind === 'opportunity' ? 'capture' : 'mitigation'} action — opens the editor">+ link action</span>`;
         }
+        // Severity buckets for the residual chip so the eye can spot
+        // "still hot after mitigation" at a glance. Same thresholds as
+        // the inherent bucket, applied to residual.
+        const resSevCls = resScore >= 12 ? 'high' : resScore >= 6 ? 'mid' : 'low';
         return `
           <div class="row ro-row kind-${kind === 'opportunity' ? 'opportunity' : 'risk'} sev-${sevCls}" data-risk-id="${r.id}">
             ${ROW_GRIP_HTML}
             <span class="ro-icon" title="${kind}">${icon}</span>
             ${r.identifier ? `<span class="ro-ident" title="Identifier">${escapeHTML(r.identifier)}</span>` : ''}
             <span class="ro-title">${escapeHTML(r.title)}</span>
-            <span class="ro-score">
-              ${moved ? `<span class="ro-pre">${inhScore}</span><span class="ro-arrow">→</span><b>${resScore}</b>` : `<b>${inhScore}</b>`}
+            <span class="ro-score" title="Inherent (raw) vs residual (post-${kind === 'opportunity' ? 'capture' : 'mitigation'}). Inherent P${inh.probability}×I${inh.impact}=${inhScore} · Residual P${res.probability}×I${res.impact}=${resScore}">
+              <span class="ro-score-chip inh sev-${sevCls}" title="Inherent (raw) — P${inh.probability}×I${inh.impact}"><span class="ro-score-lbl">Inh</span>${inhScore}</span>
+              <span class="ro-arrow">→</span>
+              <span class="ro-score-chip res sev-${resSevCls}${moved ? '' : ' unchanged'}" title="Residual — P${res.probability}×I${res.impact}${moved ? '' : ' (unchanged from inherent)'}"><span class="ro-score-lbl">Res</span>${resScore}</span>
             </span>
             <span class="row-meta">
               <span class="ro-resp" title="${responseLbl}">${r.mitigation ? renderTextWithChips(r.mitigation) : '—'}</span>
@@ -25798,6 +25971,78 @@ body.is-plndrag * { cursor: ns-resize !important; }
       </div>`;
   }
 
+  // Allocation matrix — people (rows) × active projects (columns),
+  // each cell the person's commitment% on that project. Cells are
+  // directly editable; row totals warn when the sum > capacity.
+  function renderAllocationMatrixHTML(peopleList) {
+    const projs = (state.projects || []).filter((p) => !p.archived);
+    if (!projs.length || !peopleList.length) return '';
+    const cellClass = (v, cap) => v > cap ? 'over' : v > 0 ? 'has' : 'zero';
+    const header = `
+      <tr>
+        <th class="alx-name-h">Person</th>
+        <th class="alx-cap-h" title="Total FTE the person offers, in %">Capacity</th>
+        ${projs.map((p) => `<th class="alx-proj-h" title="${escapeHTML(p.name)}"><span class="alx-proj-h-txt">${escapeHTML(p.name)}</span></th>`).join('')}
+        <th class="alx-sum-h" title="Sum of this person's project commitments — should be ≤ capacity">Assigned</th>
+      </tr>`;
+    const rows = peopleList.map((p) => {
+      const cap = Number(p.capacity) || 100;
+      const asgs = Array.isArray(p.assignments) ? p.assignments : [];
+      const commitmentFor = (projId) => {
+        const a = asgs.find((x) => x && x.projectId === projId);
+        return a ? (Number(a.commitment) || 0) : 0;
+      };
+      const cells = projs.map((pr) => {
+        const v = commitmentFor(pr.id);
+        return `<td class="alx-cell ${cellClass(v, cap)}"><input type="number" min="0" max="200" step="5" class="alx-input" data-person-id="${escapeHTML(p.id)}" data-project-id="${escapeHTML(pr.id)}" value="${v}" title="${escapeHTML(p.name)} on ${escapeHTML(pr.name)}" /></td>`;
+      }).join('');
+      const sum = projs.reduce((n, pr) => n + commitmentFor(pr.id), 0);
+      const sumCls = sum > cap ? 'over' : sum === cap ? 'full' : 'under';
+      return `
+        <tr data-person-id="${escapeHTML(p.id)}">
+          <td class="alx-name"><span class="avatar xs">${initials(p.name)}</span> <b>${escapeHTML(p.name)}</b><div class="muted" style="font-size:10.5px;">${escapeHTML(p.role || '')}</div></td>
+          <td class="alx-cap">${cap}%</td>
+          ${cells}
+          <td class="alx-sum ${sumCls}" title="Sum vs capacity ${cap}%">${sum}%</td>
+        </tr>`;
+    }).join('');
+    return `
+      <div class="panel">
+        <div class="panel-title panel-title-stack">
+          <span>Allocation matrix <span class="panel-sub">— who participates in each project, and by how much (% FTE)</span></span>
+          <span class="panel-desc">Rows are people, columns are active projects. Enter a % to assign; leave 0 (or blank) to remove. The <b>Assigned</b> column is the sum — orange when it exceeds capacity, green when it matches.</span>
+        </div>
+        <div class="alx-scroll">
+          <table class="alx">
+            <thead>${header}</thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>`;
+  }
+  function wireAllocationMatrix(root) {
+    root.querySelectorAll('.alx-input').forEach((inp) => {
+      inp.addEventListener('change', () => {
+        const personId = inp.dataset.personId;
+        const projectId = inp.dataset.projectId;
+        const p = (state.people || []).find((x) => x.id === personId);
+        if (!p) return;
+        p.assignments = Array.isArray(p.assignments) ? p.assignments : [];
+        const raw = Math.max(0, Math.min(200, Math.round(Number(inp.value) || 0)));
+        const idx = p.assignments.findIndex((a) => a && a.projectId === projectId);
+        if (raw <= 0) {
+          if (idx >= 0) p.assignments.splice(idx, 1);
+        } else if (idx >= 0) {
+          p.assignments[idx].commitment = raw;
+        } else {
+          p.assignments.push({ projectId, commitment: raw });
+        }
+        commit('Set project assignment');
+        render();
+      });
+    });
+  }
+
   function renderPeople(root) {
     const view = document.createElement('div');
     view.className = 'view';
@@ -25887,6 +26132,7 @@ body.is-plndrag * { cursor: ns-resize !important; }
           }).join('')}
         </div>
       </div>
+      ${renderAllocationMatrixHTML(visible)}
       ${externals.length ? `
       <div class="panel">
         <div class="panel-title">
@@ -25922,6 +26168,7 @@ body.is-plndrag * { cursor: ns-resize !important; }
       saveState();
       render();
     });
+    wireAllocationMatrix(view);
     // External-stakeholder rows: click to filter the Register to that
     // stakeholder; right-click to delete.
     $$('.ext-row', view).forEach((row) => {
@@ -32014,7 +32261,12 @@ body.is-plndrag * { cursor: ns-resize !important; }
    *     stored; on display, renderTextWithChips(text) swaps it for
    *     the rich chip.
    */
-  const _GMAIL_URL_RE = /https?:\/\/mail\.google\.com\/mail\/u\/\d+\/(?:#[^\s"'<>]+)?/i;
+  // Match a full Gmail URL — the base then anything up to whitespace
+  // or a quote. Wider than the old form so we capture query strings
+  // (?tab=rm, ?ogbl, …) that sit between `/u/N/` and the `#thread`
+  // fragment: without them the click opens Gmail's inbox instead of
+  // the specific thread.
+  const _GMAIL_URL_RE = /https?:\/\/mail\.google\.com\/mail\/u\/\d+\/[^\s"'<>]*/i;
   const _GMAIL_TOKEN_RE = /\[gmail:s\|([^|\]]*)\|([^\]]+)\]/g;
   function _isGmailUrl(url) { return _GMAIL_URL_RE.test(url); }
   function _parseGmailUrl(url) {
@@ -32231,16 +32483,11 @@ body.is-plndrag * { cursor: ns-resize !important; }
       }
     });
   }, true);
-  // Chip click behavior: single click is a no-op (so a chip inside
-  // editable text doesn't yank the user off-page when they meant to
-  // place the caret); double-click on the envelope icon (or the ↗)
-  // opens the Gmail thread in a new tab. Right-click still exposes
-  // the browser's "Copy link" via the underlying <a href>.
-  document.addEventListener('click', (e) => {
-    const chip = e.target.closest?.('.gm-chip');
-    if (!chip) return;
-    e.preventDefault();
-  }, true);
+  // (The single-click open handler for .gm-chip is registered next to
+  // _gmailChipHTML above — it force-opens the URL via window.open.
+  // We keep dblclick as a redundant path so the old muscle memory
+  // still works and browsers that swallow the first click still open
+  // the thread on the second.)
   document.addEventListener('dblclick', (e) => {
     const chip = e.target.closest?.('.gm-chip');
     if (!chip) return;

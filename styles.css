@@ -11043,6 +11043,80 @@ body.is-plndrag * { cursor: ns-resize !important; }
 
 .tt-dialog { width: min(720px, 100%); }
 
+/* People × projects allocation matrix ───────────────────────── */
+.alx-scroll { overflow: auto; max-height: 560px; border: 1px solid var(--line); border-radius: 6px; }
+table.alx {
+  border-collapse: separate; border-spacing: 0;
+  font-size: 12px; width: 100%;
+}
+table.alx th, table.alx td {
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  padding: 4px 6px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+table.alx th {
+  background: var(--surface-2, rgba(148,163,184,.08));
+  position: sticky; top: 0; z-index: 2;
+  font-weight: 700; text-align: center;
+  color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .3px;
+}
+table.alx .alx-name-h, table.alx .alx-cap-h { text-align: left; }
+table.alx .alx-name { position: sticky; left: 0; background: var(--bg); z-index: 1; min-width: 180px; }
+table.alx .alx-name b { font-size: 12.5px; }
+table.alx .alx-cap { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); min-width: 72px; }
+table.alx .alx-cell { padding: 2px 4px; }
+table.alx .alx-cell.has { background: rgba(96, 165, 250, .06); }
+table.alx .alx-cell.over { background: rgba(248, 113, 121, .10); }
+table.alx .alx-input {
+  width: 60px; text-align: right;
+  padding: 3px 6px;
+  border: 1px solid var(--line); border-radius: 4px;
+  background: transparent; color: var(--fg);
+  font-variant-numeric: tabular-nums;
+}
+table.alx .alx-input:focus { outline: 1px solid var(--brand, #60a5fa); background: rgba(96, 165, 250, .06); }
+table.alx .alx-sum { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+table.alx .alx-sum.under { color: var(--muted); }
+table.alx .alx-sum.full  { color: rgba(74, 222, 128, 1); }
+table.alx .alx-sum.over  { color: rgba(248, 113, 121, 1); }
+table.alx .alx-proj-h-txt {
+  display: inline-block;
+  transform: rotate(-30deg); transform-origin: bottom left;
+  max-width: 140px; overflow: hidden; text-overflow: ellipsis;
+}
+table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min-width: 70px; }
+
+/* Risk register — dual-score chips (inh → res) ─────────────── */
+.ro-score { display: inline-flex; align-items: center; gap: 4px; }
+.ro-score-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+.ro-score-chip .ro-score-lbl {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding-right: 2px;
+  border-right: 1px solid var(--line);
+}
+.ro-score-chip.sev-low  { background: rgba(74, 222, 128, .14); border-color: rgba(74, 222, 128, .45); color: rgba(74, 222, 128, 1); }
+.ro-score-chip.sev-mid  { background: rgba(251, 191, 36, .14); border-color: rgba(251, 191, 36, .45); color: rgba(251, 191, 36, 1); }
+.ro-score-chip.sev-high { background: rgba(248, 113, 121, .18); border-color: rgba(248, 113, 121, .55); color: rgba(248, 113, 121, 1); }
+.ro-score-chip.res.unchanged { opacity: .60; }
+:root[data-theme="light"] .ro-score-chip.sev-low  { color: rgba(22, 101, 52, 1); }
+:root[data-theme="light"] .ro-score-chip.sev-mid  { color: rgba(146, 64, 14, 1); }
+:root[data-theme="light"] .ro-score-chip.sev-high { color: rgba(153, 27, 27, 1); }
+.ro-score .ro-arrow { color: var(--muted); font-size: 12px; }
+
 /* Risk/Opp import dialog ────────────────────────────────────── */
 .ri-mapping {
   display: flex; flex-direction: column; gap: 3px;
