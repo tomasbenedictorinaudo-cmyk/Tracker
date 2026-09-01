@@ -11253,6 +11253,55 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 .acc-footer { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 .acc-hint { font-size: 11px; }
 
+/* Rich-text pasted images + resize handles ──────────────────── */
+.rt-img-wrap {
+  display: inline-block;
+  position: relative;
+  vertical-align: bottom;
+  max-width: 100%;
+  line-height: 0;
+  border-radius: 4px;
+}
+.rt-img-wrap .rt-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 3px;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.rt-img-wrap.is-selected {
+  outline: 2px solid var(--brand, #60a5fa);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 2px rgba(96, 165, 250, .18);
+}
+.rt-img-handle {
+  position: absolute;
+  right: -6px; bottom: -6px;
+  width: 14px; height: 14px;
+  background: var(--brand, #60a5fa);
+  border: 2px solid var(--bg, #fff);
+  border-radius: 50%;
+  cursor: nwse-resize;
+  box-shadow: 0 1px 3px rgba(0,0,0,.35);
+}
+.rt-img-delete {
+  position: absolute;
+  top: -8px; right: -8px;
+  width: 20px; height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--bg, #fff);
+  background: rgba(248, 113, 121, .95);
+  color: #fff;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 3px rgba(0,0,0,.35);
+}
+.rt-img-delete:hover { background: rgba(220, 38, 38, 1); }
+
 /* Activity editor — section titles + tasks ──────────────────── */
 .ac-section-title {
   font-size: 11px;

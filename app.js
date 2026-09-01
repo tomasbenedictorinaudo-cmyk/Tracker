@@ -21190,6 +21190,19 @@
           out += _gmailTokenText(subj, url);
           continue;
         }
+        // Pasted images — serialized as [img:<id>|<widthPx>] tokens.
+        // The wrapper `.rt-img-wrap` carries the user-chosen width;
+        // fall back to the image's own width if there's no wrapper.
+        if (n.classList?.contains('rt-img-wrap') || n.classList?.contains('rt-img')) {
+          const img = n.classList?.contains('rt-img') ? n : n.querySelector?.('.rt-img');
+          const id = img?.getAttribute('data-img-id');
+          if (id) {
+            const wRaw = n.style.width || img?.style.width || '';
+            const w = Math.round(parseFloat(wRaw) || img?.getBoundingClientRect().width || 0);
+            out += `[img:${id}|${w || 0}]`;
+            continue;
+          }
+        }
         const tag = n.tagName;
         if (tag === 'BR') { out += '\n'; continue; }
         if (tag === 'DIV' || tag === 'P') {
@@ -21223,23 +21236,46 @@
   function _gmailTokenText(subject, url) {
     return `[gmail:s|${encodeURIComponent(subject || '')}|${url}]`;
   }
-  // Public: escape plain text and render Gmail tokens as chips.
-  // Also newline → <br>. Safe to embed anywhere `escapeHTML(text)` was used.
+  // Regex for pasted-image tokens `[img:<id>|<widthPx>]`.
+  const _IMG_TOKEN_RE = /\[img:([A-Za-z0-9_-]+)\|(\d+)\]/g;
+  function _imgTokenHTML(id, widthPx) {
+    const src = (state.mediaBlobs || {})[id] || '';
+    if (!src) return '';
+    const w = Math.max(20, Math.min(2000, Number(widthPx) || 0));
+    const wAttr = w ? `style="width:${w}px;"` : '';
+    // Wrapped in a `.rt-img-wrap` span so the resize handle has a
+    // stable positioning parent — the image itself stays a plain
+    // <img> that browsers know how to render everywhere.
+    return `<span class="rt-img-wrap" contenteditable="false" ${wAttr}><img class="rt-img" data-img-id="${escapeHTML(id)}" src="${src}" alt="pasted image" draggable="false" /></span>`;
+  }
+  // Public: escape plain text and render Gmail + image tokens as
+  // chips. Newlines → <br>. Safe to embed anywhere `escapeHTML(text)`
+  // was used.
   function renderTextWithChips(text) {
     if (text == null) return '';
     const src = String(text);
+    // Merge the two token regexes into one pass so tokens can appear
+    // in any order. Match either gmail or img; consume text between.
+    const combined = new RegExp(_GMAIL_TOKEN_RE.source + '|' + _IMG_TOKEN_RE.source, 'gi');
     let out = '';
     let last = 0;
-    _GMAIL_TOKEN_RE.lastIndex = 0;
     let m;
-    while ((m = _GMAIL_TOKEN_RE.exec(src)) !== null) {
+    while ((m = combined.exec(src)) !== null) {
       const raw = m[0];
-      const subject = decodeURIComponent(m[1] || '');
-      const url = m[2];
       out += escapeHTML(src.slice(last, m.index)).replace(/\n/g, '<br>');
-      if (_isGmailUrl(url)) {
-        const parsed = _parseGmailUrl(url);
-        out += _gmailChipHTML({ url, subject, threadId: parsed.threadId });
+      if (m[1] !== undefined && m[2] !== undefined && raw.startsWith('[gmail:')) {
+        // Gmail token — m[1] = encoded subject, m[2] = url.
+        const subject = decodeURIComponent(m[1] || '');
+        const url = m[2];
+        if (_isGmailUrl(url)) {
+          const parsed = _parseGmailUrl(url);
+          out += _gmailChipHTML({ url, subject, threadId: parsed.threadId });
+        } else {
+          out += escapeHTML(raw);
+        }
+      } else if (m[3] !== undefined && m[4] !== undefined) {
+        // Image token — m[3] = id, m[4] = width.
+        out += _imgTokenHTML(m[3], m[4]);
       } else {
         out += escapeHTML(raw);
       }
@@ -21292,6 +21328,159 @@
     });
   }
   // Global paste handler — runs before per-field handlers via capture.
+  // Rich-text image paste — inserts pasted images into any
+  // contenteditable as a wrapped, resizable <img>. Runs BEFORE the
+  // Gmail paste handler; if the clipboard has no image data we bail
+  // and let the Gmail handler (or the browser) take over.
+  function _newImageId() {
+    return 'im_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+  }
+  function _storeImageBlob(dataURL) {
+    state.mediaBlobs = state.mediaBlobs || {};
+    const id = _newImageId();
+    state.mediaBlobs[id] = dataURL;
+    return id;
+  }
+  function _insertHTMLAtCaret(host, html) {
+    host.focus();
+    // execCommand insertHTML is deprecated but still by far the most
+    // reliable way to insert HTML at the current selection inside a
+    // contenteditable without losing the caret.
+    if (typeof document.execCommand === 'function') {
+      document.execCommand('insertHTML', false, html);
+    } else {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        const tmp = document.createElement('template');
+        tmp.innerHTML = html;
+        range.insertNode(tmp.content);
+      }
+    }
+    host.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  document.addEventListener('paste', (e) => {
+    const target = e.target;
+    if (!target) return;
+    const host = target.closest?.('[contenteditable="true"]');
+    if (!host) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    // Find the first image item on the clipboard. Screenshots on macOS
+    // usually arrive as image/png; some apps offer image/jpeg. Skip if
+    // there is no image (the Gmail/URL handler will run next).
+    let imgItem = null;
+    for (const it of items) {
+      if (it.kind === 'file' && (it.type || '').startsWith('image/')) { imgItem = it; break; }
+    }
+    if (!imgItem) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const blob = imgItem.getAsFile();
+    if (!blob) return;
+    if (blob.size > 8 * 1024 * 1024) {
+      alert(`Pasted image is ${(blob.size / 1024 / 1024).toFixed(1)} MB — keep pasted images under 8 MB (they are embedded in the saved state).`);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataURL = String(reader.result || '');
+      if (!dataURL.startsWith('data:image/')) return;
+      const id = _storeImageBlob(dataURL);
+      // Default width: half the host's content width, clamped 120..640.
+      const hostW = host.clientWidth || 400;
+      const defaultW = Math.max(120, Math.min(640, Math.round(hostW * 0.5)));
+      const html = _imgTokenHTML(id, defaultW) + '&nbsp;';
+      _insertHTMLAtCaret(host, html);
+      // Commit the mediaBlobs change so the image survives a reload.
+      saveState();
+    };
+    reader.readAsDataURL(blob);
+  }, true);
+
+  // Delegated resize / delete controls for pasted images. When the
+  // user clicks an image inside a contenteditable, we select the
+  // wrapper (giving it a highlight ring) and mount a drag handle on
+  // its bottom-right corner. Dragging the handle resizes the wrapper
+  // (width only — height stays proportional via the <img>'s natural
+  // aspect ratio). Clicking outside deselects.
+  let _rtImgSelected = null; // { wrap, host }
+  function _clearRtImgSelection() {
+    if (_rtImgSelected) {
+      _rtImgSelected.wrap.classList.remove('is-selected');
+      _rtImgSelected = null;
+    }
+    document.querySelectorAll('.rt-img-handle').forEach((h) => h.remove());
+    document.querySelectorAll('.rt-img-delete').forEach((h) => h.remove());
+  }
+  function _mountRtImgControls(wrap, host) {
+    _clearRtImgSelection();
+    wrap.classList.add('is-selected');
+    _rtImgSelected = { wrap, host };
+    // Delete "×" — top-right.
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'rt-img-delete';
+    del.title = 'Remove image (does not delete the file — you can undo with Cmd/Ctrl+Z inside the field)';
+    del.textContent = '×';
+    del.contentEditable = 'false';
+    del.addEventListener('mousedown', (e) => { e.preventDefault(); e.stopPropagation(); });
+    del.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      wrap.remove();
+      _clearRtImgSelection();
+      host.dispatchEvent(new Event('input', { bubbles: true }));
+      host.focus();
+    });
+    wrap.appendChild(del);
+    // Resize grip — bottom-right.
+    const grip = document.createElement('span');
+    grip.className = 'rt-img-handle';
+    grip.contentEditable = 'false';
+    grip.title = 'Drag to resize';
+    wrap.appendChild(grip);
+    // Drag to resize the wrapper's width. Height follows the image's
+    // natural aspect ratio automatically because the <img> is width-
+    // driven with height:auto.
+    grip.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const startX = e.clientX;
+      const startW = wrap.getBoundingClientRect().width;
+      const hostRect = host.getBoundingClientRect();
+      const move = (ev) => {
+        const dx = ev.clientX - startX;
+        // Clamp: at least 40px, at most the host's content width.
+        const next = Math.max(40, Math.min(hostRect.width, Math.round(startW + dx)));
+        wrap.style.width = next + 'px';
+      };
+      const up = () => {
+        window.removeEventListener('mousemove', move);
+        window.removeEventListener('mouseup', up);
+        host.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+      window.addEventListener('mousemove', move);
+      window.addEventListener('mouseup', up);
+    });
+  }
+  document.addEventListener('click', (e) => {
+    const wrap = e.target.closest?.('.rt-img-wrap');
+    const host = e.target.closest?.('[contenteditable="true"]');
+    if (wrap && host) {
+      // Don't re-mount if this same wrap is already selected.
+      if (_rtImgSelected?.wrap !== wrap) {
+        _mountRtImgControls(wrap, host);
+      }
+      return;
+    }
+    // Click outside a selected image — clear selection.
+    if (_rtImgSelected && !e.target.closest('.rt-img-handle') && !e.target.closest('.rt-img-delete')) {
+      _clearRtImgSelection();
+    }
+  }, true);
+
   // Detects a bare Gmail URL in the clipboard's text/plain payload and
   // handles it. If the payload isn't a Gmail URL, we do nothing (the
   // browser's default paste still runs).
@@ -22775,6 +22964,11 @@
     s.pulseCycles = s.pulseCycles.filter((d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d));
     s.pulseCycles = [...new Set(s.pulseCycles)].sort();
     if (!s.pulseCycles.length) s.pulseCycles.push(todayISO());
+    // Rich-text media store — paste-image support. Maps a short id to
+    // a base64 data URL. Rich-text fields carry `[img:<id>|<widthPx>]`
+    // tokens that resolve to <img> elements at render time. Kept out
+    // of the text stream so notes/comments stay lean.
+    if (!s.mediaBlobs || typeof s.mediaBlobs !== 'object') s.mediaBlobs = {};
     // Team topics — team-wide "things to raise next time we see the
     // team" list, with optional attached emails / files / links.
     // Distinct from p.talkingPoints[] which is one-on-one.
