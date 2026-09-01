@@ -15812,7 +15812,7 @@
               <tr class="act-row" data-act-id="${escapeHTML(a.id)}">
                 <td>
                   <div class="act-row-title">${escapeHTML(a.title)}</div>
-                  <div class="act-row-sub">${owners !== '—' ? '→ ' + escapeHTML(owners) : '<span class="muted">unassigned</span>'}${(a.milestones || []).length ? ' · ' + (a.milestones || []).length + '▲' : ''}${(a.deliverables || []).length ? ' · ' + (a.deliverables || []).length + '◆' : ''}${linkedActionCount ? ' · ' + linkedActionCount + ' action' + (linkedActionCount === 1 ? '' : 's') : ''}${commentCount ? ' · 💬 ' + commentCount : ''}${a.healthNote ? '<div class="act-row-blocked-note muted" style="font-size:10.5px; font-style:italic;">↳ ' + escapeHTML(a.healthNote) + '</div>' : ''}</div>
+                  <div class="act-row-sub">${owners !== '—' ? '→ ' + escapeHTML(owners) : '<span class="muted">unassigned</span>'}${(a.tasks || []).length ? ' · ☑ ' + (a.tasks || []).filter((t) => t.done).length + '/' + (a.tasks || []).length : ''}${(a.milestones || []).length ? ' · ' + (a.milestones || []).length + '▲' : ''}${(a.deliverables || []).length ? ' · ' + (a.deliverables || []).length + '◆' : ''}${linkedActionCount ? ' · ' + linkedActionCount + ' action' + (linkedActionCount === 1 ? '' : 's') : ''}${commentCount ? ' · 💬 ' + commentCount : ''}${a.healthNote ? '<div class="act-row-blocked-note muted" style="font-size:10.5px; font-style:italic;">↳ ' + escapeHTML(a.healthNote) + '</div>' : ''}</div>
                 </td>
                 <td class="act-health-cell">${activityHealthChipHTML(a, { compact: true })}</td>
                 <td>${escapeHTML(actorLabel(a.originator))}<div class="muted" style="font-size:10.5px;">${escapeHTML(a.originatedAt || '')}</div></td>
@@ -15894,9 +15894,12 @@
   function openActivityEditor(id) {
     let a = (state.activities || []).find((x) => x.id === id) || null;
     if (!a) {
-      a = { id: uid('act'), title: 'New activity', description: '', originator: null,
+      a = { id: uid('act'), title: 'New activity',
+        context: '', objective: '', inputs: '', notes: '', tasks: [],
+        description: '', originator: null,
         originatedAt: todayISO(), projectId: (curProject()?.id || null), stakeholderIds: [],
         totalHours: 0, status: 'requested', allocations: [], milestones: [], deliverables: [],
+        comments: [], health: null, healthAt: null, healthNote: '',
         createdAt: todayISO(), updatedAt: todayISO() };
       state.activities = state.activities || [];
       state.activities.push(a);
@@ -15914,12 +15917,74 @@
       persons.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === a.originator ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('') +
       (externals.length ? `<option value="" disabled>── External ──</option>` +
         externals.map((s) => `<option value="${escapeHTML(s.id)}" ${s.id === a.originator ? 'selected' : ''}>${escapeHTML(s.name)}</option>`).join('') : '');
+    // Request definition — the 8 canonical fields (Title, Context,
+    // Objective, Inputs, Tasks, Outputs, Deadlines, Stakeholders,
+    // Notes). Grouped in a section so they read as one form.
+    // Planning/execution fields (project, status, allocations, load,
+    // health, comments, linked actions) live in a second section.
     return `
-      <div class="field"><label>Title</label><input id="acTitle" type="text" value="${escapeHTML(a.title)}" /></div>
+      <div class="ac-section-title">Request definition</div>
+      <div class="field"><label>1 · Title</label><input id="acTitle" type="text" value="${escapeHTML(a.title)}" placeholder="Short, verb-first (e.g. Qualify secondary star-tracker vendor)" /></div>
       <div class="field-row" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
         <div class="field"><label>Originator</label><select id="acOrig">${originatorOpts}</select></div>
         <div class="field"><label>Received on</label><input id="acReceived" type="date" value="${escapeHTML(a.originatedAt || '')}" /></div>
       </div>
+      <div class="field">
+        <label>2 · Context <span class="muted">— what triggered this, background, why it matters. Gmail links welcome.</span></label>
+        ${ceComposeHTML({ id: 'acContext', value: a.context, placeholder: 'What is this about? Background, trigger, why it matters', style: 'min-height:80px;' })}
+      </div>
+      <div class="field">
+        <label>3 · Objective <span class="muted">— the outcome that means this activity is a success</span></label>
+        ${ceComposeHTML({ id: 'acObjective', value: a.objective, placeholder: 'What does success look like? A single, measurable outcome is best.', style: 'min-height:60px;' })}
+      </div>
+      <div class="field">
+        <label>4 · Inputs <span class="muted">— what's needed before work starts (data, decisions, artefacts, upstream deliverables)</span></label>
+        ${ceComposeHTML({ id: 'acInputs', value: a.inputs, placeholder: 'What has to be available? Any assumption to flag?', style: 'min-height:60px;' })}
+      </div>
+      <div class="field">
+        <label>5 · Tasks <span class="muted">— the checklist of work to do. Tick as they are completed.</span></label>
+        <div id="acTasks" class="ac-task-list"></div>
+        <div class="ac-task-add">
+          <input id="acTaskNew" type="text" placeholder="Add a task and press Enter…" />
+          <button type="button" class="ghost" id="acTaskAdd">+ Add</button>
+        </div>
+      </div>
+      <div class="ac-split">
+        <div class="field ac-mile">
+          <label>6 · Outputs ◆ <span class="muted">— what gets produced</span></label>
+          <div id="acDeliverables" class="ac-mile-list"></div>
+          <div class="ac-mile-add">
+            <input id="acDelName" type="text" placeholder="Name…" />
+            <input id="acDelDate" type="date" />
+            <button type="button" class="ghost" id="acDelAdd">+ Add</button>
+          </div>
+        </div>
+        <div class="field ac-mile">
+          <label>7 · Deadlines ▲ <span class="muted">— dates that must be met</span></label>
+          <div id="acMilestones" class="ac-mile-list"></div>
+          <div class="ac-mile-add">
+            <input id="acMileName" type="text" placeholder="Description…" />
+            <input id="acMileDate" type="date" />
+            <button type="button" class="ghost" id="acMileAdd">+ Add</button>
+          </div>
+        </div>
+      </div>
+      <div class="field">
+        <label>8 · Stakeholders <span class="muted">— people to keep in the loop</span></label>
+        <div id="acStkChips" class="ac-stk-chips"></div>
+        <select id="acStkAdd">
+          <option value="">+ Add stakeholder…</option>
+          ${persons.map((p) => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}
+          ${externals.length ? `<option value="" disabled>── External ──</option>` +
+            externals.map((s) => `<option value="${escapeHTML(s.id)}">${escapeHTML(s.name)}</option>`).join('') : ''}
+        </select>
+      </div>
+      <div class="field">
+        <label>9 · Notes <span class="muted">— free-form scratchpad</span></label>
+        ${ceComposeHTML({ id: 'acNotes', value: a.notes, placeholder: 'Working notes — anything not covered above', style: 'min-height:60px;' })}
+      </div>
+
+      <div class="ac-section-title" style="margin-top:18px;">Planning &amp; execution</div>
       <div class="field-row" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
         <div class="field"><label>Project</label><select id="acProj"><option value="">— None</option>${projects.map((p) => `<option value="${escapeHTML(p.id)}" ${p.id === a.projectId ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('')}</select></div>
         <div class="field"><label>Status <span class="muted">— workflow</span></label><select id="acStatus">${ACT_STATUSES.map((s) => `<option value="${s.id}" ${s.id === a.status ? 'selected' : ''}>${escapeHTML(s.label)}</option>`).join('')}</select></div>
@@ -15943,47 +16008,13 @@
         <div id="acLoadChart" class="ac-load-chart"></div>
       </div>
       <div class="field">
-        <label>Description <span class="muted">— rich text; paste Gmail thread URLs to attach</span></label>
-        ${ceComposeHTML({ id: 'acDesc', value: a.description, placeholder: 'Context, scope, why it matters — Gmail links welcome', style: 'min-height:80px;' })}
-      </div>
-      <div class="field">
-        <label>Interested stakeholders <span class="muted">— get kept in the loop</span></label>
-        <div id="acStkChips" class="ac-stk-chips"></div>
-        <select id="acStkAdd">
-          <option value="">+ Add stakeholder…</option>
-          ${persons.map((p) => `<option value="${escapeHTML(p.id)}">${escapeHTML(p.name)}</option>`).join('')}
-          ${externals.length ? `<option value="" disabled>── External ──</option>` +
-            externals.map((s) => `<option value="${escapeHTML(s.id)}">${escapeHTML(s.name)}</option>`).join('') : ''}
-        </select>
-      </div>
-      <div class="ac-split">
-        <div class="field ac-mile">
-          <label>Milestones ▲</label>
-          <div id="acMilestones" class="ac-mile-list"></div>
-          <div class="ac-mile-add">
-            <input id="acMileName" type="text" placeholder="Name…" />
-            <input id="acMileDate" type="date" />
-            <button type="button" class="ghost" id="acMileAdd">+ Add</button>
-          </div>
-        </div>
-        <div class="field ac-mile">
-          <label>Deliverables ◆</label>
-          <div id="acDeliverables" class="ac-mile-list"></div>
-          <div class="ac-mile-add">
-            <input id="acDelName" type="text" placeholder="Name…" />
-            <input id="acDelDate" type="date" />
-            <button type="button" class="ghost" id="acDelAdd">+ Add</button>
-          </div>
-        </div>
-      </div>
-      <div class="field">
         <label>Allocations <span class="muted">— split the work across people; tentative = grey ghost bar on the gantt</span></label>
         <div id="acAllocList" class="ac-alloc-list"></div>
         <button type="button" class="ghost" id="acAllocAdd">+ Add allocation</button>
         <div class="ac-alloc-summary muted" id="acAllocSum"></div>
       </div>
       <div class="field">
-        <label>Linked actions <span class="muted">— the atomic to-dos that make up this activity (they appear on the Board, Register and Person planners)</span></label>
+        <label>Linked actions <span class="muted">— the atomic to-dos in the Register that execute this activity</span></label>
         <div id="acLinkedActions" class="ac-linked-list"></div>
         <div class="ac-linked-add">
           <select id="acLinkedAdd">
@@ -15992,7 +16023,7 @@
         </div>
       </div>
       <div class="field">
-        <label>Comments <span class="muted">— dated notes on this activity</span></label>
+        <label>Comments <span class="muted">— dated notes on this activity's execution</span></label>
         <div id="acComments" class="ac-comments-list"></div>
         <div class="ac-comment-compose">
           <input id="acCommentDate" type="date" title="Comment date" />
@@ -16296,6 +16327,47 @@
         });
       });
     }
+    // Tasks — checkable list. Rendered inline; add/remove/toggle
+    // mutate a.tasks and re-render. Uses ceComposeHTML-style seed for
+    // editing existing text (contenteditable) so long items wrap.
+    function renderTasks() {
+      const host = $('#acTasks'); if (!host) return;
+      a.tasks = Array.isArray(a.tasks) ? a.tasks : [];
+      if (!a.tasks.length) {
+        host.innerHTML = '<div class="muted" style="font-size:11.5px;">No tasks yet — add one below.</div>';
+        return;
+      }
+      host.innerHTML = a.tasks.map((t) => `
+        <div class="ac-task-row" data-tid="${escapeHTML(t.id)}">
+          <input type="checkbox" class="ac-task-chk" ${t.done ? 'checked' : ''} />
+          <div class="ac-task-text ${t.done ? 'done' : ''}" contenteditable="plaintext-only" spellcheck="true">${escapeHTML(t.text)}</div>
+          <div class="ac-task-meta muted">${t.done && t.doneAt ? '✓ ' + escapeHTML(t.doneAt) : ''}</div>
+          <button type="button" class="icon-btn ac-task-del" title="Remove">×</button>
+        </div>`).join('');
+      host.querySelectorAll('.ac-task-row').forEach((row) => {
+        const tid = row.dataset.tid;
+        const t = a.tasks.find((x) => x.id === tid);
+        if (!t) return;
+        row.querySelector('.ac-task-chk').addEventListener('change', (e) => {
+          t.done = !!e.target.checked;
+          t.doneAt = t.done ? todayISO() : null;
+          renderTasks();
+        });
+        row.querySelector('.ac-task-text').addEventListener('blur', (e) => {
+          const v = e.target.textContent.trim();
+          if (!v) {
+            a.tasks = a.tasks.filter((x) => x.id !== tid);
+            renderTasks();
+          } else if (v !== t.text) {
+            t.text = v;
+          }
+        });
+        row.querySelector('.ac-task-del').addEventListener('click', () => {
+          a.tasks = a.tasks.filter((x) => x.id !== tid);
+          renderTasks();
+        });
+      });
+    }
     renderStk();
     renderMilestones();
     renderDeliverables();
@@ -16304,6 +16376,23 @@
     renderLinkedActions();
     renderLinkedActionPicker();
     renderActivityComments();
+    renderTasks();
+    // Wire task-add controls: Enter in the input adds; + Add button adds.
+    const taskInput = $('#acTaskNew');
+    const taskAddBtn = $('#acTaskAdd');
+    const addTask = () => {
+      const v = (taskInput?.value || '').trim();
+      if (!v) return;
+      a.tasks = Array.isArray(a.tasks) ? a.tasks : [];
+      a.tasks.push({ id: uid('atk'), text: v, done: false, doneAt: null });
+      taskInput.value = '';
+      renderTasks();
+      taskInput.focus();
+    };
+    taskAddBtn?.addEventListener('click', addTask);
+    taskInput?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); addTask(); }
+    });
     // Health picker: clicking a button sets health; note is required
     // for 'blocked'. Selection state visualised via .is-set.
     const healthPicker = $('#acHealthPicker');
@@ -16423,7 +16512,15 @@
         return;
       }
       a.healthNote = noteVal;
-      a.description = serializeChipsToText($('#acDesc'));
+      // Serialise the four rich-text request-definition fields.
+      a.context   = serializeChipsToText($('#acContext'));
+      a.objective = serializeChipsToText($('#acObjective'));
+      a.inputs    = serializeChipsToText($('#acInputs'));
+      a.notes     = serializeChipsToText($('#acNotes'));
+      // `description` is legacy — keep the last serialised context in
+      // it so older exports/importers that key on description still
+      // see the current story.
+      a.description = a.context;
       a.updatedAt = todayISO();
       commit('activity-save');
       closeDrawer();
@@ -22173,6 +22270,32 @@
     s.activities.forEach((a) => {
       a.id = a.id || uid('act');
       a.title = String(a.title || '');
+      // Request definition — the 8-field shape the tool asks users to
+      // fill in when logging a new activity request. `description` is
+      // the legacy free-form blob and is now the migration source for
+      // `context`; kept on the schema for older exports but only read
+      // once and never written back.
+      a.context = typeof a.context === 'string' ? a.context
+                : (typeof a.description === 'string' ? a.description : '');
+      a.objective = typeof a.objective === 'string' ? a.objective : '';
+      a.inputs = typeof a.inputs === 'string' ? a.inputs : '';
+      a.notes = typeof a.notes === 'string' ? a.notes : '';
+      // Tasks — a list of checkable items so the requester can define
+      // "what has to happen for this activity to be done" up front.
+      // Independent of `a.actions[]` in the register: tasks here are
+      // the request's own definition of done; actions in the register
+      // are the assigned work items. Shape: [{ id, text, done, doneAt }]
+      a.tasks = Array.isArray(a.tasks) ? a.tasks : [];
+      a.tasks = a.tasks.filter((t) => t && typeof t === 'object' && typeof t.text === 'string');
+      a.tasks.forEach((t) => {
+        t.id = t.id || uid('atk');
+        t.text = String(t.text);
+        t.done = !!t.done;
+        t.doneAt = typeof t.doneAt === 'string' ? t.doneAt : null;
+      });
+      // Keep description on the schema for backward compat with old
+      // exports/importers, but the editor no longer reads or writes it
+      // — context is the canonical field.
       a.description = typeof a.description === 'string' ? a.description : '';
       a.originator = a.originator || null;
       a.originatedAt = a.originatedAt || todayISO();
