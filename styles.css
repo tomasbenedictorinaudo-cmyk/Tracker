@@ -11184,6 +11184,29 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 }
 .act-list th .sort-arrow.is-active { opacity: 1; color: var(--brand, #60a5fa); }
 
+/* Activity — "Copy for email" picker dialog ─────────────────── */
+.acc-dialog .acc-toolbar { display: flex; gap: 6px; margin-bottom: 8px; }
+.acc-preview {
+  border-collapse: collapse;
+  border: 1px solid var(--line);
+  width: 100%;
+  font-size: 12px;
+}
+.acc-preview th, .acc-preview td { border: 1px solid var(--line); padding: 6px 8px; vertical-align: top; }
+.acc-preview .acc-row.acc-row-list { background: rgba(148,163,184,.04); }
+.acc-preview .acc-lbl { min-width: 130px; }
+.acc-preview .acc-val { line-height: 1.45; }
+.acc-preview .acc-cb {
+  width: 28px; text-align: center; vertical-align: top;
+  background: rgba(148,163,184,.06);
+}
+.acc-preview input[type="checkbox"] { cursor: pointer; margin: 3px auto; display: block; }
+.acc-sub { border-collapse: collapse; width: 100%; font-size: 12px; }
+.acc-sub td { border: 0; padding: 2px 4px; vertical-align: top; }
+.acc-sub .acc-cb { width: 22px; padding: 2px 0; background: transparent; border: 0; }
+.acc-footer { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.acc-hint { font-size: 11px; }
+
 /* Activity editor — section titles + tasks ──────────────────── */
 .ac-section-title {
   font-size: 11px;

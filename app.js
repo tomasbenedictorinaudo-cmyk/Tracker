@@ -16033,6 +16033,7 @@
       </div>
       <div style="display:flex; gap:8px; margin-top:6px;">
         <button class="primary" id="acSave">Save</button>
+        <button class="ghost" id="acCopy" title="Copy the request as a two-column table you can paste into an email">📋 Copy for email…</button>
         <button class="ghost" id="acDelete" style="margin-left:auto; color:var(--bad);">Delete activity</button>
       </div>`;
   }
@@ -16533,6 +16534,256 @@
       closeDrawer();
       renderActivityList(); renderActivityGantt(); renderActivityWorkload();
     });
+    $('#acCopy')?.addEventListener('click', () => openActivityCopyDialog(a));
+  }
+
+  // ── Copy activity request as a two-column table ─────────────────
+  // Opens a modal listing every field of the request as a row; each
+  // row carries a checkbox. On Copy, the ticked rows are packaged
+  // into an HTML table (for Gmail/Outlook paste) and a plain-text
+  // fallback for text-only clients. Uses the Clipboard API's
+  // ClipboardItem for the dual-payload path.
+  function openActivityCopyDialog(a) {
+    // Strip rich-text HTML back to plain text with light structure —
+    // used both for the plain-text mirror and for HTML preview cells
+    // (they get re-escaped and re-wrapped in <br>).
+    const stripToText = (html) => {
+      if (!html) return '';
+      // If it already looks like plain text with no tags, keep it.
+      if (!/<[a-zA-Z]/.test(html)) return String(html);
+      const tmp = document.createElement('div');
+      tmp.innerHTML = String(html);
+      // Convert <br> and closing block tags to newlines so the plain
+      // text mirror preserves paragraph structure.
+      tmp.querySelectorAll('br').forEach((b) => b.replaceWith('\n'));
+      tmp.querySelectorAll('p,div,li').forEach((el) => {
+        if (el.textContent && !el.textContent.endsWith('\n')) el.appendChild(document.createTextNode('\n'));
+      });
+      return (tmp.textContent || '').replace(/\n{3,}/g, '\n\n').trim();
+    };
+    const projName = (state.projects || []).find((p) => p.id === a.projectId)?.name || '';
+    const originator = a.originator ? actorLabel(a.originator) : '';
+    const stakeholders = (a.stakeholderIds || []).map(actorLabel).filter(Boolean);
+    const tasks = (a.tasks || []).map((t) => ({ id: t.id, text: t.text, done: t.done }));
+    const outputs = (a.deliverables || []).map((d) => ({ id: d.id, text: d.name + (d.date ? ' — ' + d.date : '') }));
+    const deadlines = (a.milestones || []).map((m) => ({ id: m.id, text: m.name + (m.date ? ' — ' + m.date : '') }));
+    // Build the row list. Each entry is either:
+    //   { kind: 'field', key, label, valueText, valueHTML }   — single-row
+    //   { kind: 'list',  key, label, items: [{id, text, done?}] } — multi-item
+    // The dialog checkbox model:
+    //   included[<key>] = true|false               for field rows
+    //   included[<key>__ids]  = Set<string>        for list rows (subset of items)
+    const rows = [];
+    const fld = (key, label, txt) => {
+      if (txt == null || String(txt).trim() === '') return;
+      rows.push({ kind: 'field', key, label, valueText: stripToText(txt) });
+    };
+    fld('title',       'Title',       a.title);
+    fld('project',     'Project',     projName);
+    fld('originator',  'Originator',  originator + (a.originatedAt ? ' · received ' + a.originatedAt : ''));
+    fld('context',     'Context',     a.context);
+    fld('objective',   'Objective',   a.objective);
+    fld('inputs',      'Inputs',      a.inputs);
+    if (tasks.length)      rows.push({ kind: 'list', key: 'tasks',        label: 'Tasks',        items: tasks,      showDone: true });
+    if (outputs.length)    rows.push({ kind: 'list', key: 'outputs',      label: 'Outputs',      items: outputs });
+    if (deadlines.length)  rows.push({ kind: 'list', key: 'deadlines',    label: 'Deadlines',    items: deadlines });
+    if (stakeholders.length) rows.push({ kind: 'list', key: 'stakeholders', label: 'Stakeholders', items: stakeholders.map((s, i) => ({ id: 'sh' + i, text: s })) });
+    fld('notes',       'Notes',       a.notes);
+
+    // Selection state — everything on by default.
+    const included = {};
+    rows.forEach((r) => {
+      if (r.kind === 'field') included[r.key] = true;
+      else                    included[r.key + '__ids'] = new Set(r.items.map((x) => x.id));
+    });
+
+    const overlay = document.createElement('div');
+    overlay.className = 'tp-dialog-mask';
+    const dlg = document.createElement('div');
+    dlg.className = 'tp-dialog acc-dialog';
+    dlg.style.width = 'min(820px, 96vw)';
+    const close = () => overlay.remove();
+
+    const build = () => {
+      dlg.innerHTML = `
+        <div class="tp-dialog-head">
+          <div>
+            <div style="font-weight:700; font-size:14px;">Copy for email — ${escapeHTML(a.title)}</div>
+            <div class="muted" style="font-size:11px;">Untick anything you don't want to share. The copy will paste as a real table in Gmail / Outlook / Word (plain-text fallback for other clients).</div>
+          </div>
+          <button type="button" class="btn ghost tp-dialog-close" aria-label="Close">×</button>
+        </div>
+        <div class="tp-dialog-body">
+          <div class="acc-toolbar">
+            <button type="button" class="btn ghost" id="accSelectAll">Select all</button>
+            <button type="button" class="btn ghost" id="accSelectNone">None</button>
+          </div>
+          <table class="acc-preview">
+            <colgroup><col style="width:32px;"/><col style="width:150px;"/><col/></colgroup>
+            <tbody>
+              ${rows.map((r) => renderAccRow(r)).join('')}
+            </tbody>
+          </table>
+          <div class="acc-footer">
+            <div class="acc-hint muted">${countTicked()} row${countTicked() === 1 ? '' : 's'} selected</div>
+            <div style="flex:1"></div>
+            <button type="button" class="btn ghost" id="accCancel">Cancel</button>
+            <button type="button" class="btn primary" id="accCopy">📋 Copy</button>
+          </div>
+        </div>`;
+      dlg.querySelector('.tp-dialog-close')?.addEventListener('click', close);
+      dlg.querySelector('#accCancel')?.addEventListener('click', close);
+      dlg.querySelector('#accSelectAll')?.addEventListener('click', () => {
+        rows.forEach((r) => {
+          if (r.kind === 'field') included[r.key] = true;
+          else                    included[r.key + '__ids'] = new Set(r.items.map((x) => x.id));
+        });
+        build();
+      });
+      dlg.querySelector('#accSelectNone')?.addEventListener('click', () => {
+        rows.forEach((r) => {
+          if (r.kind === 'field') included[r.key] = false;
+          else                    included[r.key + '__ids'] = new Set();
+        });
+        build();
+      });
+      dlg.querySelectorAll('.acc-cb-field').forEach((cb) => {
+        cb.addEventListener('change', (e) => {
+          included[cb.dataset.key] = !!e.target.checked;
+          dlg.querySelector('.acc-hint').textContent = `${countTicked()} row${countTicked() === 1 ? '' : 's'} selected`;
+        });
+      });
+      dlg.querySelectorAll('.acc-cb-list').forEach((cb) => {
+        cb.addEventListener('change', (e) => {
+          const key = cb.dataset.key;
+          const set = included[key + '__ids'];
+          if (e.target.checked) set.add(cb.dataset.itemId);
+          else                  set.delete(cb.dataset.itemId);
+          // Sync the group header ("all/none") checkbox.
+          const groupCB = dlg.querySelector(`.acc-cb-group[data-key="${CSS.escape(key)}"]`);
+          const total = rows.find((r) => r.key === key).items.length;
+          if (groupCB) {
+            groupCB.checked = set.size === total;
+            groupCB.indeterminate = set.size > 0 && set.size < total;
+          }
+          dlg.querySelector('.acc-hint').textContent = `${countTicked()} row${countTicked() === 1 ? '' : 's'} selected`;
+        });
+      });
+      dlg.querySelectorAll('.acc-cb-group').forEach((cb) => {
+        cb.addEventListener('change', (e) => {
+          const key = cb.dataset.key;
+          const row = rows.find((r) => r.key === key);
+          const set = included[key + '__ids'];
+          if (e.target.checked) row.items.forEach((it) => set.add(it.id));
+          else                  set.clear();
+          dlg.querySelectorAll(`.acc-cb-list[data-key="${CSS.escape(key)}"]`).forEach((c) => { c.checked = e.target.checked; });
+          dlg.querySelector('.acc-hint').textContent = `${countTicked()} row${countTicked() === 1 ? '' : 's'} selected`;
+        });
+      });
+      dlg.querySelector('#accCopy')?.addEventListener('click', doCopy);
+    };
+    function countTicked() {
+      let n = 0;
+      rows.forEach((r) => {
+        if (r.kind === 'field') { if (included[r.key]) n++; }
+        else { if (included[r.key + '__ids'].size) n++; }
+      });
+      return n;
+    }
+    function renderAccRow(r) {
+      if (r.kind === 'field') {
+        const checked = included[r.key] ? 'checked' : '';
+        return `<tr class="acc-row">
+          <td class="acc-cb"><input type="checkbox" class="acc-cb-field" data-key="${escapeHTML(r.key)}" ${checked} /></td>
+          <td class="acc-lbl"><b>${escapeHTML(r.label)}</b></td>
+          <td class="acc-val">${(escapeHTML(r.valueText) || '').replace(/\n/g, '<br>')}</td>
+        </tr>`;
+      }
+      // list
+      const set = included[r.key + '__ids'];
+      const all = set.size === r.items.length;
+      const some = set.size > 0 && !all;
+      return `<tr class="acc-row acc-row-list">
+        <td class="acc-cb"><input type="checkbox" class="acc-cb-group" data-key="${escapeHTML(r.key)}" ${all ? 'checked' : ''} ${some ? 'data-indeterminate="1"' : ''} /></td>
+        <td class="acc-lbl"><b>${escapeHTML(r.label)}</b><div class="muted" style="font-size:10px;">${r.items.length} item${r.items.length === 1 ? '' : 's'}</div></td>
+        <td class="acc-val">
+          <table class="acc-sub"><tbody>
+            ${r.items.map((it) => `<tr>
+              <td class="acc-cb"><input type="checkbox" class="acc-cb-list" data-key="${escapeHTML(r.key)}" data-item-id="${escapeHTML(it.id)}" ${set.has(it.id) ? 'checked' : ''} /></td>
+              <td>${r.showDone && it.done ? '<span style="color:var(--ok, #16a34a); font-weight:600; margin-right:6px;">✓</span>' : ''}${escapeHTML(it.text)}</td>
+            </tr>`).join('')}
+          </tbody></table>
+        </td>
+      </tr>`;
+    }
+    async function doCopy() {
+      const html = buildCopyHTML();
+      const text = buildCopyText();
+      let ok = false;
+      try {
+        if (navigator.clipboard && window.ClipboardItem) {
+          const item = new ClipboardItem({
+            'text/html':  new Blob([html], { type: 'text/html' }),
+            'text/plain': new Blob([text], { type: 'text/plain' }),
+          });
+          await navigator.clipboard.write([item]);
+          ok = true;
+        }
+      } catch (_) { ok = false; }
+      if (!ok) {
+        // Fallback — copy plain text via legacy execCommand.
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select();
+          document.execCommand('copy'); ta.remove();
+          ok = true;
+        } catch (_) {}
+      }
+      if (ok) { toast(`Copied — ${countTicked()} row${countTicked() === 1 ? '' : 's'}`); close(); }
+      else    { alert('Copy failed — your browser may be blocking clipboard access. Try again from a user interaction.'); }
+    }
+    function buildCopyHTML() {
+      // Inline styles so pasted content renders the same in Gmail (which
+      // strips <style>/<link>) and other web mail clients.
+      const rowsHtml = rows.map((r) => {
+        if (r.kind === 'field') {
+          if (!included[r.key]) return '';
+          return `<tr>
+            <th style="text-align:left; padding:6px 10px; border:1px solid #ccc; background:#f6f7f9; vertical-align:top; width:170px;">${escapeHTML(r.label)}</th>
+            <td style="padding:6px 10px; border:1px solid #ccc; vertical-align:top;">${(escapeHTML(r.valueText) || '').replace(/\n/g, '<br>')}</td>
+          </tr>`;
+        }
+        const chosen = r.items.filter((it) => included[r.key + '__ids'].has(it.id));
+        if (!chosen.length) return '';
+        const list = chosen.map((it) => `<li>${r.showDone && it.done ? '☑ ' : ''}${escapeHTML(it.text)}</li>`).join('');
+        return `<tr>
+          <th style="text-align:left; padding:6px 10px; border:1px solid #ccc; background:#f6f7f9; vertical-align:top; width:170px;">${escapeHTML(r.label)}</th>
+          <td style="padding:6px 10px; border:1px solid #ccc; vertical-align:top;"><ul style="margin:0; padding-left:18px;">${list}</ul></td>
+        </tr>`;
+      }).join('');
+      return `<table style="border-collapse:collapse; border:1px solid #ccc; font-family:Arial, sans-serif; font-size:13px; line-height:1.4;"><tbody>${rowsHtml}</tbody></table>`;
+    }
+    function buildCopyText() {
+      const parts = [];
+      rows.forEach((r) => {
+        if (r.kind === 'field') {
+          if (!included[r.key]) return;
+          parts.push(`${r.label}:\n${r.valueText}\n`);
+        } else {
+          const chosen = r.items.filter((it) => included[r.key + '__ids'].has(it.id));
+          if (!chosen.length) return;
+          parts.push(`${r.label}:\n` + chosen.map((it) => `  • ${r.showDone && it.done ? '[x] ' : ''}${it.text}`).join('\n') + '\n');
+        }
+      });
+      return parts.join('\n');
+    }
+    build();
+    overlay.appendChild(dlg);
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    // Set indeterminate visual state on group checkboxes now that they're in the DOM.
+    dlg.querySelectorAll('.acc-cb-group[data-indeterminate="1"]').forEach((cb) => { cb.indeterminate = true; });
   }
 
   // Shared time window for the Activities Gantt + Workload chart.
