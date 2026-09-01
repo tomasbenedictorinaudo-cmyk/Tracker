@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-09-01T19:15:29.522Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-09-01T19:24:43.829Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -28159,8 +28159,37 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     const originator = a.originator ? actorLabel(a.originator) : '';
     const stakeholders = (a.stakeholderIds || []).map(actorLabel).filter(Boolean);
     const tasks = (a.tasks || []).map((t) => ({ id: t.id, text: t.text, done: t.done }));
-    const outputs = (a.deliverables || []).map((d) => ({ id: d.id, text: d.name + (d.date ? ' — ' + d.date : '') }));
+    const outputs = (a.deliverables || []).map((d) => ({
+      id: d.id,
+      text: d.name + (d.date ? ' — ' + d.date : '') + (d.status && d.status !== 'todo' ? ' [' + d.status + ']' : ''),
+    }));
     const deadlines = (a.milestones || []).map((m) => ({ id: m.id, text: m.name + (m.date ? ' — ' + m.date : '') }));
+    const allocations = (a.allocations || []).map((al) => {
+      const who = al.personId ? (personName(al.personId) || 'Unassigned') : 'Unassigned';
+      const range = (al.startDate && al.endDate) ? ` (${al.startDate} → ${al.endDate})` : '';
+      const hrs = al.hours ? `${al.hours} h` : '';
+      const tent = al.tentative ? ' · tentative' : '';
+      return { id: al.id, text: `${who} · ${hrs}${range}${tent}` };
+    });
+    const linkedActions = (state.projects || []).flatMap((pr) =>
+      (pr.actions || []).filter((x) => x.activityId === a.id).map((x) => ({
+        id: x.id,
+        text: `${x.title}${x.owner ? ' — ' + personName(x.owner) : ''}${x.due ? ' · due ' + x.due : ''} [${x.status || 'todo'}]`,
+      })));
+    const commentItems = (a.comments || []).slice().sort((c1, c2) => (c1.at || '').localeCompare(c2.at || '')).map((c) => ({
+      id: c.id,
+      text: `${c.at || ''}${c.by ? ' · ' + actorLabel(c.by) : ''}: ${stripToText(c.text || '')}`,
+    }));
+    // Status → human label from ACT_STATUSES; health label from ACT_HEALTHS.
+    const statusLabel = actStatusMeta(a.status)?.label || a.status || '';
+    const healthMeta = actHealthMeta(a.health);
+    const healthLabel = a.health ? `${healthMeta.icon} ${healthMeta.label}${a.healthAt ? ' · set ' + a.healthAt : ''}` : '';
+    // Load window summary — start/end + total hours in one line so it
+    // reads as a "planned envelope" cell.
+    const loadWindow = (a.plannedStart || a.plannedEnd)
+      ? `${a.plannedStart || '?'} → ${a.plannedEnd || '?'}${a.totalHours ? ' · ' + a.totalHours + ' h total' : ''}`
+      : (a.totalHours ? `${a.totalHours} h total` : '');
+
     // Build the row list. Each entry is either:
     //   { kind: 'field', key, label, valueText, valueHTML }   — single-row
     //   { kind: 'list',  key, label, items: [{id, text, done?}] } — multi-item
@@ -28172,17 +28201,32 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
       if (txt == null || String(txt).trim() === '') return;
       rows.push({ kind: 'field', key, label, valueText: stripToText(txt) });
     };
-    fld('title',       'Title',       a.title);
-    fld('project',     'Project',     projName);
-    fld('originator',  'Originator',  originator + (a.originatedAt ? ' · received ' + a.originatedAt : ''));
-    fld('context',     'Context',     a.context);
-    fld('objective',   'Objective',   a.objective);
-    fld('inputs',      'Inputs',      a.inputs);
-    if (tasks.length)      rows.push({ kind: 'list', key: 'tasks',        label: 'Tasks',        items: tasks,      showDone: true });
-    if (outputs.length)    rows.push({ kind: 'list', key: 'outputs',      label: 'Outputs',      items: outputs });
-    if (deadlines.length)  rows.push({ kind: 'list', key: 'deadlines',    label: 'Deadlines',    items: deadlines });
+    // Request definition (the 9 canonical fields).
+    fld('title',        'Title',        a.title);
+    fld('originator',   'Originator',   originator);
+    fld('receivedOn',   'Received on',  a.originatedAt);
+    fld('context',      'Context',      a.context);
+    fld('objective',    'Objective',    a.objective);
+    fld('inputs',       'Inputs',       a.inputs);
+    if (tasks.length)        rows.push({ kind: 'list', key: 'tasks',        label: 'Tasks',        items: tasks, showDone: true });
+    if (outputs.length)      rows.push({ kind: 'list', key: 'outputs',      label: 'Outputs',      items: outputs });
+    if (deadlines.length)    rows.push({ kind: 'list', key: 'deadlines',    label: 'Deadlines',    items: deadlines });
     if (stakeholders.length) rows.push({ kind: 'list', key: 'stakeholders', label: 'Stakeholders', items: stakeholders.map((s, i) => ({ id: 'sh' + i, text: s })) });
-    fld('notes',       'Notes',       a.notes);
+    fld('notes',        'Notes',        a.notes);
+    // Planning & execution metadata (kept opt-in — sensible when
+    // sharing the full plan post-kick-off, noisier when the audience
+    // only needs the request itself).
+    fld('project',      'Project',      projName);
+    fld('status',       'Status',       statusLabel);
+    fld('health',       'Health',       healthLabel);
+    fld('healthNote',   'Health note',  a.healthNote);
+    fld('loadWindow',   'Planned load', loadWindow);
+    if (allocations.length)   rows.push({ kind: 'list', key: 'allocations',   label: 'Allocations',   items: allocations });
+    if (linkedActions.length) rows.push({ kind: 'list', key: 'linkedActions', label: 'Linked actions', items: linkedActions });
+    if (commentItems.length)  rows.push({ kind: 'list', key: 'comments',      label: 'Comments',      items: commentItems });
+    fld('id',           'Activity ID',  a.id);
+    fld('createdAt',    'Created at',   a.createdAt);
+    fld('updatedAt',    'Updated at',   a.updatedAt);
 
     // Selection state — everything on by default.
     const included = {};
