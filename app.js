@@ -16636,12 +16636,11 @@
     fld('createdAt',    'Created at',   a.createdAt);
     fld('updatedAt',    'Updated at',   a.updatedAt);
 
-    // Selection state — everything on by default.
+    // Selection state — everything on by default. Whole rows only,
+    // whether field or list. There is no per-item exclusion inside a
+    // list; the entire row is IN or OUT.
     const included = {};
-    rows.forEach((r) => {
-      if (r.kind === 'field') included[r.key] = true;
-      else                    included[r.key + '__ids'] = new Set(r.items.map((x) => x.id));
-    });
+    rows.forEach((r) => { included[r.key] = true; });
 
     const overlay = document.createElement('div');
     overlay.className = 'tp-dialog-mask';
@@ -16683,121 +16682,65 @@
       dlg.querySelector('.tp-dialog-close')?.addEventListener('click', close);
       dlg.querySelector('#accCancel')?.addEventListener('click', close);
       dlg.querySelector('#accSelectAll')?.addEventListener('click', () => {
-        rows.forEach((r) => {
-          if (r.kind === 'field') included[r.key] = true;
-          else                    included[r.key + '__ids'] = new Set(r.items.map((x) => x.id));
-        });
+        rows.forEach((r) => { included[r.key] = true; });
         build();
       });
       dlg.querySelector('#accSelectNone')?.addEventListener('click', () => {
-        rows.forEach((r) => {
-          if (r.kind === 'field') included[r.key] = false;
-          else                    included[r.key + '__ids'] = new Set();
-        });
+        rows.forEach((r) => { included[r.key] = false; });
         build();
       });
       const refreshHint = () => {
         dlg.querySelector('.acc-hint').textContent = `${countTicked()} row${countTicked() === 1 ? '' : 's'} selected`;
       };
-      // Field toggles.
-      dlg.querySelectorAll('.acc-tog-field').forEach((btn) => {
+      // Row toggles — a single control per row (field OR list).
+      dlg.querySelectorAll('.acc-tog-row').forEach((btn) => {
         btn.addEventListener('click', () => {
           included[btn.dataset.key] = !included[btn.dataset.key];
           setTogVisual(btn, included[btn.dataset.key]);
           refreshHint();
         });
       });
-      // Per-item toggles.
-      dlg.querySelectorAll('.acc-tog-list').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const key = btn.dataset.key;
-          const set = included[key + '__ids'];
-          const nowIn = !set.has(btn.dataset.itemId);
-          if (nowIn) set.add(btn.dataset.itemId);
-          else       set.delete(btn.dataset.itemId);
-          setTogVisual(btn, nowIn);
-          // Sync the group header toggle.
-          const groupBtn = dlg.querySelector(`.acc-tog-group[data-key="${CSS.escape(key)}"]`);
-          const total = rows.find((r) => r.key === key).items.length;
-          if (groupBtn) setTogVisual(groupBtn, set.size === total ? true : set.size === 0 ? false : 'mixed');
-          refreshHint();
-        });
-      });
-      // Group toggles (row header for list rows).
-      dlg.querySelectorAll('.acc-tog-group').forEach((btn) => {
-        btn.addEventListener('click', () => {
-          const key = btn.dataset.key;
-          const row = rows.find((r) => r.key === key);
-          const set = included[key + '__ids'];
-          const nowIn = set.size !== row.items.length; // if not all → include all; else exclude all
-          if (nowIn) row.items.forEach((it) => set.add(it.id));
-          else       set.clear();
-          setTogVisual(btn, nowIn);
-          dlg.querySelectorAll(`.acc-tog-list[data-key="${CSS.escape(key)}"]`).forEach((b) => setTogVisual(b, nowIn));
-          refreshHint();
-        });
-      });
       dlg.querySelector('#accCopy')?.addEventListener('click', doCopy);
     };
-    // Repaint a toggle button. `state` is true (IN), false (OUT), or 'mixed'.
+    // Repaint a toggle button. `state` is true (IN) or false (OUT).
     function setTogVisual(btn, state) {
-      btn.classList.toggle('is-in', state === true);
+      btn.classList.toggle('is-in',  state === true);
       btn.classList.toggle('is-out', state === false);
-      btn.classList.toggle('is-mixed', state === 'mixed');
-      btn.textContent = state === true ? 'IN' : state === false ? 'OUT' : '—';
-      btn.setAttribute('aria-pressed', state === true ? 'true' : state === false ? 'false' : 'mixed');
+      btn.textContent = state ? 'IN' : 'OUT';
+      btn.setAttribute('aria-pressed', state ? 'true' : 'false');
     }
     function countTicked() {
-      let n = 0;
-      rows.forEach((r) => {
-        if (r.kind === 'field') { if (included[r.key]) n++; }
-        else { if (included[r.key + '__ids'].size) n++; }
-      });
-      return n;
+      return rows.reduce((n, r) => n + (included[r.key] ? 1 : 0), 0);
     }
-    function togHTML(cls, dataAttrs, state) {
-      // state: true (IN), false (OUT), 'mixed' (partial group). Deliberately not a
-      // checkbox — the visual is a labelled pill button so users cannot mistake
-      // "IN/OUT for the copy" for the item's own state (task done, action status).
-      const label = state === true ? 'IN' : state === false ? 'OUT' : '—';
-      const stateCls = state === true ? 'is-in' : state === false ? 'is-out' : 'is-mixed';
-      const pressed = state === true ? 'true' : state === false ? 'false' : 'mixed';
-      return `<button type="button" class="acc-tog ${cls} ${stateCls}" ${dataAttrs} aria-pressed="${pressed}" title="Toggle IN/OUT — does not change the underlying item">${label}</button>`;
+    function togHTML(dataAttrs, state) {
+      // A labelled pill button — not a checkbox. Kept visually
+      // distinct from the task-done / action-status pills inside
+      // content cells so the two can never be confused.
+      const label = state ? 'IN' : 'OUT';
+      const stateCls = state ? 'is-in' : 'is-out';
+      return `<button type="button" class="acc-tog acc-tog-row ${stateCls}" ${dataAttrs} aria-pressed="${state ? 'true' : 'false'}" title="Toggle whether this row is copied — does not change the underlying data">${label}</button>`;
     }
     function renderAccRow(r) {
+      const state = !!included[r.key];
       if (r.kind === 'field') {
-        const state = !!included[r.key];
         return `<tr class="acc-row">
-          <td class="acc-cb">${togHTML('acc-tog-field', `data-key="${escapeHTML(r.key)}"`, state)}</td>
+          <td class="acc-cb">${togHTML(`data-key="${escapeHTML(r.key)}"`, state)}</td>
           <td class="acc-lbl"><b>${escapeHTML(r.label)}</b></td>
           <td class="acc-val">${(escapeHTML(r.valueText) || '').replace(/\n/g, '<br>')}</td>
         </tr>`;
       }
-      // list
-      const set = included[r.key + '__ids'];
-      const all = set.size === r.items.length;
-      const some = set.size > 0 && !all;
-      const groupState = all ? true : some ? 'mixed' : false;
-      // Every item-status marker is a pill (not a bracketed [todo] /
-      // [done] and not a ✓). Rationale: those glyphs look like
-      // checkboxes and confuse readers about what "ticked" means. The
-      // only control that decides inclusion is the .acc-tog toggle.
+      // list — one toggle for the whole row; items render as plain
+      // lines with status pills. No per-item toggles.
+      const itemsHTML = r.items.map((it) => {
+        const status = (r.showDone && it.done) ? 'done' : (it.status || null);
+        const isDone = status === 'done';
+        const pill = status ? ` <span class="acc-status-pill acc-status-${escapeHTML(status)}">${escapeHTML(status)}</span>` : '';
+        return `<div class="acc-list-item${isDone ? ' is-done' : ''}">• ${escapeHTML(it.text)}${pill}</div>`;
+      }).join('');
       return `<tr class="acc-row acc-row-list">
-        <td class="acc-cb">${togHTML('acc-tog-group', `data-key="${escapeHTML(r.key)}"`, groupState)}</td>
+        <td class="acc-cb">${togHTML(`data-key="${escapeHTML(r.key)}"`, state)}</td>
         <td class="acc-lbl"><b>${escapeHTML(r.label)}</b><div class="muted" style="font-size:10px;">${r.items.length} item${r.items.length === 1 ? '' : 's'}</div></td>
-        <td class="acc-val">
-          <table class="acc-sub"><tbody>
-            ${r.items.map((it) => {
-              const status = (r.showDone && it.done) ? 'done' : (it.status || null);
-              const isDone = status === 'done';
-              const pill = status ? ` <span class="acc-status-pill acc-status-${escapeHTML(status)}">${escapeHTML(status)}</span>` : '';
-              return `<tr>
-                <td class="acc-cb">${togHTML('acc-tog-list', `data-key="${escapeHTML(r.key)}" data-item-id="${escapeHTML(it.id)}"`, set.has(it.id))}</td>
-                <td class="acc-sub-text${isDone ? ' is-done' : ''}">${escapeHTML(it.text)}${pill}</td>
-              </tr>`;
-            }).join('')}
-          </tbody></table>
-        </td>
+        <td class="acc-val">${itemsHTML}</td>
       </tr>`;
     }
     async function doCopy() {
@@ -16831,14 +16774,14 @@
       // Inline styles so pasted content renders the same in Gmail (which
       // strips <style>/<link>) and other web mail clients.
       const rowsHtml = rows.map((r) => {
+        if (!included[r.key]) return '';
         if (r.kind === 'field') {
-          if (!included[r.key]) return '';
           return `<tr>
             <th style="text-align:left; padding:6px 10px; border:1px solid #ccc; background:#f6f7f9; vertical-align:top; width:170px;">${escapeHTML(r.label)}</th>
             <td style="padding:6px 10px; border:1px solid #ccc; vertical-align:top;">${(escapeHTML(r.valueText) || '').replace(/\n/g, '<br>')}</td>
           </tr>`;
         }
-        const chosen = r.items.filter((it) => included[r.key + '__ids'].has(it.id));
+        const chosen = r.items;
         if (!chosen.length) return '';
         // Status → pill badge with inline styles that survive Gmail /
         // Outlook paste (they strip <style>, so styling must live on
@@ -16857,7 +16800,7 @@
           const st = STATUS_PILL[status] || STATUS_PILL.todo;
           return ` <span style="display:inline-block; padding:0 6px; margin-left:4px; border-radius:8px; font-size:11px; font-weight:600; ${st}">${escapeHTML(status)}</span>`;
         };
-        const list = chosen.map((it) => {
+        const list = r.items.map((it) => {
           const status = (r.showDone && it.done) ? 'done' : (it.status || null);
           const isDone = status === 'done';
           const textStyle = isDone ? ' style="text-decoration:line-through; color:#6b7280;"' : '';
@@ -16873,16 +16816,15 @@
     function buildCopyText() {
       const parts = [];
       rows.forEach((r) => {
+        if (!included[r.key]) return;
         if (r.kind === 'field') {
-          if (!included[r.key]) return;
           parts.push(`${r.label}:\n${r.valueText}\n`);
         } else {
-          const chosen = r.items.filter((it) => included[r.key + '__ids'].has(it.id));
-          if (!chosen.length) return;
+          if (!r.items.length) return;
           // Parenthesised suffix "(status)" for any item that carries
           // one — never bracketed "[status]" which reads too much like
           // a checkbox in monospace clients.
-          parts.push(`${r.label}:\n` + chosen.map((it) => {
+          parts.push(`${r.label}:\n` + r.items.map((it) => {
             const status = (r.showDone && it.done) ? 'done' : (it.status || '');
             return `  • ${it.text}${status ? ' (' + status + ')' : ''}`;
           }).join('\n') + '\n');
@@ -16894,8 +16836,6 @@
     overlay.appendChild(dlg);
     document.body.appendChild(overlay);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-    // Set indeterminate visual state on group checkboxes now that they're in the DOM.
-    dlg.querySelectorAll('.acc-cb-group[data-indeterminate="1"]').forEach((cb) => { cb.indeterminate = true; });
   }
 
   // Shared time window for the Activities Gantt + Workload chart.

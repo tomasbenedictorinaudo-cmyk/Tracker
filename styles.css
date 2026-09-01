@@ -11223,10 +11223,12 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 .acc-tog:hover    { filter: brightness(1.15); }
 :root[data-theme="light"] .acc-tog.is-in    { color: rgba(22, 101, 52, 1); }
 :root[data-theme="light"] .acc-tog.is-mixed { color: rgba(146, 64, 14, 1); }
-.acc-sub { border-collapse: collapse; width: 100%; font-size: 12px; }
-.acc-sub td { border: 0; padding: 2px 4px; vertical-align: top; }
-.acc-sub .acc-cb { width: 52px; padding: 2px 0; background: transparent; border: 0; }
-.acc-sub-text.is-done { text-decoration: line-through; text-decoration-color: rgba(148,163,184,.6); color: var(--muted); }
+.acc-list-item {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 1px 0;
+}
+.acc-list-item.is-done { text-decoration: line-through; text-decoration-color: rgba(148,163,184,.6); color: var(--muted); }
 .acc-status-pill {
   display: inline-block;
   padding: 0 6px;
