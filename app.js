@@ -16747,6 +16747,9 @@
       const set = included[r.key + '__ids'];
       const all = set.size === r.items.length;
       const some = set.size > 0 && !all;
+      // Task "done" is shown as a discreet pill + strikethrough so it
+      // can't be mistaken for a copy-inclusion checkbox. The only
+      // control that decides what gets copied is the leftmost .acc-cb.
       return `<tr class="acc-row acc-row-list">
         <td class="acc-cb"><input type="checkbox" class="acc-cb-group" data-key="${escapeHTML(r.key)}" ${all ? 'checked' : ''} ${some ? 'data-indeterminate="1"' : ''} /></td>
         <td class="acc-lbl"><b>${escapeHTML(r.label)}</b><div class="muted" style="font-size:10px;">${r.items.length} item${r.items.length === 1 ? '' : 's'}</div></td>
@@ -16754,7 +16757,7 @@
           <table class="acc-sub"><tbody>
             ${r.items.map((it) => `<tr>
               <td class="acc-cb"><input type="checkbox" class="acc-cb-list" data-key="${escapeHTML(r.key)}" data-item-id="${escapeHTML(it.id)}" ${set.has(it.id) ? 'checked' : ''} /></td>
-              <td>${r.showDone && it.done ? '<span style="color:var(--ok, #16a34a); font-weight:600; margin-right:6px;">✓</span>' : ''}${escapeHTML(it.text)}</td>
+              <td class="acc-sub-text${r.showDone && it.done ? ' is-done' : ''}">${escapeHTML(it.text)}${r.showDone && it.done ? ' <span class="acc-done-pill">done</span>' : ''}</td>
             </tr>`).join('')}
           </tbody></table>
         </td>
@@ -16800,7 +16803,15 @@
         }
         const chosen = r.items.filter((it) => included[r.key + '__ids'].has(it.id));
         if (!chosen.length) return '';
-        const list = chosen.map((it) => `<li>${r.showDone && it.done ? '☑ ' : ''}${escapeHTML(it.text)}</li>`).join('');
+        // Done tasks render as strikethrough with a small "done" badge —
+        // clearly a status marker, not a checkbox. Deliberately avoids
+        // any ✓/☑ glyph inside the copied text.
+        const list = chosen.map((it) => {
+          const isDone = r.showDone && it.done;
+          const textStyle = isDone ? ' style="text-decoration:line-through; color:#6b7280;"' : '';
+          const badge    = isDone ? ' <span style="display:inline-block; padding:0 6px; margin-left:4px; border-radius:8px; background:#dcfce7; color:#166534; font-size:11px; font-weight:600;">done</span>' : '';
+          return `<li${textStyle}>${escapeHTML(it.text)}${badge}</li>`;
+        }).join('');
         return `<tr>
           <th style="text-align:left; padding:6px 10px; border:1px solid #ccc; background:#f6f7f9; vertical-align:top; width:170px;">${escapeHTML(r.label)}</th>
           <td style="padding:6px 10px; border:1px solid #ccc; vertical-align:top;"><ul style="margin:0; padding-left:18px;">${list}</ul></td>
@@ -16817,7 +16828,9 @@
         } else {
           const chosen = r.items.filter((it) => included[r.key + '__ids'].has(it.id));
           if (!chosen.length) return;
-          parts.push(`${r.label}:\n` + chosen.map((it) => `  • ${r.showDone && it.done ? '[x] ' : ''}${it.text}`).join('\n') + '\n');
+          // Suffix "(done)" instead of a `[x]` prefix so plain-text
+          // clients don't render a checkbox-looking glyph up front.
+          parts.push(`${r.label}:\n` + chosen.map((it) => `  • ${it.text}${r.showDone && it.done ? ' (done)' : ''}`).join('\n') + '\n');
         }
       });
       return parts.join('\n');
