@@ -11228,7 +11228,6 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
   line-height: 1.5;
   padding: 1px 0;
 }
-.acc-list-item.is-done { text-decoration: line-through; text-decoration-color: rgba(148,163,184,.6); color: var(--muted); }
 .acc-status-pill {
   display: inline-block;
   padding: 0 6px;

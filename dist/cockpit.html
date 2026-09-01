@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-09-01T20:05:56.678Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-09-01T20:16:12.517Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -11237,7 +11237,6 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
   line-height: 1.5;
   padding: 1px 0;
 }
-.acc-list-item.is-done { text-decoration: line-through; text-decoration-color: rgba(148,163,184,.6); color: var(--muted); }
 .acc-status-pill {
   display: inline-block;
   padding: 0 6px;
@@ -28374,9 +28373,8 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
       // lines with status pills. No per-item toggles.
       const itemsHTML = r.items.map((it) => {
         const status = (r.showDone && it.done) ? 'done' : (it.status || null);
-        const isDone = status === 'done';
         const pill = status ? ` <span class="acc-status-pill acc-status-${escapeHTML(status)}">${escapeHTML(status)}</span>` : '';
-        return `<div class="acc-list-item${isDone ? ' is-done' : ''}">• ${escapeHTML(it.text)}${pill}</div>`;
+        return `<div class="acc-list-item">• ${escapeHTML(it.text)}${pill}</div>`;
       }).join('');
       return `<tr class="acc-row acc-row-list">
         <td class="acc-cb">${togHTML(`data-key="${escapeHTML(r.key)}"`, state)}</td>
@@ -28443,9 +28441,7 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
         };
         const list = r.items.map((it) => {
           const status = (r.showDone && it.done) ? 'done' : (it.status || null);
-          const isDone = status === 'done';
-          const textStyle = isDone ? ' style="text-decoration:line-through; color:#6b7280;"' : '';
-          return `<li${textStyle}>${escapeHTML(it.text)}${pillHTML(status)}</li>`;
+          return `<li>${escapeHTML(it.text)}${pillHTML(status)}</li>`;
         }).join('');
         return `<tr>
           <th style="text-align:left; padding:6px 10px; border:1px solid #ccc; background:#f6f7f9; vertical-align:top; width:170px;">${escapeHTML(r.label)}</th>

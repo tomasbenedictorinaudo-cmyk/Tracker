@@ -16733,9 +16733,8 @@
       // lines with status pills. No per-item toggles.
       const itemsHTML = r.items.map((it) => {
         const status = (r.showDone && it.done) ? 'done' : (it.status || null);
-        const isDone = status === 'done';
         const pill = status ? ` <span class="acc-status-pill acc-status-${escapeHTML(status)}">${escapeHTML(status)}</span>` : '';
-        return `<div class="acc-list-item${isDone ? ' is-done' : ''}">• ${escapeHTML(it.text)}${pill}</div>`;
+        return `<div class="acc-list-item">• ${escapeHTML(it.text)}${pill}</div>`;
       }).join('');
       return `<tr class="acc-row acc-row-list">
         <td class="acc-cb">${togHTML(`data-key="${escapeHTML(r.key)}"`, state)}</td>
@@ -16802,9 +16801,7 @@
         };
         const list = r.items.map((it) => {
           const status = (r.showDone && it.done) ? 'done' : (it.status || null);
-          const isDone = status === 'done';
-          const textStyle = isDone ? ' style="text-decoration:line-through; color:#6b7280;"' : '';
-          return `<li${textStyle}>${escapeHTML(it.text)}${pillHTML(status)}</li>`;
+          return `<li>${escapeHTML(it.text)}${pillHTML(status)}</li>`;
         }).join('');
         return `<tr>
           <th style="text-align:left; padding:6px 10px; border:1px solid #ccc; background:#f6f7f9; vertical-align:top; width:170px;">${escapeHTML(r.label)}</th>
