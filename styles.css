@@ -11604,3 +11604,22 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 .nt-toc-filter[data-sev="ok"].is-on   { background: rgba(74, 222, 128, .18); color: rgba(74, 222, 128, 1); border-color: rgba(74, 222, 128, .40); }
 .nt-toc-filter[data-sev="warn"].is-on { background: rgba(251, 191, 36, .18); color: rgba(251, 191, 36, 1); border-color: rgba(251, 191, 36, .40); }
 .nt-toc-filter[data-sev="bad"].is-on  { background: rgba(248, 113, 121, .18); color: rgba(248, 113, 121, 1); border-color: rgba(248, 113, 121, .40); }
+
+/* Notes — reference chips (risk / open point / decision / activity) */
+.note-chip.ref-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  border: 1px solid var(--line);
+  background: rgba(148, 163, 184, .10);
+  color: var(--fg);
+  cursor: pointer;
+  user-select: none;
+  margin: 0 1px;
+}
+.note-chip.ref-chip:hover { background: rgba(148, 163, 184, .22); border-color: var(--fg); }
+.note-chip.ref-chip-risk       { background: rgba(248, 113, 121, .12); border-color: rgba(248, 113, 121, .40); }
+.note-chip.ref-chip-openpoint  { background: rgba(251, 191, 36, .12); border-color: rgba(251, 191, 36, .40); }
+.note-chip.ref-chip-decision   { background: rgba(96, 165, 250, .12); border-color: rgba(96, 165, 250, .40); }
+.note-chip.ref-chip-activity   { background: rgba(147, 197, 253, .12); border-color: rgba(147, 197, 253, .40); }

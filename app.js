@@ -21729,7 +21729,7 @@
         if (tag === 'SPAN') ['style'].forEach((a) => keep.add(a));
         if (tag === 'DIV' || tag === 'P' || /^H[1-6]$/.test(tag)) keep.add('style');
         // Preserve every chip/link data-* attribute we know about.
-        ['data-action-id','data-person-id','data-gmail-thread','data-gmail-subject','data-img-id','data-hl'].forEach((a) => keep.add(a));
+        ['data-action-id','data-person-id','data-gmail-thread','data-gmail-subject','data-img-id','data-hl','data-ref-kind','data-ref-id','data-ref-proj'].forEach((a) => keep.add(a));
         for (const attr of Array.from(child.attributes)) {
           const n = attr.name.toLowerCase();
           if (n.startsWith('on')) { child.removeAttribute(attr.name); continue; }
@@ -21827,6 +21827,96 @@
     for (const id of Object.keys(state.mediaBlobs)) {
       if (!referenced.has(id)) delete state.mediaBlobs[id];
     }
+  }
+
+  // ── Notes: HTML → Markdown ────────────────────────────────────
+  // Pragmatic converter tuned for the notes we produce — headings,
+  // paragraphs, bold/italic/underline, lists (nested), inline code,
+  // <hr>, links, blockquotes, images (as data-URIs or their id),
+  // chips (rendered as [Ref: label] shorthand). Not a general-
+  // purpose serializer — anything unexpected falls through as its
+  // text content.
+  function _notesHTMLToMarkdown(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = String(html || '');
+    const out = [];
+    const walk = (node, depth, prefix) => {
+      for (const n of node.childNodes) {
+        if (n.nodeType === 3) { out.push(n.nodeValue); continue; }
+        if (n.nodeType !== 1) continue;
+        const t = n.tagName;
+        if (t === 'BR') { out.push('\n'); continue; }
+        if (/^H([1-6])$/.test(t)) {
+          const lvl = Number(RegExp.$1);
+          out.push('\n\n' + '#'.repeat(lvl) + ' ');
+          walk(n, depth, '');
+          out.push('\n');
+          continue;
+        }
+        if (t === 'P')  { walk(n, depth, ''); out.push('\n\n'); continue; }
+        if (t === 'HR') { out.push('\n\n---\n\n'); continue; }
+        if (t === 'BLOCKQUOTE') { out.push('\n> '); walk(n, depth, '> '); out.push('\n'); continue; }
+        if (t === 'STRONG' || t === 'B') { out.push('**'); walk(n, depth, ''); out.push('**'); continue; }
+        if (t === 'EM' || t === 'I')     { out.push('*');  walk(n, depth, ''); out.push('*');  continue; }
+        if (t === 'U')                   { out.push('__'); walk(n, depth, ''); out.push('__'); continue; }
+        if (t === 'S')                   { out.push('~~'); walk(n, depth, ''); out.push('~~'); continue; }
+        if (t === 'CODE') { out.push('`');  walk(n, depth, ''); out.push('`');  continue; }
+        if (t === 'A') {
+          out.push('[');
+          walk(n, depth, '');
+          out.push('](' + (n.getAttribute('href') || '') + ')');
+          continue;
+        }
+        if (t === 'UL' || t === 'OL') {
+          out.push('\n');
+          const kids = n.children;
+          for (let i = 0; i < kids.length; i++) {
+            const li = kids[i];
+            if (li.tagName !== 'LI') continue;
+            const marker = t === 'OL' ? `${i + 1}. ` : '- ';
+            out.push('  '.repeat(depth) + marker);
+            walk(li, depth + 1, '');
+            out.push('\n');
+          }
+          out.push('\n');
+          continue;
+        }
+        if (t === 'MARK') {
+          // Highlight — surface the icon inline as a semantic tag.
+          const kind = n.getAttribute('data-hl') || '';
+          const glyph = ({ ok: '✓', warn: '⚠', bad: '✕' })[kind] || '';
+          if (glyph) out.push(glyph + ' ');
+          walk(n, depth, '');
+          continue;
+        }
+        if (n.classList?.contains('gm-chip')) {
+          const subj = n.getAttribute('data-gmail-subject') || 'email';
+          const url = n.getAttribute('href') || '';
+          out.push(`[✉ ${subj}](${url})`);
+          continue;
+        }
+        if (n.classList?.contains('rt-img')) {
+          const id = n.getAttribute('data-img-id') || '';
+          out.push(`![pasted-image-${id}]`);
+          continue;
+        }
+        if (n.classList?.contains('rt-img-wrap')) {
+          const img = n.querySelector?.('.rt-img');
+          const id = img?.getAttribute('data-img-id') || '';
+          out.push(`![pasted-image-${id}]`);
+          continue;
+        }
+        if (n.classList?.contains('note-chip')) {
+          if (n.dataset.refKind) out.push(`[${n.dataset.refKind}:${(n.textContent || '').trim().replace(/^[^\w]+\s*/, '')}]`);
+          else if (n.dataset.actionId) out.push(`[action:${(n.textContent || '').trim().replace(/^[^\w]+\s*/, '')}]`);
+          else out.push((n.textContent || ''));
+          continue;
+        }
+        walk(n, depth, prefix);
+      }
+    };
+    walk(tmp, 0, '');
+    return out.join('').replace(/\n{3,}/g, '\n\n').trim() + '\n';
   }
 
   // ── Notes: in-note search bar ─────────────────────────────────
@@ -22839,10 +22929,17 @@
         if (!exactMatch) items.push({ __newPerson: true, name: trimmed });
       }
     } else {
-      items = state.projects
-        .flatMap((proj) => (proj.actions || []).filter((a) => !a.archivedAt).map((a) => ({ ...a, _proj: proj })))
-        .filter((a) => a.title.toLowerCase().includes(q))
-        .slice(0, 8);
+      // Phase 4 — `#` now indexes actions, risks, opportunities,
+      // open points, decisions, and activities. The item's _kind
+      // decides what chip gets rendered and where a click drills.
+      const acts = state.projects.flatMap((pr) => (pr.actions || []).filter((a) => !a.archivedAt).map((a) => ({ ...a, _kind: 'action', _proj: pr, _label: a.title })));
+      const risks = state.projects.flatMap((pr) => (pr.risks || []).map((r) => ({ ...r, _kind: 'risk', _proj: pr, _label: r.title })));
+      const ops   = state.projects.flatMap((pr) => (pr.openPoints || []).map((op) => ({ ...op, _kind: 'openpoint', _proj: pr, _label: op.title })));
+      const decs  = state.projects.flatMap((pr) => (pr.decisions || []).map((d) => ({ ...d, _kind: 'decision', _proj: pr, _label: d.title })));
+      const activities = (state.activities || []).map((a) => ({ ...a, _kind: 'activity', _label: a.title }));
+      items = acts.concat(risks, ops, decs, activities)
+        .filter((it) => (it._label || '').toLowerCase().includes(q))
+        .slice(0, 12);
     }
     if (!items.length) { hideNotesAutocomplete(); return; }
     notesAcState = { kind: ctx.kind, query: ctx.query, items, idx: 0, triggerRange: ctx.triggerRange };
@@ -22877,10 +22974,24 @@
           <span class="ac-text"><span class="ac-name">${escapeHTML(it.name)}</span><span class="ac-meta">${escapeHTML(it.role || '')}</span></span>
         </button>`;
       }
-      const due = it.due ? fmtDate(it.due) : '—';
+      // Kind-aware rendering — actions keep their existing look; the
+      // other kinds get an icon + type label so users can distinguish
+      // "action" from "risk" from "activity" at a glance.
+      const KIND_META = {
+        action:    { icon: '▤', label: 'Action' },
+        risk:      { icon: '△', label: 'Risk' },
+        openpoint: { icon: '⚐', label: 'Open point' },
+        decision:  { icon: '⚖', label: 'Decision' },
+        activity:  { icon: '⟟', label: 'Activity' },
+      };
+      const m = KIND_META[it._kind] || KIND_META.action;
+      const due = it.due ? fmtDate(it.due) : '';
+      const meta = it._kind === 'action'
+        ? `${escapeHTML(personName(it.owner))}${due ? ' · ' + due : ''}`
+        : `${m.label}${it._proj ? ' · ' + escapeHTML(it._proj.name) : ''}`;
       return `<button type="button" class="ac-item ${sel}" data-ac-idx="${i}" role="option">
-        <span class="ac-icon">▤</span>
-        <span class="ac-text"><span class="ac-name">${escapeHTML(it.title)}</span><span class="ac-meta">${escapeHTML(personName(it.owner))} · ${due}</span></span>
+        <span class="ac-icon">${m.icon}</span>
+        <span class="ac-text"><span class="ac-name">${escapeHTML(it._label || it.title || '')}</span><span class="ac-meta">${meta}</span></span>
       </button>`;
     }).join('');
     popup.hidden = false;
@@ -22940,7 +23051,33 @@
       openActionFor(it.id);
       return;
     }
-    insertActionChip(it);
+    // # picker — insert a chip appropriate to the kind. Actions use
+    // the existing insertActionChip (live status glyph). All the
+    // other kinds get a lighter link chip that opens the target's
+    // editor on click.
+    if (!it._kind || it._kind === 'action') {
+      insertActionChip(it);
+    } else {
+      insertRefChip(it);
+    }
+  }
+  // Generic reference chip for non-action targets (risk / open point
+  // / decision / activity). Renders as a small pill; clicking opens
+  // the target's editor. The chip carries its kind + id so back-
+  // references can be counted on the target side later.
+  function insertRefChip(it) {
+    const KIND_META = {
+      risk:      { icon: '△', label: 'Risk' },
+      openpoint: { icon: '⚐', label: 'Open point' },
+      decision:  { icon: '⚖', label: 'Decision' },
+      activity:  { icon: '⟟', label: 'Activity' },
+    };
+    const m = KIND_META[it._kind] || { icon: '▤', label: 'Ref' };
+    const id = it.id;
+    const label = it._label || it.title || 'ref';
+    const html = `<span class="note-chip ref-chip ref-chip-${escapeHTML(it._kind)}" contenteditable="false" data-ref-kind="${escapeHTML(it._kind)}" data-ref-id="${escapeHTML(id)}" data-ref-proj="${escapeHTML(it._proj?.id || '')}" title="${m.label}: ${escapeHTML(label)} — click to open">${m.icon}&nbsp;${escapeHTML(label)}</span>&nbsp;`;
+    document.execCommand('insertHTML', false, html);
+    scheduleNotesSave();
   }
 
   function refreshNoteChips() {
@@ -23048,6 +23185,57 @@
       const p = $('#notesPanel');
       p?.classList.toggle('reading-mode');
       $('#notesBody')?.focus();
+    });
+
+    // Copy for email — writes both HTML and Markdown to the
+    // clipboard so a paste in Gmail keeps the formatting, and a
+    // paste in Slack / a code editor stays readable as plain text.
+    $('#btnNotesCopy')?.addEventListener('click', async () => {
+      const proj = curProject(); if (!proj) return;
+      const entry = _activeEntry(proj.id);
+      const html  = _sanitizeNotesHTML(entry.html || '');
+      const md    = _notesHTMLToMarkdown(html);
+      const wrapped = `<div style="font-family:Arial,sans-serif; font-size:13px; line-height:1.5;"><h2 style="margin:0 0 8px;">${escapeHTML(entry.title)}</h2>${html}</div>`;
+      try {
+        if (navigator.clipboard && window.ClipboardItem) {
+          await navigator.clipboard.write([new ClipboardItem({
+            'text/html':  new Blob([wrapped], { type: 'text/html' }),
+            'text/plain': new Blob([md],      { type: 'text/plain' }),
+          })]);
+          toast('Copied — paste into Gmail (formatted) or Slack (Markdown).');
+        } else {
+          throw new Error('no ClipboardItem');
+        }
+      } catch (_) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = md; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove();
+          toast('Copied as Markdown.');
+        } catch (__) {
+          alert('Copy failed — try again from a user interaction.');
+        }
+      }
+    });
+    // Export the whole notebook as one Markdown file per project.
+    $('#btnNotesExport')?.addEventListener('click', () => {
+      const proj = curProject(); if (!proj) return;
+      const nb = _notebookFor(proj.id);
+      const parts = [`# ${proj.name} — notebook\n`];
+      nb.entries.filter((e) => !e.archived)
+        .sort((a, b) => (a.pinned !== b.pinned ? (a.pinned ? -1 : 1) : (b.updatedAt||'').localeCompare(a.updatedAt||'')))
+        .forEach((e) => {
+          parts.push(`\n\n---\n\n## ${e.title}\n\n*${e.kind} · updated ${new Date(e.updatedAt).toLocaleString()}*\n\n`);
+          parts.push(_notesHTMLToMarkdown(_sanitizeNotesHTML(e.html || '')));
+        });
+      const md = parts.join('');
+      const blob = new Blob([md], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${proj.name.replace(/\s+/g, '_')}-notebook-${todayISO()}.md`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast(`Exported ${nb.entries.filter((e)=>!e.archived).length} entries as Markdown.`);
     });
 
     // In-note search — Cmd/Ctrl+F when the notes panel is focused
@@ -23388,9 +23576,21 @@
       const chip = e.target.closest('.note-chip');
       if (!chip) return;
       e.preventDefault();
-      // Person chips → filter Register to that person; action chips → drawer
+      // Person chips → filter Register; action chips → drawer;
+      // ref chips → open the target's editor (risk / open point /
+      // decision / activity).
       if (chip.classList.contains('person-chip') && chip.dataset.personId) {
         applyTopbarFilter({ owner: chip.dataset.personId, view: 'register' });
+      } else if (chip.dataset.refKind && chip.dataset.refId) {
+        const k = chip.dataset.refKind, id = chip.dataset.refId, pid = chip.dataset.refProj;
+        // Switch to the ref's project if not merged/current.
+        if (pid && pid !== state.currentProjectId && state.currentProjectId !== '__all__') {
+          state.currentProjectId = pid; saveState(); render();
+        }
+        if (k === 'risk')      typeof openRiskEditor === 'function' && openRiskEditor(id);
+        else if (k === 'openpoint') typeof openOpenPointEditor === 'function' && openOpenPointEditor(id);
+        else if (k === 'decision')  typeof openDecisionEditor === 'function' && openDecisionEditor(id);
+        else if (k === 'activity')  typeof openActivityEditor === 'function' && openActivityEditor(id);
       } else if (chip.dataset.actionId) {
         openDrawer(chip.dataset.actionId);
       }
