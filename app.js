@@ -21204,8 +21204,8 @@
           }
         }
         const tag = n.tagName;
-        if (tag === 'BR') { out += '\n'; continue; }
-        if (tag === 'DIV' || tag === 'P') {
+        if (tag === 'BR' || tag === 'HR') { out += '\n'; continue; }
+        if (tag === 'DIV' || tag === 'P' || /^H[1-6]$/.test(tag) || tag === 'BLOCKQUOTE' || tag === 'LI' || tag === 'PRE') {
           if (out && !out.endsWith('\n')) out += '\n';
           walk(n);
           continue;
@@ -22043,12 +22043,25 @@
         </div>`;
     }
     document.body.appendChild(pop);
-    // Anchor next to the history button.
+    // Anchor to the history button — top-right of the popover aligned
+    // to bottom-right of the button. Clamped to the viewport so it
+    // never spills off-screen in fullscreen or on narrow panels.
     const btn = $('#btnNotesHistory');
     if (btn) {
       const r = btn.getBoundingClientRect();
-      pop.style.top  = (r.bottom + window.scrollY + 6) + 'px';
-      pop.style.left = Math.max(8, r.right + window.scrollX - pop.offsetWidth) + 'px';
+      const w = pop.offsetWidth  || 300;
+      const h = pop.offsetHeight || 200;
+      let top  = r.bottom + window.scrollY + 6;
+      let left = r.right + window.scrollX - w;
+      // Clamp horizontally within viewport.
+      if (left + w + 8 > window.innerWidth) left = window.innerWidth - w - 8;
+      if (left < 8) left = 8;
+      // Flip above if there's no room below.
+      if (top + h + 8 > window.innerHeight + window.scrollY) {
+        top = Math.max(window.scrollY + 8, r.top + window.scrollY - h - 6);
+      }
+      pop.style.top  = top  + 'px';
+      pop.style.left = left + 'px';
     }
     const close = () => pop.remove();
     pop.querySelector('.nt-hist-close')?.addEventListener('click', close);
@@ -22226,7 +22239,14 @@
     const html = entry.html ? _sanitizeNotesHTML(entry.html)
       : `<p><i>New note for <b>${escapeHTML(proj.name)}</b> — type freely.</i></p><p></p>`;
     body.innerHTML = html;
-    $('#notesMeta').textContent = `${proj.name} · ${entry.title}`;
+    // Show the entry title (bigger) with the project name as a small
+    // subtitle. Both truncate cleanly on narrow panels; the full
+    // strings live in the tooltip.
+    const metaEl = $('#notesMeta');
+    if (metaEl) {
+      metaEl.innerHTML = `<span class="nt-meta-title">${escapeHTML(entry.title)}</span><span class="nt-meta-sub">${escapeHTML(proj.name)}</span>`;
+      metaEl.title = `${entry.title} · ${proj.name}`;
+    }
     buildNotesToc();
     renderNotesEntryList();
     // Tag each block's language so the browser's native spellcheck
@@ -22932,13 +22952,13 @@
       // Phase 4 — `#` now indexes actions, risks, opportunities,
       // open points, decisions, and activities. The item's _kind
       // decides what chip gets rendered and where a click drills.
-      const acts = state.projects.flatMap((pr) => (pr.actions || []).filter((a) => !a.archivedAt).map((a) => ({ ...a, _kind: 'action', _proj: pr, _label: a.title })));
-      const risks = state.projects.flatMap((pr) => (pr.risks || []).map((r) => ({ ...r, _kind: 'risk', _proj: pr, _label: r.title })));
-      const ops   = state.projects.flatMap((pr) => (pr.openPoints || []).map((op) => ({ ...op, _kind: 'openpoint', _proj: pr, _label: op.title })));
-      const decs  = state.projects.flatMap((pr) => (pr.decisions || []).map((d) => ({ ...d, _kind: 'decision', _proj: pr, _label: d.title })));
-      const activities = (state.activities || []).map((a) => ({ ...a, _kind: 'activity', _label: a.title }));
+      const acts = state.projects.flatMap((pr) => (pr.actions || []).filter((a) => a && a.id && !a.archivedAt).map((a) => ({ ...a, _kind: 'action', _proj: pr, _label: a.title || '' })));
+      const risks = state.projects.flatMap((pr) => (pr.risks || []).filter((r) => r && r.id).map((r) => ({ ...r, _kind: 'risk', _proj: pr, _label: r.title || '' })));
+      const ops   = state.projects.flatMap((pr) => (pr.openPoints || []).filter((op) => op && op.id).map((op) => ({ ...op, _kind: 'openpoint', _proj: pr, _label: op.title || '' })));
+      const decs  = state.projects.flatMap((pr) => (pr.decisions || []).filter((d) => d && d.id).map((d) => ({ ...d, _kind: 'decision', _proj: pr, _label: d.title || '' })));
+      const activities = (state.activities || []).filter((a) => a && a.id).map((a) => ({ ...a, _kind: 'activity', _label: a.title || '' }));
       items = acts.concat(risks, ops, decs, activities)
-        .filter((it) => (it._label || '').toLowerCase().includes(q))
+        .filter((it) => it._label && it._label.toLowerCase().includes(q))
         .slice(0, 12);
     }
     if (!items.length) { hideNotesAutocomplete(); return; }
@@ -23180,10 +23200,13 @@
 
     // Reading mode — pinches the body to a comfortable max-width and
     // bumps line-height. Per-session, not persisted (feels like a
-    // context-specific mode, not a preference).
+    // context-specific mode, not a preference). Button shows an
+    // active outline so the state is legible.
     $('#btnNotesReading')?.addEventListener('click', () => {
       const p = $('#notesPanel');
-      p?.classList.toggle('reading-mode');
+      const btn = $('#btnNotesReading');
+      const on = p?.classList.toggle('reading-mode');
+      btn?.classList.toggle('is-on', !!on);
       $('#notesBody')?.focus();
     });
 
@@ -23279,13 +23302,24 @@
       e.preventDefault();
       $('#notesBody').focus();
       // Wrap the selection in <code>. If no selection, insert an empty
-      // <code></code> and place the caret inside.
+      // <code>…</code> with a zero-width space placeholder and put the
+      // caret inside it so the user can start typing immediately.
       const sel = window.getSelection();
       if (sel && sel.rangeCount && !sel.getRangeAt(0).collapsed) {
         const t = sel.toString();
         document.execCommand('insertHTML', false, `<code>${escapeHTML(t)}</code>`);
       } else {
-        document.execCommand('insertHTML', false, '<code>​</code>');
+        const range = sel.getRangeAt(0);
+        const code = document.createElement('code');
+        code.appendChild(document.createTextNode('​')); // zero-width space
+        range.deleteContents();
+        range.insertNode(code);
+        // Place caret INSIDE the <code>, after the zero-width space.
+        const r = document.createRange();
+        r.setStart(code.firstChild, 1);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
       }
       scheduleNotesSave();
     });
@@ -23341,8 +23375,9 @@
     $('#btnNotesFullscreen')?.addEventListener('click', () => {
       const p = $('#notesPanel');
       if (!p) return;
-      p.classList.toggle('is-fullscreen');
-      document.body.classList.toggle('notes-fullscreen', p.classList.contains('is-fullscreen'));
+      const on = p.classList.toggle('is-fullscreen');
+      document.body.classList.toggle('notes-fullscreen', on);
+      $('#btnNotesFullscreen')?.classList.toggle('is-on', on);
       $('#notesBody')?.focus();
     });
     // Esc exits fullscreen (only when notes are focused, and the drawer /

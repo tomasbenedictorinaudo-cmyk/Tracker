@@ -153,18 +153,29 @@
     <aside class="notes-panel" id="notesPanel" hidden>
       <div class="notes-resize" id="notesResize" title="Drag to resize · double-click to reset" aria-label="Resize notes panel" role="separator"></div>
       <div class="notes-head">
-        <div class="notes-title">Meeting notes</div>
-        <div class="notes-meta" id="notesMeta"></div>
-        <button class="icon-btn" id="btnNotesCopy" title="Copy this entry — HTML for email + Markdown for anywhere" aria-label="Copy note">📋</button>
-        <button class="icon-btn" id="btnNotesExport" title="Export the whole notebook as Markdown" aria-label="Export notebook as Markdown">⤓</button>
-        <button class="icon-btn" id="btnNotesSearch" title="Find in note (Cmd/Ctrl+F)" aria-label="Find in note">🔍</button>
-        <button class="icon-btn" id="btnNotesReading" title="Toggle reading mode (max-width + larger line-height)" aria-label="Toggle reading mode">☰</button>
-        <button class="icon-btn" id="btnNotesHistory" title="Show recent versions of these notes (last 20 autosaves)" aria-label="Version history">⤺</button>
-        <button class="icon-btn" id="btnNotesFullscreen" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">
-          <svg class="nt-fs-in" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <svg class="nt-fs-out" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <button class="icon-btn" id="btnNotesClose" title="Close">×</button>
+        <div class="notes-meta" id="notesMeta" title=""></div>
+        <div class="notes-head-actions">
+          <button class="icon-btn" id="btnNotesCopy" title="Copy this entry — HTML for email + Markdown for anywhere" aria-label="Copy note">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="5" y="3" width="8" height="10" rx="1.5"/><path d="M3 5v7a1.5 1.5 0 0 0 1.5 1.5H10"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesExport" title="Export the whole notebook as Markdown" aria-label="Export notebook">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 8l4 4 4-4M3 14h10"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesSearch" title="Find in note (Cmd/Ctrl+F)" aria-label="Find in note">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4"/><path d="M13 13l-3-3"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesReading" title="Toggle reading mode (comfortable width + line-height)" aria-label="Toggle reading mode">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4h10M3 8h10M3 12h7"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesHistory" title="Show recent versions (last 20 autosaves)" aria-label="Version history">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a5 5 0 1 1-1 3"/><path d="M2 3v3h3"/><path d="M8 5v3l2 1.5"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesFullscreen" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">
+            <svg class="nt-fs-in" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg class="nt-fs-out" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesClose" title="Close (Cmd/Ctrl+\)" aria-label="Close notes">×</button>
+        </div>
       </div>
       <div class="notes-toolbar" id="notesToolbar">
         <span class="nt-tb-group">
@@ -183,9 +194,7 @@
           <button data-cmd="formatBlock" data-arg="<h1>" title="Heading 1 (Cmd/Ctrl+1)" class="nt-h">H1</button>
           <button data-cmd="formatBlock" data-arg="<h2>" title="Heading 2 (Cmd/Ctrl+2)" class="nt-h">H2</button>
           <button data-cmd="formatBlock" data-arg="<h3>" title="Heading 3 (Cmd/Ctrl+3)" class="nt-h">H3</button>
-          <button data-cmd="formatBlock" data-arg="<h4>" title="Heading 4 (Cmd/Ctrl+4)" class="nt-h">H4</button>
-          <button data-cmd="formatBlock" data-arg="<h5>" title="Heading 5 (Cmd/Ctrl+5)" class="nt-h">H5</button>
-          <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph (Cmd/Ctrl+0)">¶</button>
+          <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph (Cmd/Ctrl+0) — H4/H5 available via Cmd/Ctrl+4/5">¶</button>
         </span>
         <span class="sep"></span>
         <span class="nt-tb-group">
@@ -235,9 +244,11 @@
       <div class="notes-entries" id="notesEntriesPanel">
         <div class="notes-entries-head">
           <input type="text" class="notes-entries-search" id="notesEntrySearch" placeholder="Search entries…" />
-          <label class="notes-entries-arch" title="Include archived entries in the list"><input type="checkbox" id="notesShowArchived" /> Archived</label>
-          <button type="button" class="notes-entries-new" id="btnNotesNewEntry" title="New entry (choose template)">+ New</button>
+          <button type="button" class="notes-entries-new" id="btnNotesNewEntry" title="New entry (choose template)" aria-label="New entry">+</button>
         </div>
+        <label class="notes-entries-arch" title="Include archived entries in the list">
+          <input type="checkbox" id="notesShowArchived" /> Show archived
+        </label>
         <div class="notes-entry-list" id="notesEntryList"></div>
       </div>
       <nav class="notes-toc" id="notesToc" aria-label="Notes contents" hidden></nav>

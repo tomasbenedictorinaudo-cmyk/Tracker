@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-09-03T18:43:05.918Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-09-03T18:55:23.071Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -8649,6 +8649,21 @@ kbd {
   min-width: 0;
   overflow: hidden;
   position: relative;
+  container-type: inline-size;
+  container-name: notespanel;
+}
+/* On narrow panels (< 320 px) the toolbar hides the least-used
+   controls — H3, colour swatch, insert group. Everything's still
+   reachable via the corresponding keyboard shortcut. */
+@container notespanel (max-width: 320px) {
+  .notes-toolbar button[data-arg="<h3>"],
+  .notes-toolbar #btnNotesInsertLink,
+  .notes-toolbar #btnNotesInsertHR,
+  .notes-toolbar #btnNotesInsertCode { display: none; }
+}
+@container notespanel (max-width: 260px) {
+  .notes-toolbar .nt-color,
+  .notes-toolbar button[data-cmd="removeFormat"] { display: none; }
 }
 .notes-panel[hidden] { display: none; }
 
@@ -8713,13 +8728,46 @@ body.is-row-dragging,
 body.is-row-dragging .row-grip { cursor: grabbing !important; }
 body.is-row-dragging *        { user-select: none !important; }
 .notes-head {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-2);
+  min-height: 40px;
 }
-.notes-title { font-weight: 600; font-size: 13px; }
-.notes-meta { color: var(--text-faint); font-size: 11px; flex: 1; }
+.notes-title { display: none; } /* replaced by structured .notes-meta */
+.notes-meta {
+  flex: 1 1 auto;
+  min-width: 0; /* allows the flex child to shrink and truncate */
+  display: flex; flex-direction: column; line-height: 1.2;
+  overflow: hidden;
+}
+.nt-meta-title {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nt-meta-sub {
+  font-size: 10.5px;
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.notes-head-actions {
+  display: flex; align-items: center; gap: 2px; flex-shrink: 0;
+}
+.notes-head-actions .icon-btn {
+  width: 26px; height: 26px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+}
+.notes-head-actions .icon-btn:hover { color: var(--fg); background: rgba(148,163,184,.14); }
+.notes-head-actions .icon-btn.is-on {
+  background: rgba(96, 165, 250, .18);
+  color: rgba(147, 197, 253, 1);
+}
+:root[data-theme="light"] .notes-head-actions .icon-btn.is-on { color: rgba(29, 78, 216, 1); }
+#btnNotesClose { font-size: 18px; }
 .notes-toolbar {
   display: flex; gap: 4px; align-items: center;
   padding: 6px 10px;
@@ -8728,7 +8776,8 @@ body.is-row-dragging *        { user-select: none !important; }
   flex-wrap: wrap;
 }
 .notes-toolbar .sep {
-  width: 1px; height: 18px; background: var(--line); margin: 0 4px;
+  width: 1px; height: 16px; background: var(--line); margin: 0 2px;
+  flex-shrink: 0;
 }
 .notes-toolbar button {
   background: transparent;
@@ -11442,10 +11491,11 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
   max-height: 220px;
 }
 .notes-entries-head {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 4px;
+  min-width: 0;
 }
 .notes-entries-search {
-  flex: 1;
+  flex: 1 1 auto; min-width: 0;
   padding: 3px 8px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -11455,19 +11505,22 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 }
 .notes-entries-arch {
   font-size: 10.5px; color: var(--muted);
-  display: inline-flex; align-items: center; gap: 3px;
+  display: inline-flex; align-items: center; gap: 4px;
   cursor: pointer; user-select: none;
+  padding: 0 2px;
 }
 .notes-entries-arch input { margin: 0; }
 .notes-entries-new {
   cursor: pointer;
-  padding: 2px 8px;
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: rgba(96, 165, 250, .15);
   color: rgba(147, 197, 253, 1);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 16px; font-weight: 700; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .notes-entries-new:hover { background: rgba(96, 165, 250, .28); }
 :root[data-theme="light"] .notes-entries-new { color: rgba(29, 78, 216, 1); }
@@ -11498,41 +11551,41 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 
 /* Notes — Phase 3 editor upgrade ───────────────────────────── */
 .notes-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   background: var(--bg, #0b1220);
   border-bottom: 1px solid var(--line);
   padding: 4px 6px;
   display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+  row-gap: 3px;
 }
 .notes-toolbar button svg { display: block; }
 .notes-toolbar button {
-  padding: 3px 6px;
-  min-width: 26px;
-  min-height: 26px;
+  padding: 3px 5px;
+  min-width: 24px;
+  min-height: 24px;
   display: inline-flex; align-items: center; justify-content: center;
 }
+.notes-toolbar button.nt-h {
+  min-width: 22px;
+  font-size: 10.5px; font-weight: 700;
+  padding: 3px 5px;
+}
 .nt-tb-group {
-  display: inline-flex; align-items: center; gap: 1px;
-  padding: 0 2px;
+  display: inline-flex; align-items: center; gap: 0;
   border-radius: 4px;
 }
-.nt-tb-group + .sep { margin: 0 4px; }
-/* Sticky-inside-fullscreen: keep toolbar visible when the panel is
-   in fullscreen and the body scrolls */
-.notes-panel.is-fullscreen .notes-toolbar { top: 0; }
+.nt-tb-group + .sep { margin: 0 3px; }
 
-/* In-note search bar ─────────────────────────────────────────── */
+/* In-note search bar — NOT sticky (sits directly under toolbar
+   which is not sticky either; scroll happens inside .notes-body).
+   `hidden` overrides the display:flex — HTML boolean attr wins. */
 .notes-search {
-  position: sticky;
-  top: 40px;
-  z-index: 6;
   background: var(--bg, #0b1220);
   border-bottom: 1px solid var(--line);
   padding: 4px 8px;
   display: flex; align-items: center; gap: 6px;
+  min-height: 34px;
 }
+.notes-search[hidden] { display: none !important; }
 .notes-search input#notesSearchInput {
   flex: 1;
   padding: 4px 8px;
@@ -11781,18 +11834,29 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     <aside class="notes-panel" id="notesPanel" hidden>
       <div class="notes-resize" id="notesResize" title="Drag to resize · double-click to reset" aria-label="Resize notes panel" role="separator"></div>
       <div class="notes-head">
-        <div class="notes-title">Meeting notes</div>
-        <div class="notes-meta" id="notesMeta"></div>
-        <button class="icon-btn" id="btnNotesCopy" title="Copy this entry — HTML for email + Markdown for anywhere" aria-label="Copy note">📋</button>
-        <button class="icon-btn" id="btnNotesExport" title="Export the whole notebook as Markdown" aria-label="Export notebook as Markdown">⤓</button>
-        <button class="icon-btn" id="btnNotesSearch" title="Find in note (Cmd/Ctrl+F)" aria-label="Find in note">🔍</button>
-        <button class="icon-btn" id="btnNotesReading" title="Toggle reading mode (max-width + larger line-height)" aria-label="Toggle reading mode">☰</button>
-        <button class="icon-btn" id="btnNotesHistory" title="Show recent versions of these notes (last 20 autosaves)" aria-label="Version history">⤺</button>
-        <button class="icon-btn" id="btnNotesFullscreen" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">
-          <svg class="nt-fs-in" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <svg class="nt-fs-out" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
-        <button class="icon-btn" id="btnNotesClose" title="Close">×</button>
+        <div class="notes-meta" id="notesMeta" title=""></div>
+        <div class="notes-head-actions">
+          <button class="icon-btn" id="btnNotesCopy" title="Copy this entry — HTML for email + Markdown for anywhere" aria-label="Copy note">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><rect x="5" y="3" width="8" height="10" rx="1.5"/><path d="M3 5v7a1.5 1.5 0 0 0 1.5 1.5H10"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesExport" title="Export the whole notebook as Markdown" aria-label="Export notebook">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2v9M4 8l4 4 4-4M3 14h10"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesSearch" title="Find in note (Cmd/Ctrl+F)" aria-label="Find in note">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><circle cx="7" cy="7" r="4"/><path d="M13 13l-3-3"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesReading" title="Toggle reading mode (comfortable width + line-height)" aria-label="Toggle reading mode">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M3 4h10M3 8h10M3 12h7"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesHistory" title="Show recent versions (last 20 autosaves)" aria-label="Version history">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6a5 5 0 1 1-1 3"/><path d="M2 3v3h3"/><path d="M8 5v3l2 1.5"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesFullscreen" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">
+            <svg class="nt-fs-in" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <svg class="nt-fs-out" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button class="icon-btn" id="btnNotesClose" title="Close (Cmd/Ctrl+\)" aria-label="Close notes">×</button>
+        </div>
       </div>
       <div class="notes-toolbar" id="notesToolbar">
         <span class="nt-tb-group">
@@ -11811,9 +11875,7 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
           <button data-cmd="formatBlock" data-arg="<h1>" title="Heading 1 (Cmd/Ctrl+1)" class="nt-h">H1</button>
           <button data-cmd="formatBlock" data-arg="<h2>" title="Heading 2 (Cmd/Ctrl+2)" class="nt-h">H2</button>
           <button data-cmd="formatBlock" data-arg="<h3>" title="Heading 3 (Cmd/Ctrl+3)" class="nt-h">H3</button>
-          <button data-cmd="formatBlock" data-arg="<h4>" title="Heading 4 (Cmd/Ctrl+4)" class="nt-h">H4</button>
-          <button data-cmd="formatBlock" data-arg="<h5>" title="Heading 5 (Cmd/Ctrl+5)" class="nt-h">H5</button>
-          <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph (Cmd/Ctrl+0)">¶</button>
+          <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph (Cmd/Ctrl+0) — H4/H5 available via Cmd/Ctrl+4/5">¶</button>
         </span>
         <span class="sep"></span>
         <span class="nt-tb-group">
@@ -11863,9 +11925,11 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
       <div class="notes-entries" id="notesEntriesPanel">
         <div class="notes-entries-head">
           <input type="text" class="notes-entries-search" id="notesEntrySearch" placeholder="Search entries…" />
-          <label class="notes-entries-arch" title="Include archived entries in the list"><input type="checkbox" id="notesShowArchived" /> Archived</label>
-          <button type="button" class="notes-entries-new" id="btnNotesNewEntry" title="New entry (choose template)">+ New</button>
+          <button type="button" class="notes-entries-new" id="btnNotesNewEntry" title="New entry (choose template)" aria-label="New entry">+</button>
         </div>
+        <label class="notes-entries-arch" title="Include archived entries in the list">
+          <input type="checkbox" id="notesShowArchived" /> Show archived
+        </label>
         <div class="notes-entry-list" id="notesEntryList"></div>
       </div>
       <nav class="notes-toc" id="notesToc" aria-label="Notes contents" hidden></nav>
@@ -33184,8 +33248,8 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
           }
         }
         const tag = n.tagName;
-        if (tag === 'BR') { out += '\n'; continue; }
-        if (tag === 'DIV' || tag === 'P') {
+        if (tag === 'BR' || tag === 'HR') { out += '\n'; continue; }
+        if (tag === 'DIV' || tag === 'P' || /^H[1-6]$/.test(tag) || tag === 'BLOCKQUOTE' || tag === 'LI' || tag === 'PRE') {
           if (out && !out.endsWith('\n')) out += '\n';
           walk(n);
           continue;
@@ -34023,12 +34087,25 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
         </div>`;
     }
     document.body.appendChild(pop);
-    // Anchor next to the history button.
+    // Anchor to the history button — top-right of the popover aligned
+    // to bottom-right of the button. Clamped to the viewport so it
+    // never spills off-screen in fullscreen or on narrow panels.
     const btn = $('#btnNotesHistory');
     if (btn) {
       const r = btn.getBoundingClientRect();
-      pop.style.top  = (r.bottom + window.scrollY + 6) + 'px';
-      pop.style.left = Math.max(8, r.right + window.scrollX - pop.offsetWidth) + 'px';
+      const w = pop.offsetWidth  || 300;
+      const h = pop.offsetHeight || 200;
+      let top  = r.bottom + window.scrollY + 6;
+      let left = r.right + window.scrollX - w;
+      // Clamp horizontally within viewport.
+      if (left + w + 8 > window.innerWidth) left = window.innerWidth - w - 8;
+      if (left < 8) left = 8;
+      // Flip above if there's no room below.
+      if (top + h + 8 > window.innerHeight + window.scrollY) {
+        top = Math.max(window.scrollY + 8, r.top + window.scrollY - h - 6);
+      }
+      pop.style.top  = top  + 'px';
+      pop.style.left = left + 'px';
     }
     const close = () => pop.remove();
     pop.querySelector('.nt-hist-close')?.addEventListener('click', close);
@@ -34206,7 +34283,14 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     const html = entry.html ? _sanitizeNotesHTML(entry.html)
       : `<p><i>New note for <b>${escapeHTML(proj.name)}</b> — type freely.</i></p><p></p>`;
     body.innerHTML = html;
-    $('#notesMeta').textContent = `${proj.name} · ${entry.title}`;
+    // Show the entry title (bigger) with the project name as a small
+    // subtitle. Both truncate cleanly on narrow panels; the full
+    // strings live in the tooltip.
+    const metaEl = $('#notesMeta');
+    if (metaEl) {
+      metaEl.innerHTML = `<span class="nt-meta-title">${escapeHTML(entry.title)}</span><span class="nt-meta-sub">${escapeHTML(proj.name)}</span>`;
+      metaEl.title = `${entry.title} · ${proj.name}`;
+    }
     buildNotesToc();
     renderNotesEntryList();
     // Tag each block's language so the browser's native spellcheck
@@ -34912,13 +34996,13 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
       // Phase 4 — `#` now indexes actions, risks, opportunities,
       // open points, decisions, and activities. The item's _kind
       // decides what chip gets rendered and where a click drills.
-      const acts = state.projects.flatMap((pr) => (pr.actions || []).filter((a) => !a.archivedAt).map((a) => ({ ...a, _kind: 'action', _proj: pr, _label: a.title })));
-      const risks = state.projects.flatMap((pr) => (pr.risks || []).map((r) => ({ ...r, _kind: 'risk', _proj: pr, _label: r.title })));
-      const ops   = state.projects.flatMap((pr) => (pr.openPoints || []).map((op) => ({ ...op, _kind: 'openpoint', _proj: pr, _label: op.title })));
-      const decs  = state.projects.flatMap((pr) => (pr.decisions || []).map((d) => ({ ...d, _kind: 'decision', _proj: pr, _label: d.title })));
-      const activities = (state.activities || []).map((a) => ({ ...a, _kind: 'activity', _label: a.title }));
+      const acts = state.projects.flatMap((pr) => (pr.actions || []).filter((a) => a && a.id && !a.archivedAt).map((a) => ({ ...a, _kind: 'action', _proj: pr, _label: a.title || '' })));
+      const risks = state.projects.flatMap((pr) => (pr.risks || []).filter((r) => r && r.id).map((r) => ({ ...r, _kind: 'risk', _proj: pr, _label: r.title || '' })));
+      const ops   = state.projects.flatMap((pr) => (pr.openPoints || []).filter((op) => op && op.id).map((op) => ({ ...op, _kind: 'openpoint', _proj: pr, _label: op.title || '' })));
+      const decs  = state.projects.flatMap((pr) => (pr.decisions || []).filter((d) => d && d.id).map((d) => ({ ...d, _kind: 'decision', _proj: pr, _label: d.title || '' })));
+      const activities = (state.activities || []).filter((a) => a && a.id).map((a) => ({ ...a, _kind: 'activity', _label: a.title || '' }));
       items = acts.concat(risks, ops, decs, activities)
-        .filter((it) => (it._label || '').toLowerCase().includes(q))
+        .filter((it) => it._label && it._label.toLowerCase().includes(q))
         .slice(0, 12);
     }
     if (!items.length) { hideNotesAutocomplete(); return; }
@@ -35160,10 +35244,13 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 
     // Reading mode — pinches the body to a comfortable max-width and
     // bumps line-height. Per-session, not persisted (feels like a
-    // context-specific mode, not a preference).
+    // context-specific mode, not a preference). Button shows an
+    // active outline so the state is legible.
     $('#btnNotesReading')?.addEventListener('click', () => {
       const p = $('#notesPanel');
-      p?.classList.toggle('reading-mode');
+      const btn = $('#btnNotesReading');
+      const on = p?.classList.toggle('reading-mode');
+      btn?.classList.toggle('is-on', !!on);
       $('#notesBody')?.focus();
     });
 
@@ -35259,13 +35346,24 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
       e.preventDefault();
       $('#notesBody').focus();
       // Wrap the selection in <code>. If no selection, insert an empty
-      // <code></code> and place the caret inside.
+      // <code>…</code> with a zero-width space placeholder and put the
+      // caret inside it so the user can start typing immediately.
       const sel = window.getSelection();
       if (sel && sel.rangeCount && !sel.getRangeAt(0).collapsed) {
         const t = sel.toString();
         document.execCommand('insertHTML', false, `<code>${escapeHTML(t)}</code>`);
       } else {
-        document.execCommand('insertHTML', false, '<code>​</code>');
+        const range = sel.getRangeAt(0);
+        const code = document.createElement('code');
+        code.appendChild(document.createTextNode('​')); // zero-width space
+        range.deleteContents();
+        range.insertNode(code);
+        // Place caret INSIDE the <code>, after the zero-width space.
+        const r = document.createRange();
+        r.setStart(code.firstChild, 1);
+        r.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(r);
       }
       scheduleNotesSave();
     });
@@ -35321,8 +35419,9 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     $('#btnNotesFullscreen')?.addEventListener('click', () => {
       const p = $('#notesPanel');
       if (!p) return;
-      p.classList.toggle('is-fullscreen');
-      document.body.classList.toggle('notes-fullscreen', p.classList.contains('is-fullscreen'));
+      const on = p.classList.toggle('is-fullscreen');
+      document.body.classList.toggle('notes-fullscreen', on);
+      $('#btnNotesFullscreen')?.classList.toggle('is-on', on);
       $('#notesBody')?.focus();
     });
     // Esc exits fullscreen (only when notes are focused, and the drawer /

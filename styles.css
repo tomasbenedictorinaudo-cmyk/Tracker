@@ -8640,6 +8640,21 @@ kbd {
   min-width: 0;
   overflow: hidden;
   position: relative;
+  container-type: inline-size;
+  container-name: notespanel;
+}
+/* On narrow panels (< 320 px) the toolbar hides the least-used
+   controls — H3, colour swatch, insert group. Everything's still
+   reachable via the corresponding keyboard shortcut. */
+@container notespanel (max-width: 320px) {
+  .notes-toolbar button[data-arg="<h3>"],
+  .notes-toolbar #btnNotesInsertLink,
+  .notes-toolbar #btnNotesInsertHR,
+  .notes-toolbar #btnNotesInsertCode { display: none; }
+}
+@container notespanel (max-width: 260px) {
+  .notes-toolbar .nt-color,
+  .notes-toolbar button[data-cmd="removeFormat"] { display: none; }
 }
 .notes-panel[hidden] { display: none; }
 
@@ -8704,13 +8719,46 @@ body.is-row-dragging,
 body.is-row-dragging .row-grip { cursor: grabbing !important; }
 body.is-row-dragging *        { user-select: none !important; }
 .notes-head {
-  display: flex; align-items: center; gap: 10px;
-  padding: 10px 12px;
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-2);
+  min-height: 40px;
 }
-.notes-title { font-weight: 600; font-size: 13px; }
-.notes-meta { color: var(--text-faint); font-size: 11px; flex: 1; }
+.notes-title { display: none; } /* replaced by structured .notes-meta */
+.notes-meta {
+  flex: 1 1 auto;
+  min-width: 0; /* allows the flex child to shrink and truncate */
+  display: flex; flex-direction: column; line-height: 1.2;
+  overflow: hidden;
+}
+.nt-meta-title {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nt-meta-sub {
+  font-size: 10.5px;
+  color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.notes-head-actions {
+  display: flex; align-items: center; gap: 2px; flex-shrink: 0;
+}
+.notes-head-actions .icon-btn {
+  width: 26px; height: 26px;
+  padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+}
+.notes-head-actions .icon-btn:hover { color: var(--fg); background: rgba(148,163,184,.14); }
+.notes-head-actions .icon-btn.is-on {
+  background: rgba(96, 165, 250, .18);
+  color: rgba(147, 197, 253, 1);
+}
+:root[data-theme="light"] .notes-head-actions .icon-btn.is-on { color: rgba(29, 78, 216, 1); }
+#btnNotesClose { font-size: 18px; }
 .notes-toolbar {
   display: flex; gap: 4px; align-items: center;
   padding: 6px 10px;
@@ -8719,7 +8767,8 @@ body.is-row-dragging *        { user-select: none !important; }
   flex-wrap: wrap;
 }
 .notes-toolbar .sep {
-  width: 1px; height: 18px; background: var(--line); margin: 0 4px;
+  width: 1px; height: 16px; background: var(--line); margin: 0 2px;
+  flex-shrink: 0;
 }
 .notes-toolbar button {
   background: transparent;
@@ -11433,10 +11482,11 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
   max-height: 220px;
 }
 .notes-entries-head {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; gap: 4px;
+  min-width: 0;
 }
 .notes-entries-search {
-  flex: 1;
+  flex: 1 1 auto; min-width: 0;
   padding: 3px 8px;
   border: 1px solid var(--line);
   border-radius: 4px;
@@ -11446,19 +11496,22 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 }
 .notes-entries-arch {
   font-size: 10.5px; color: var(--muted);
-  display: inline-flex; align-items: center; gap: 3px;
+  display: inline-flex; align-items: center; gap: 4px;
   cursor: pointer; user-select: none;
+  padding: 0 2px;
 }
 .notes-entries-arch input { margin: 0; }
 .notes-entries-new {
   cursor: pointer;
-  padding: 2px 8px;
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 4px;
   background: rgba(96, 165, 250, .15);
   color: rgba(147, 197, 253, 1);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: 16px; font-weight: 700; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .notes-entries-new:hover { background: rgba(96, 165, 250, .28); }
 :root[data-theme="light"] .notes-entries-new { color: rgba(29, 78, 216, 1); }
@@ -11489,41 +11542,41 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 
 /* Notes — Phase 3 editor upgrade ───────────────────────────── */
 .notes-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 5;
   background: var(--bg, #0b1220);
   border-bottom: 1px solid var(--line);
   padding: 4px 6px;
   display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+  row-gap: 3px;
 }
 .notes-toolbar button svg { display: block; }
 .notes-toolbar button {
-  padding: 3px 6px;
-  min-width: 26px;
-  min-height: 26px;
+  padding: 3px 5px;
+  min-width: 24px;
+  min-height: 24px;
   display: inline-flex; align-items: center; justify-content: center;
 }
+.notes-toolbar button.nt-h {
+  min-width: 22px;
+  font-size: 10.5px; font-weight: 700;
+  padding: 3px 5px;
+}
 .nt-tb-group {
-  display: inline-flex; align-items: center; gap: 1px;
-  padding: 0 2px;
+  display: inline-flex; align-items: center; gap: 0;
   border-radius: 4px;
 }
-.nt-tb-group + .sep { margin: 0 4px; }
-/* Sticky-inside-fullscreen: keep toolbar visible when the panel is
-   in fullscreen and the body scrolls */
-.notes-panel.is-fullscreen .notes-toolbar { top: 0; }
+.nt-tb-group + .sep { margin: 0 3px; }
 
-/* In-note search bar ─────────────────────────────────────────── */
+/* In-note search bar — NOT sticky (sits directly under toolbar
+   which is not sticky either; scroll happens inside .notes-body).
+   `hidden` overrides the display:flex — HTML boolean attr wins. */
 .notes-search {
-  position: sticky;
-  top: 40px;
-  z-index: 6;
   background: var(--bg, #0b1220);
   border-bottom: 1px solid var(--line);
   padding: 4px 8px;
   display: flex; align-items: center; gap: 6px;
+  min-height: 34px;
 }
+.notes-search[hidden] { display: none !important; }
 .notes-search input#notesSearchInput {
   flex: 1;
   padding: 4px 8px;
