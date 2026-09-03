@@ -22008,6 +22008,33 @@
     if (countEl) countEl.textContent = `${_notesSearchCursor + 1}/${_notesSearchHits.length}`;
   }
 
+  // ── Notes: save-as-template helper ────────────────────────────
+  // Flushes any pending debounce so the *current* body is what gets
+  // captured, then prompts for a name and stores the entry as a
+  // template in state.notesTemplates.
+  function saveNotesEntryAsTemplate(entry) {
+    const proj = curProject(); if (!proj) return;
+    // Make sure the latest edits are captured.
+    if (typeof notesSaveTimer !== 'undefined' && notesSaveTimer) saveNotesNow();
+    const e = entry || _activeEntry(proj.id);
+    if (!e) return;
+    const guess = (e.title || '').replace(/ — \d{4}-\d{2}-\d{2}/, '').trim() || 'My template';
+    const name = prompt('Template name (shows up in the + New menu):', guess);
+    if (!name || !name.trim()) return;
+    state.notesTemplates = state.notesTemplates || [];
+    state.notesTemplates.push({
+      id: 'ntpl_' + Math.random().toString(36).slice(2, 8),
+      name: name.trim(),
+      // Substituted at use time — "My template" → "My template — 2026-09-03".
+      titleTemplate: name.trim() + ' — {today}',
+      kind: e.kind || 'general',
+      html: e.html || '',
+      createdAt: new Date().toISOString(),
+    });
+    saveState();
+    toast(`Template "${name.trim()}" saved — pick it from + New.`);
+  }
+
   // ── Notes: emoji picker ───────────────────────────────────────
   // Curated set tuned for meetings and notes — status, priority,
   // roles, decisions, reactions. Not a general-purpose keyboard
@@ -22347,24 +22374,7 @@
           } },
           { icon: e.pinned ? '📌' : '⌖', label: e.pinned ? 'Unpin' : 'Pin to top', onClick: () => { e.pinned = !e.pinned; saveState(); renderNotesEntryList(); } },
           { icon: e.archived ? '↥' : '📦', label: e.archived ? 'Unarchive' : 'Archive', onClick: () => { e.archived = !e.archived; saveState(); renderNotesEntryList(); if (nb.activeId === e.id && e.archived) { const other = nb.entries.find((x) => !x.archived); if (other) activateNotesEntry(other.id); } } },
-          { icon: '⎘', label: 'Save as template…', onClick: () => {
-            const name = prompt('Template name (shows up in the + New menu):', e.title.replace(/ — \d{4}-\d{2}-\d{2}/, ''));
-            if (!name || !name.trim()) return;
-            state.notesTemplates = state.notesTemplates || [];
-            state.notesTemplates.push({
-              id: 'ntpl_' + Math.random().toString(36).slice(2, 8),
-              name: name.trim(),
-              // Store a title stem — the current title with any trailing
-              // date stripped so "Meeting — 2026-09-03" becomes "Meeting".
-              // Placeholder {today} will be substituted on use.
-              titleTemplate: name.trim() + ' — {today}',
-              kind: e.kind || 'general',
-              html: e.html || '',
-              createdAt: new Date().toISOString(),
-            });
-            saveState();
-            toast(`Template "${name.trim()}" saved.`);
-          } },
+          { icon: '⎘', label: 'Save as template…', onClick: () => saveNotesEntryAsTemplate(e) },
           { separator: true },
           { icon: '✕', label: 'Delete permanently', onClick: () => {
             if (!confirm(`Delete "${e.title}"? This cannot be undone (except via the version history of another entry).`)) return;
@@ -23407,9 +23417,58 @@
       const r = btn.getBoundingClientRect();
       showContextMenu(r.left, r.bottom + 4, items);
     });
+    // Save-as-template button — captures the currently active entry.
+    $('#btnNotesSaveTpl')?.addEventListener('click', () => saveNotesEntryAsTemplate());
     // Live search + archived toggle.
     $('#notesEntrySearch')?.addEventListener('input', renderNotesEntryList);
     $('#notesShowArchived')?.addEventListener('change', renderNotesEntryList);
+    // Drag the bottom edge of the entries panel to resize it. Height
+    // persists in state.settings.notesEntriesHeight (px). Double-click
+    // resets to the built-in default.
+    (function wireEntriesResize() {
+      const handle = $('#notesEntriesResize');
+      const panel  = $('#notesEntriesPanel');
+      if (!handle || !panel) return;
+      const MIN = 80, MAX_FACTOR = 0.75; // never eat more than 75% of the notes body area
+      const stored = Number(state.settings?.notesEntriesHeight) || 0;
+      // Use `height` (not max-height) so the panel EXPANDS to the user's
+      // pick even when there are only a couple of entries — otherwise
+      // dragging down looked like it did nothing until the entry list
+      // filled naturally. Clear max-height so height wins.
+      if (stored >= MIN) { panel.style.height = stored + 'px'; panel.style.maxHeight = 'none'; }
+      handle.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const startY = e.clientY;
+        const startH = panel.getBoundingClientRect().height;
+        const notesPanel = $('#notesPanel');
+        const containerH = notesPanel ? notesPanel.getBoundingClientRect().height : 800;
+        const max = Math.max(200, Math.floor(containerH * MAX_FACTOR));
+        document.body.style.cursor = 'ns-resize';
+        panel.style.maxHeight = 'none';
+        const onMove = (ev) => {
+          const next = Math.max(MIN, Math.min(max, Math.round(startH + (ev.clientY - startY))));
+          panel.style.height = next + 'px';
+        };
+        const onUp = () => {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          document.body.style.cursor = '';
+          const h = Math.round(panel.getBoundingClientRect().height);
+          state.settings = state.settings || {};
+          state.settings.notesEntriesHeight = h;
+          saveState();
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+      handle.addEventListener('dblclick', () => {
+        panel.style.height = '';
+        panel.style.maxHeight = '';
+        state.settings = state.settings || {};
+        delete state.settings.notesEntriesHeight;
+        saveState();
+      });
+    })();
 
     // Reading mode — pinches the body to a comfortable max-width and
     // bumps line-height. Per-session, not persisted (feels like a

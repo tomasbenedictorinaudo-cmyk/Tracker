@@ -11765,3 +11765,31 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 }
 .nt-tpl-meta { font-size: 10.5px; white-space: nowrap; }
 .nt-tpl-del { padding: 2px 8px; font-size: 14px; line-height: 1; }
+
+/* Notes entries — resize handle + save-template button ─────── */
+.notes-entries-resize {
+  height: 6px;
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+  cursor: ns-resize;
+  flex-shrink: 0;
+  transition: background .12s;
+}
+.notes-entries-resize:hover,
+.notes-entries-resize:active {
+  background: rgba(96, 165, 250, .35);
+}
+.notes-entries-tpl {
+  cursor: pointer;
+  flex-shrink: 0;
+  width: 26px; height: 26px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.notes-entries-tpl:hover { background: rgba(148, 163, 184, .18); color: var(--fg); }

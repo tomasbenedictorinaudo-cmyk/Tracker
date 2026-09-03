@@ -245,6 +245,7 @@
       <div class="notes-entries" id="notesEntriesPanel">
         <div class="notes-entries-head">
           <input type="text" class="notes-entries-search" id="notesEntrySearch" placeholder="Search entries…" />
+          <button type="button" class="notes-entries-tpl" id="btnNotesSaveTpl" title="Save the current entry as a reusable template" aria-label="Save as template">⎘</button>
           <button type="button" class="notes-entries-new" id="btnNotesNewEntry" title="New entry (choose template)" aria-label="New entry">+</button>
         </div>
         <label class="notes-entries-arch" title="Include archived entries in the list">
@@ -252,6 +253,7 @@
         </label>
         <div class="notes-entry-list" id="notesEntryList"></div>
       </div>
+      <div class="notes-entries-resize" id="notesEntriesResize" title="Drag to resize · double-click to reset" aria-label="Resize entry list" role="separator"></div>
       <nav class="notes-toc" id="notesToc" aria-label="Notes contents" hidden></nav>
       <div class="notes-toc-resize" id="notesTocResize" title="Drag to resize · double-click to reset" aria-label="Resize table of contents" role="separator" hidden></div>
       <div class="notes-body" id="notesBody" contenteditable="true" spellcheck="true"></div>
