@@ -23324,6 +23324,36 @@
       scheduleNotesSave();
     });
 
+    // Highlight the toolbar's H1..H5/¶ button that matches the block
+    // the caret is currently in. Re-runs on selection change so it's
+    // always accurate. Falls back to nothing when the caret isn't in
+    // a mapped block (e.g. inside a UL).
+    function _updateBlockButtonState() {
+      const bodyEl = $('#notesBody'); if (!bodyEl) return;
+      const sel = document.getSelection();
+      const anchor = sel && sel.anchorNode;
+      if (!anchor || !bodyEl.contains(anchor)) return;
+      let n = anchor.nodeType === 1 ? anchor : anchor.parentNode;
+      let tag = null;
+      while (n && n !== bodyEl) {
+        if (n.nodeType === 1) {
+          const t = n.tagName;
+          if (t === 'P' || /^H[1-6]$/.test(t)) { tag = t; break; }
+          if (t === 'LI') { tag = 'LI'; break; }
+        }
+        n = n.parentNode;
+      }
+      const argFor = { H1: '<h1>', H2: '<h2>', H3: '<h3>', H4: '<h4>', H5: '<h5>', P: '<p>' };
+      const target = argFor[tag] || null;
+      document.querySelectorAll('.notes-toolbar [data-cmd="formatBlock"]').forEach((btn) => {
+        btn.classList.toggle('is-current', btn.dataset.arg === target);
+      });
+    }
+    document.addEventListener('selectionchange', () => {
+      // Cheap — only run when the panel is open.
+      if (state.notesOpen) _updateBlockButtonState();
+    });
+
     // Notes-scoped keyboard shortcuts. Only fire when the body has
     // focus so they don't fight with the rest of the app.
     $('#notesBody')?.addEventListener('keydown', (e) => {

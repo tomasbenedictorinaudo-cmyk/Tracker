@@ -8977,42 +8977,46 @@ body.notes-fullscreen { overflow: hidden; }
 }
 .notes-body:focus { outline: none; }
 .notes-body p { margin: 0 0 10px; }
-/* Five distinct heading levels for meeting notes — each visually clearer than
-   the next. H1 carries an underline accent so titles stand out. */
+/* Five distinct heading levels — sized so each is clearly bigger than
+   body text (13 px) and clearly bigger than the next. H1 carries an
+   underline accent; H5 uses uppercase-tracking as a stylistic hierarchy
+   trick so it stays visually distinct at a small size without being
+   smaller than body copy. */
 .notes-body h1 {
-  font-size: 18px !important; line-height: 1.25;
-  margin: 18px 0 8px;
+  font-size: 24px !important; line-height: 1.2;
+  margin: 24px 0 10px;
   color: var(--text);
   font-weight: 800;
-  letter-spacing: -.01em;
+  letter-spacing: -.015em;
   border-bottom: 1px solid var(--line-2);
-  padding-bottom: 4px;
+  padding-bottom: 6px;
 }
 .notes-body h2 {
+  font-size: 19px !important; line-height: 1.25;
+  margin: 20px 0 8px;
+  color: var(--text);
+  font-weight: 700;
+  letter-spacing: -.005em;
+}
+.notes-body h3 {
   font-size: 16px !important; line-height: 1.3;
   margin: 16px 0 6px;
   color: var(--text);
   font-weight: 700;
 }
-.notes-body h3 {
-  font-size: 14.5px !important; line-height: 1.35;
+.notes-body h4 {
+  font-size: 14px !important; line-height: 1.35;
   margin: 14px 0 5px;
   color: var(--text);
   font-weight: 700;
 }
-.notes-body h4 {
-  font-size: 13.5px !important;
-  margin: 12px 0 4px;
-  color: var(--text-dim);
-  font-weight: 700;
-}
 .notes-body h5 {
   font-size: 12.5px !important;
-  margin: 10px 0 4px;
-  color: var(--text-faint);
+  margin: 12px 0 4px;
+  color: var(--text);
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: .06em;
+  letter-spacing: .08em;
 }
 .notes-body h6 {
   font-size: 12px !important;
@@ -11559,6 +11563,14 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
   min-width: 22px;
   font-size: 10.5px; font-weight: 700;
   padding: 3px 5px;
+}
+.notes-toolbar button.is-current {
+  background: rgba(96, 165, 250, .22);
+  color: rgba(147, 197, 253, 1);
+  border-color: rgba(96, 165, 250, .55);
+}
+:root[data-theme="light"] .notes-toolbar button.is-current {
+  color: rgba(29, 78, 216, 1);
 }
 .nt-tb-group {
   display: inline-flex; align-items: center; gap: 0;
