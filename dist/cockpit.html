@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-09-03T19:35:50.620Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-09-03T19:44:51.302Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -34342,11 +34342,43 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     while (n && n !== root) {
       if (n.nodeType === 1) {
         const t = n.tagName;
-        if (t === 'P' || /^H[1-6]$/.test(t) || t === 'BLOCKQUOTE' || t === 'PRE' || t === 'LI') return n;
+        // Everything that behaves like a paragraph-level block is a
+        // valid swap target — including DIV (paste from Word/Docs
+        // frequently uses <div> as its paragraph unit).
+        if (t === 'P' || /^H[1-6]$/.test(t) || t === 'BLOCKQUOTE' || t === 'PRE' || t === 'LI' || t === 'DIV') return n;
       }
       n = n.parentNode;
     }
     return null;
+  }
+  // Walk direct children of #notesBody and wrap every run of inline
+  // nodes (text nodes, spans, marks, chips, images…) in a fresh <p>.
+  // Existing block children (P, H1..H6, UL, OL, BLOCKQUOTE, PRE, HR,
+  // TABLE) are passed through untouched. Called from notesSwapBlock
+  // before the swap so a naked "jjjsj" text becomes <p>jjjsj</p>
+  // first — then the swap has something to convert.
+  function _wrapNakedTextInNotesBody(body) {
+    const BLOCK = /^(P|H[1-6]|UL|OL|BLOCKQUOTE|PRE|HR|TABLE|DIV)$/;
+    const kids = Array.from(body.childNodes);
+    let currentP = null;
+    for (const n of kids) {
+      const isBlockEl = n.nodeType === 1 && BLOCK.test(n.tagName);
+      if (isBlockEl) {
+        currentP = null;
+        continue;
+      }
+      // Skip pure-whitespace text nodes at the top level — they're
+      // formatting artefacts, not content.
+      if (n.nodeType === 3 && !n.nodeValue.trim()) {
+        continue;
+      }
+      // Start or continue a wrapping <p> for this run of inlines.
+      if (!currentP) {
+        currentP = document.createElement('p');
+        body.insertBefore(currentP, n);
+      }
+      currentP.appendChild(n);
+    }
   }
   function _stripSizingStyles(root) {
     if (!root) return;
@@ -34382,13 +34414,27 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     body.focus();
     const sel = window.getSelection();
     if (!sel.rangeCount) return;
-    const range = sel.getRangeAt(0);
-    // Collect every distinct block-ancestor the selection touches. For
-    // a collapsed caret this is just one block. For a multi-line
-    // selection it's every block between anchor and focus.
-    const startBlock = _findNotesBlockAncestor(range.startContainer, body);
-    const endBlock   = _findNotesBlockAncestor(range.endContainer,   body);
-    if (!startBlock) return;
+    // Capture the anchor / focus nodes directly — refs stay valid
+    // across DOM mutation (nodes are moved, not cloned), whereas a
+    // captured Range object can be invalidated by mutation in some
+    // browsers.
+    let anchorNode = sel.anchorNode;
+    let focusNode  = sel.focusNode;
+    if (!anchorNode || !body.contains(anchorNode)) return;
+    let startBlock = _findNotesBlockAncestor(anchorNode, body);
+    let endBlock   = _findNotesBlockAncestor(focusNode || anchorNode, body);
+    // If the selection sits directly under #notesBody (naked text
+    // node, no wrapping paragraph — happens after some paste flows or
+    // when the seed HTML has been trimmed), promote every top-level
+    // run of naked inline nodes into a proper <p>. The user's text
+    // node stays intact — its parentNode changes to the new <p>.
+    if (!startBlock) {
+      _wrapNakedTextInNotesBody(body);
+      startBlock = _findNotesBlockAncestor(anchorNode, body);
+      endBlock   = _findNotesBlockAncestor(focusNode || anchorNode, body);
+      if (!startBlock) return; // still nothing — bail cleanly
+    }
+    if (!endBlock) endBlock = startBlock;
     const blocks = [];
     if (startBlock === endBlock) {
       blocks.push(startBlock);
