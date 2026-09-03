@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-09-03T20:09:37.282Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-09-03T20:21:16.858Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -34061,13 +34061,15 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
         }
         if (n.classList?.contains('rt-img')) {
           const id = n.getAttribute('data-img-id') || '';
-          out.push(`![pasted-image-${id}]`);
+          const data = (state.mediaBlobs && state.mediaBlobs[id]) || n.getAttribute('src') || '';
+          out.push(data ? `![pasted image](${data})` : `![pasted-image-${id}]`);
           continue;
         }
         if (n.classList?.contains('rt-img-wrap')) {
           const img = n.querySelector?.('.rt-img');
           const id = img?.getAttribute('data-img-id') || '';
-          out.push(`![pasted-image-${id}]`);
+          const data = (state.mediaBlobs && state.mediaBlobs[id]) || img?.getAttribute('src') || '';
+          out.push(data ? `![pasted image](${data})` : `![pasted-image-${id}]`);
           continue;
         }
         if (n.classList?.contains('note-chip')) {

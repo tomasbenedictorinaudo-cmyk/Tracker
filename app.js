@@ -21897,13 +21897,15 @@
         }
         if (n.classList?.contains('rt-img')) {
           const id = n.getAttribute('data-img-id') || '';
-          out.push(`![pasted-image-${id}]`);
+          const data = (state.mediaBlobs && state.mediaBlobs[id]) || n.getAttribute('src') || '';
+          out.push(data ? `![pasted image](${data})` : `![pasted-image-${id}]`);
           continue;
         }
         if (n.classList?.contains('rt-img-wrap')) {
           const img = n.querySelector?.('.rt-img');
           const id = img?.getAttribute('data-img-id') || '';
-          out.push(`![pasted-image-${id}]`);
+          const data = (state.mediaBlobs && state.mediaBlobs[id]) || img?.getAttribute('src') || '';
+          out.push(data ? `![pasted image](${data})` : `![pasted-image-${id}]`);
           continue;
         }
         if (n.classList?.contains('note-chip')) {
