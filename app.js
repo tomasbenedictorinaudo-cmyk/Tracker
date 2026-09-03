@@ -22008,6 +22008,126 @@
     if (countEl) countEl.textContent = `${_notesSearchCursor + 1}/${_notesSearchHits.length}`;
   }
 
+  // ── Notes: emoji picker ───────────────────────────────────────
+  // Curated set tuned for meetings and notes — status, priority,
+  // roles, decisions, reactions. Not a general-purpose keyboard
+  // (~60 chars); users can always paste anything they need.
+  const NOTES_EMOJI_CATEGORIES = [
+    { name: 'Status',   items: ['✅','☑️','❌','⚠️','⛔','🚧','⏳','⌛','🔴','🟡','🟢','🔵','◐','◑','◕','◔'] },
+    { name: 'Priority', items: ['🔥','⭐','🚀','⚡','⏰','📌','🎯','💡'] },
+    { name: 'Meeting',  items: ['👥','🗣️','💬','📝','📋','📎','📅','📆','☎️','📞','🎥','🖥️'] },
+    { name: 'Signals',  items: ['👍','👎','👀','🙋','🤝','🙌','🤔','💪','✋'] },
+    { name: 'Insight',  items: ['💡','🧠','🔍','🔎','📈','📉','📊','🎯','🧭'] },
+    { name: 'Blockers', items: ['🚧','🛑','⛔','❗','❓','⁉️','🔒','🔓'] },
+  ];
+  function openNotesEmojiPicker(anchorBtn) {
+    document.querySelectorAll('.nt-emoji-pop').forEach((el) => el.remove());
+    const pop = document.createElement('div');
+    pop.className = 'nt-emoji-pop';
+    pop.innerHTML = NOTES_EMOJI_CATEGORIES.map((cat) => `
+      <div class="nt-emoji-cat-title">${escapeHTML(cat.name)}</div>
+      <div class="nt-emoji-cat">
+        ${cat.items.map((e) => `<button type="button" class="nt-emoji-item" data-emoji="${escapeHTML(e)}" title="${escapeHTML(e)}">${e}</button>`).join('')}
+      </div>`).join('');
+    document.body.appendChild(pop);
+    // Position under the anchor, clamped to viewport.
+    const r = anchorBtn.getBoundingClientRect();
+    const w = pop.offsetWidth  || 260;
+    const h = pop.offsetHeight || 200;
+    let left = r.left + window.scrollX;
+    let top  = r.bottom + window.scrollY + 4;
+    if (left + w + 8 > window.innerWidth) left = window.innerWidth - w - 8;
+    if (top + h + 8 > window.innerHeight + window.scrollY) top = Math.max(window.scrollY + 8, r.top + window.scrollY - h - 4);
+    pop.style.left = left + 'px';
+    pop.style.top  = top  + 'px';
+    // Preserve caret before we lose focus to the popup.
+    let cachedRange = null;
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) cachedRange = sel.getRangeAt(0).cloneRange();
+    const close = () => { pop.remove(); document.removeEventListener('mousedown', outside, true); };
+    const outside = (ev) => { if (!pop.contains(ev.target) && ev.target !== anchorBtn) close(); };
+    setTimeout(() => document.addEventListener('mousedown', outside, true), 0);
+    pop.querySelectorAll('.nt-emoji-item').forEach((btn) => {
+      btn.addEventListener('mousedown', (ev) => { ev.preventDefault(); });
+      btn.addEventListener('click', (ev) => {
+        const emoji = ev.currentTarget.dataset.emoji;
+        const body = $('#notesBody');
+        if (body) {
+          body.focus();
+          if (cachedRange) {
+            const s = window.getSelection();
+            s.removeAllRanges();
+            s.addRange(cachedRange);
+          }
+          document.execCommand('insertText', false, emoji);
+          scheduleNotesSave();
+        }
+        close();
+      });
+    });
+  }
+
+  // ── Notes: custom templates manager ───────────────────────────
+  function openNotesTemplatesDialog() {
+    document.querySelectorAll('.nt-tpl-mask').forEach((el) => el.remove());
+    const list = (state.notesTemplates || []).slice();
+    const overlay = document.createElement('div');
+    overlay.className = 'tp-dialog-mask nt-tpl-mask';
+    const dlg = document.createElement('div');
+    dlg.className = 'tp-dialog';
+    dlg.style.width = 'min(520px, 96vw)';
+    const build = () => {
+      dlg.innerHTML = `
+        <div class="tp-dialog-head">
+          <div>
+            <div style="font-weight:700; font-size:14px;">Custom templates</div>
+            <div class="muted" style="font-size:11px;">Saved via the entry list's right-click → "Save as template…". These show up in the + New menu.</div>
+          </div>
+          <button type="button" class="btn ghost tp-dialog-close" aria-label="Close">×</button>
+        </div>
+        <div class="tp-dialog-body">
+          ${list.length ? `
+            <div class="nt-tpl-list">
+              ${list.map((t) => `
+                <div class="nt-tpl-item" data-id="${escapeHTML(t.id)}">
+                  <input type="text" class="nt-tpl-name" value="${escapeHTML(t.name)}" />
+                  <span class="muted nt-tpl-meta">${escapeHTML(t.kind)} · saved ${new Date(t.createdAt).toLocaleDateString()}</span>
+                  <button type="button" class="btn ghost nt-tpl-del" data-id="${escapeHTML(t.id)}" title="Delete template">×</button>
+                </div>`).join('')}
+            </div>` : '<div class="muted" style="padding:12px 4px; font-size:12px;">No custom templates yet — right-click any note entry to save one.</div>'}
+        </div>`;
+      dlg.querySelector('.tp-dialog-close')?.addEventListener('click', close);
+      dlg.querySelectorAll('.nt-tpl-name').forEach((inp) => {
+        inp.addEventListener('blur', () => {
+          const id = inp.closest('.nt-tpl-item').dataset.id;
+          const t = (state.notesTemplates || []).find((x) => x.id === id);
+          const v = inp.value.trim();
+          if (t && v) {
+            t.name = v;
+            t.titleTemplate = v + ' — {today}';
+            saveState();
+          }
+        });
+      });
+      dlg.querySelectorAll('.nt-tpl-del').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.id;
+          const t = (state.notesTemplates || []).find((x) => x.id === id);
+          if (!confirm(`Delete template "${t?.name || id}"?`)) return;
+          state.notesTemplates = (state.notesTemplates || []).filter((x) => x.id !== id);
+          saveState();
+          list.splice(list.findIndex((x) => x.id === id), 1);
+          build();
+        });
+      });
+    };
+    build();
+    overlay.appendChild(dlg);
+    document.body.appendChild(overlay);
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (ev) => { if (ev.target === overlay) close(); });
+  }
+
   // Notes history popover — lists the last N snapshots for the
   // current project and lets the user restore any one. Restore takes
   // a fresh snapshot of the current text first so nothing is lost.
@@ -22132,12 +22252,26 @@
     retro:   { title: 'Retro — {today}', kind: 'retro', html: '<h2>Retro — {today}</h2><h3>What worked</h3><ul><li></li></ul><h3>What hurt</h3><ul><li></li></ul><h3>What we\'ll change</h3><ul><li></li></ul><h3>Kudos</h3><ul><li></li></ul>' },
   };
   function _newEntry(templateKey) {
-    const tpl = NOTES_ENTRY_TEMPLATES[templateKey] || NOTES_ENTRY_TEMPLATES.blank;
     const today = todayISO();
     const now = new Date().toISOString();
+    // Custom template keys are "custom:<templateId>" — look them up
+    // in state.notesTemplates; fall back to the built-in map.
+    let tpl;
+    if (typeof templateKey === 'string' && templateKey.startsWith('custom:')) {
+      const id = templateKey.slice('custom:'.length);
+      const found = (state.notesTemplates || []).find((t) => t.id === id);
+      if (found) {
+        tpl = {
+          title: (found.titleTemplate || found.name || 'Untitled') + '',
+          kind: found.kind || 'general',
+          html: found.html || '<p></p>',
+        };
+      }
+    }
+    tpl = tpl || NOTES_ENTRY_TEMPLATES[templateKey] || NOTES_ENTRY_TEMPLATES.blank;
     return {
       id: 'ne_' + Math.random().toString(36).slice(2, 8),
-      title: tpl.title.replace('{today}', today),
+      title: tpl.title.replace(/\{today\}/g, today),
       kind: tpl.kind,
       createdAt: now,
       updatedAt: now,
@@ -22213,6 +22347,24 @@
           } },
           { icon: e.pinned ? '📌' : '⌖', label: e.pinned ? 'Unpin' : 'Pin to top', onClick: () => { e.pinned = !e.pinned; saveState(); renderNotesEntryList(); } },
           { icon: e.archived ? '↥' : '📦', label: e.archived ? 'Unarchive' : 'Archive', onClick: () => { e.archived = !e.archived; saveState(); renderNotesEntryList(); if (nb.activeId === e.id && e.archived) { const other = nb.entries.find((x) => !x.archived); if (other) activateNotesEntry(other.id); } } },
+          { icon: '⎘', label: 'Save as template…', onClick: () => {
+            const name = prompt('Template name (shows up in the + New menu):', e.title.replace(/ — \d{4}-\d{2}-\d{2}/, ''));
+            if (!name || !name.trim()) return;
+            state.notesTemplates = state.notesTemplates || [];
+            state.notesTemplates.push({
+              id: 'ntpl_' + Math.random().toString(36).slice(2, 8),
+              name: name.trim(),
+              // Store a title stem — the current title with any trailing
+              // date stripped so "Meeting — 2026-09-03" becomes "Meeting".
+              // Placeholder {today} will be substituted on use.
+              titleTemplate: name.trim() + ' — {today}',
+              kind: e.kind || 'general',
+              html: e.html || '',
+              createdAt: new Date().toISOString(),
+            });
+            saveState();
+            toast(`Template "${name.trim()}" saved.`);
+          } },
           { separator: true },
           { icon: '✕', label: 'Delete permanently', onClick: () => {
             if (!confirm(`Delete "${e.title}"? This cannot be undone (except via the version history of another entry).`)) return;
@@ -23225,8 +23377,8 @@
     // Version-history button — floating popover listing the last 20
     // saved snapshots. Click a snapshot to preview + restore.
     $('#btnNotesHistory')?.addEventListener('click', () => openNotesHistoryPopover());
-    // "+ New" — opens a small template picker; each option creates a
-    // fresh entry seeded with the template's HTML.
+    // "+ New" — opens a small template picker with built-ins + any
+    // custom templates the user has saved via "Save as template…".
     $('#btnNotesNewEntry')?.addEventListener('click', (ev) => {
       ev.preventDefault();
       const btn = ev.currentTarget;
@@ -23237,6 +23389,21 @@
         { icon: '⚖',  label: 'Decision',          onClick: () => createNotesEntry('decision') },
         { icon: '↺',  label: 'Retro',             onClick: () => createNotesEntry('retro') },
       ];
+      const custom = state.notesTemplates || [];
+      if (custom.length) {
+        items.push({ separator: true });
+        custom.forEach((t) => {
+          items.push({
+            icon: '⎘',
+            label: t.name,
+            onClick: () => createNotesEntry('custom:' + t.id),
+            // Right-click on the menu entry would be ideal, but the
+            // context menu doesn't nest — offer a Delete via prompt.
+          });
+        });
+        items.push({ separator: true });
+        items.push({ icon: '⚙', label: 'Manage custom templates…', onClick: () => openNotesTemplatesDialog() });
+      }
       const r = btn.getBoundingClientRect();
       showContextMenu(r.left, r.bottom + 4, items);
     });
@@ -23343,6 +23510,11 @@
       $('#notesBody').focus();
       document.execCommand('insertHTML', false, '<hr>');
       scheduleNotesSave();
+    });
+    $('#btnNotesInsertEmoji')?.addEventListener('mousedown', (e) => { e.preventDefault(); });
+    $('#btnNotesInsertEmoji')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      openNotesEmojiPicker(e.currentTarget);
     });
     $('#btnNotesInsertCode')?.addEventListener('mousedown', (e) => {
       e.preventDefault();
@@ -23981,6 +24153,16 @@
     // tokens that resolve to <img> elements at render time. Kept out
     // of the text stream so notes/comments stay lean.
     if (!s.mediaBlobs || typeof s.mediaBlobs !== 'object') s.mediaBlobs = {};
+    // Custom notes templates — user-saved entry blueprints that show
+    // up in the + New menu.
+    if (!Array.isArray(s.notesTemplates)) s.notesTemplates = [];
+    s.notesTemplates = s.notesTemplates.filter((t) => t && typeof t === 'object' && t.id && t.name);
+    s.notesTemplates.forEach((t) => {
+      t.kind = t.kind || 'general';
+      t.html = typeof t.html === 'string' ? t.html : '<p></p>';
+      t.titleTemplate = t.titleTemplate || (t.name + ' — {today}');
+      t.createdAt = t.createdAt || new Date().toISOString();
+    });
     // Team topics — team-wide "things to raise next time we see the
     // team" list, with optional attached emails / files / links.
     // Distinct from p.talkingPoints[] which is one-on-one.

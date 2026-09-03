@@ -11688,3 +11688,80 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 .note-chip.ref-chip-openpoint  { background: rgba(251, 191, 36, .12); border-color: rgba(251, 191, 36, .40); }
 .note-chip.ref-chip-decision   { background: rgba(96, 165, 250, .12); border-color: rgba(96, 165, 250, .40); }
 .note-chip.ref-chip-activity   { background: rgba(147, 197, 253, .12); border-color: rgba(147, 197, 253, .40); }
+
+/* Notes — emoji picker popover ─────────────────────────────── */
+.nt-emoji-btn { font-size: 14px; line-height: 1; }
+.nt-emoji-pop {
+  position: absolute;
+  z-index: 500;
+  min-width: 260px;
+  max-width: 320px;
+  background: var(--bg, #0b1220);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  padding: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+.nt-emoji-cat-title {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  color: var(--muted);
+  padding: 4px 4px 2px;
+  margin-top: 4px;
+  border-top: 1px solid var(--line);
+}
+.nt-emoji-cat-title:first-child { border-top: 0; margin-top: 0; }
+.nt-emoji-cat {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 2px;
+  padding: 2px 0 4px;
+}
+.nt-emoji-item {
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  border-radius: 4px;
+  padding: 4px 0;
+  font-size: 18px;
+  line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .1s;
+}
+.nt-emoji-item:hover { background: rgba(148,163,184,.18); border-color: var(--line); }
+
+/* Highlight-clear button label — needed after adding the "clear"
+   text next to the ◌ glyph. */
+.notes-toolbar button[data-hl="clear"] {
+  font-size: 10.5px;
+  font-weight: 600;
+  gap: 2px;
+  min-width: 44px;
+}
+
+/* Notes — custom templates dialog rows ─────────────────────── */
+.nt-tpl-list { display: flex; flex-direction: column; gap: 4px; }
+.nt-tpl-item {
+  display: grid;
+  grid-template-columns: 1fr auto 26px;
+  gap: 8px;
+  align-items: center;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.nt-tpl-name {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+}
+.nt-tpl-meta { font-size: 10.5px; white-space: nowrap; }
+.nt-tpl-del { padding: 2px 8px; font-size: 14px; line-height: 1; }

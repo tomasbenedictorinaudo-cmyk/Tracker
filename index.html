@@ -212,10 +212,10 @@
             <span class="nt-color-bar" id="ntColorBar"></span>
             <input type="color" id="ntColorInput" value="#6ea8ff" />
           </label>
-          <button data-hl="ok"   class="nt-hl-btn nt-hl-btn-ok"   title="Highlight as success">✓</button>
-          <button data-hl="warn" class="nt-hl-btn nt-hl-btn-warn" title="Highlight as warning">⚠</button>
-          <button data-hl="bad"  class="nt-hl-btn nt-hl-btn-bad"  title="Highlight as failure">✕</button>
-          <button data-hl="clear" title="Remove highlight">◌</button>
+          <button data-hl="ok"   class="nt-hl-btn nt-hl-btn-ok"   title="Highlight as success — click again on highlighted text to remove">✓</button>
+          <button data-hl="warn" class="nt-hl-btn nt-hl-btn-warn" title="Highlight as warning — click again on highlighted text to remove">⚠</button>
+          <button data-hl="bad"  class="nt-hl-btn nt-hl-btn-bad"  title="Highlight as failure — click again on highlighted text to remove">✕</button>
+          <button data-hl="clear" title="Remove any highlight from selected text (or place caret inside a highlighted span)">◌ clear</button>
         </span>
         <span class="sep"></span>
         <span class="nt-tb-group">
@@ -228,6 +228,7 @@
           <button id="btnNotesInsertCode" title="Inline code (Cmd/Ctrl+Shift+X)" aria-label="Inline code">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4L2 8l3 4M11 4l3 4-3 4"/></svg>
           </button>
+          <button id="btnNotesInsertEmoji" title="Insert emoji" aria-label="Insert emoji" class="nt-emoji-btn">🙂</button>
         </span>
         <span class="sep"></span>
         <button data-cmd="removeFormat" title="Clear formatting" aria-label="Clear formatting">
