@@ -11793,3 +11793,111 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
   display: inline-flex; align-items: center; justify-content: center;
 }
 .notes-entries-tpl:hover { background: rgba(148, 163, 184, .18); color: var(--fg); }
+
+/* ── Notes: quick sketch modal ──────────────────────────────── */
+.nt-sk-dialog {
+  width: min(1000px, 100%);
+  max-height: 92vh;
+}
+.nt-sk-dialog .tp-dialog-head {
+  padding: 12px 16px;
+  align-items: center;
+}
+.nt-sk-dialog .tp-dialog-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--fg);
+}
+.nt-sk-toolbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(148, 163, 184, .06);
+  flex-wrap: wrap;
+}
+.nt-sk-tools { display: inline-flex; gap: 4px; }
+.nt-sk-tool {
+  cursor: pointer;
+  width: 30px; height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 14px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.nt-sk-tool:hover { background: rgba(148, 163, 184, .16); }
+.nt-sk-tool.is-active {
+  background: rgba(96, 165, 250, .22);
+  border-color: rgba(96, 165, 250, .55);
+  color: var(--fg);
+}
+.nt-sk-sep {
+  width: 1px; align-self: stretch;
+  background: var(--line);
+  margin: 0 4px;
+}
+.nt-sk-colors { display: inline-flex; gap: 4px; }
+.nt-sk-color {
+  cursor: pointer;
+  width: 22px; height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  padding: 0;
+  transition: transform .1s;
+}
+.nt-sk-color:hover { transform: scale(1.12); }
+.nt-sk-color.is-active {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px rgba(96, 165, 250, .8);
+}
+.nt-sk-size {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--muted);
+}
+.nt-sk-size input { width: 110px; }
+.nt-sk-size-val {
+  min-width: 18px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.nt-sk-spacer { flex: 1; }
+.nt-sk-btn {
+  cursor: pointer;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+}
+.nt-sk-btn:hover { background: rgba(148, 163, 184, .16); }
+.nt-sk-canvas-wrap {
+  padding: 16px;
+  overflow: auto;
+  background:
+    linear-gradient(45deg, rgba(148,163,184,.08) 25%, transparent 25%),
+    linear-gradient(-45deg, rgba(148,163,184,.08) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, rgba(148,163,184,.08) 75%),
+    linear-gradient(-45deg, transparent 75%, rgba(148,163,184,.08) 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  display: flex; justify-content: center;
+}
+.nt-sk-canvas {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #ffffff;
+  cursor: crosshair;
+  box-shadow: 0 2px 8px rgba(0,0,0,.15);
+}
+.nt-sk-dialog .tp-dialog-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 12px 16px;
+  border-top: 1px solid var(--line);
+}
+.nt-sk-hint { font-size: 11px; color: var(--muted); }
+.nt-sk-dialog .tp-dialog-actions { display: inline-flex; gap: 8px; }

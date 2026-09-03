@@ -22096,6 +22096,184 @@
     });
   }
 
+  // ── Notes: quick sketch modal ─────────────────────────────────
+  // A tiny canvas sketchpad. Pen / eraser / colour / width / undo /
+  // clear. On "Insert" we flatten to PNG, feed it through the same
+  // mediaBlobs → _imgTokenHTML → _insertHTMLAtCaret pipeline that
+  // pasted images use — so the resulting element gets the resize
+  // handle, delete button, GC, and MD-export inline-embed for free.
+  const NOTES_SKETCH_COLORS = ['#111827','#dc2626','#ea580c','#ca8a04','#16a34a','#0891b2','#2563eb','#7c3aed','#db2777','#ffffff'];
+  function openNotesSketchpad() {
+    document.querySelectorAll('.nt-sk-mask').forEach((el) => el.remove());
+    const host = $('#notesBody');
+    if (!host) return;
+    const overlay = document.createElement('div');
+    overlay.className = 'tp-dialog-mask nt-sk-mask';
+    overlay.innerHTML = `
+      <div class="tp-dialog nt-sk-dialog" role="dialog" aria-label="Sketch">
+        <div class="tp-dialog-head">
+          <div class="tp-dialog-title">Quick sketch</div>
+          <button type="button" class="tp-dialog-close nt-sk-cancel" aria-label="Cancel">×</button>
+        </div>
+        <div class="nt-sk-toolbar">
+          <div class="nt-sk-tools">
+            <button type="button" class="nt-sk-tool is-active" data-tool="pen"    title="Pen (P)">✎</button>
+            <button type="button" class="nt-sk-tool"           data-tool="eraser" title="Eraser (E)">⌫</button>
+          </div>
+          <div class="nt-sk-sep"></div>
+          <div class="nt-sk-colors">
+            ${NOTES_SKETCH_COLORS.map((c, i) => `<button type="button" class="nt-sk-color${i===0?' is-active':''}" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
+          </div>
+          <div class="nt-sk-sep"></div>
+          <label class="nt-sk-size">
+            <span>Width</span>
+            <input type="range" min="1" max="24" value="3" step="1" />
+            <span class="nt-sk-size-val">3</span>
+          </label>
+          <div class="nt-sk-spacer"></div>
+          <button type="button" class="nt-sk-btn nt-sk-undo"  title="Undo (Cmd/Ctrl+Z)">Undo</button>
+          <button type="button" class="nt-sk-btn nt-sk-clear" title="Clear the canvas">Clear</button>
+        </div>
+        <div class="nt-sk-canvas-wrap">
+          <canvas class="nt-sk-canvas" width="900" height="520" aria-label="Drawing area"></canvas>
+        </div>
+        <div class="tp-dialog-foot">
+          <div class="nt-sk-hint">Draw with mouse, stylus, or finger — Insert flattens the sketch as an image.</div>
+          <div class="tp-dialog-actions">
+            <button type="button" class="btn nt-sk-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary nt-sk-insert">Insert</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    const canvas  = overlay.querySelector('.nt-sk-canvas');
+    const ctx     = canvas.getContext('2d');
+    // Paint a white background so the exported PNG is not transparent
+    // (transparent PNGs look bad on top of dark-mode notes).
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    let tool = 'pen';
+    let color = NOTES_SKETCH_COLORS[0];
+    let width = 3;
+    const undoStack = []; // ImageData snapshots; capped
+    const UNDO_CAP = 30;
+    const pushSnapshot = () => {
+      try {
+        undoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+        if (undoStack.length > UNDO_CAP) undoStack.shift();
+      } catch (_) { /* tainted canvas — shouldn't happen */ }
+    };
+
+    // Pointer drawing (mouse + touch + stylus in one path).
+    let drawing = false;
+    let lastX = 0, lastY = 0;
+    const pointToCanvas = (e) => {
+      const r = canvas.getBoundingClientRect();
+      // Canvas is displayed CSS-scaled; map back to bitmap coords.
+      return {
+        x: (e.clientX - r.left) * (canvas.width  / r.width),
+        y: (e.clientY - r.top)  * (canvas.height / r.height),
+      };
+    };
+    const beginStroke = (e) => {
+      e.preventDefault();
+      try { canvas.setPointerCapture?.(e.pointerId); } catch (_) { /* synthetic events don't have real ids */ }
+      pushSnapshot();
+      drawing = true;
+      const p = pointToCanvas(e);
+      lastX = p.x; lastY = p.y;
+      // Dot on click so single-click leaves a mark.
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, width / 2, 0, Math.PI * 2);
+      ctx.fillStyle = tool === 'eraser' ? '#ffffff' : color;
+      ctx.fill();
+    };
+    const extendStroke = (e) => {
+      if (!drawing) return;
+      const p = pointToCanvas(e);
+      ctx.strokeStyle = tool === 'eraser' ? '#ffffff' : color;
+      ctx.lineWidth   = tool === 'eraser' ? Math.max(6, width * 3) : width;
+      ctx.beginPath();
+      ctx.moveTo(lastX, lastY);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      lastX = p.x; lastY = p.y;
+    };
+    const endStroke = () => { drawing = false; };
+    canvas.addEventListener('pointerdown', beginStroke);
+    canvas.addEventListener('pointermove', extendStroke);
+    canvas.addEventListener('pointerup',   endStroke);
+    canvas.addEventListener('pointercancel', endStroke);
+    canvas.addEventListener('pointerleave',  endStroke);
+    canvas.style.touchAction = 'none'; // stop page scrolling while drawing
+
+    // Toolbar wiring.
+    overlay.querySelectorAll('.nt-sk-tool').forEach((b) => {
+      b.addEventListener('click', () => {
+        tool = b.getAttribute('data-tool');
+        overlay.querySelectorAll('.nt-sk-tool').forEach((x) => x.classList.toggle('is-active', x === b));
+      });
+    });
+    overlay.querySelectorAll('.nt-sk-color').forEach((b) => {
+      b.addEventListener('click', () => {
+        color = b.getAttribute('data-color');
+        overlay.querySelectorAll('.nt-sk-color').forEach((x) => x.classList.toggle('is-active', x === b));
+        // Picking a colour implies pen (users expect this).
+        tool = 'pen';
+        overlay.querySelectorAll('.nt-sk-tool').forEach((x) => x.classList.toggle('is-active', x.getAttribute('data-tool') === 'pen'));
+      });
+    });
+    const sizeInput = overlay.querySelector('.nt-sk-size input');
+    const sizeVal   = overlay.querySelector('.nt-sk-size-val');
+    sizeInput.addEventListener('input', () => { width = Number(sizeInput.value) || 3; sizeVal.textContent = String(width); });
+    overlay.querySelector('.nt-sk-undo').addEventListener('click', () => {
+      const snap = undoStack.pop();
+      if (snap) ctx.putImageData(snap, 0, 0);
+    });
+    overlay.querySelector('.nt-sk-clear').addEventListener('click', () => {
+      if (!confirm('Clear the whole sketch?')) return;
+      pushSnapshot();
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    });
+
+    // Insert / cancel.
+    const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey, true); };
+    overlay.querySelectorAll('.nt-sk-cancel').forEach((b) => b.addEventListener('click', close));
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelector('.nt-sk-insert').addEventListener('click', () => {
+      const dataURL = canvas.toDataURL('image/png');
+      const id = _storeImageBlob(dataURL);
+      // Default display width mirrors pasted images: half the note width,
+      // clamped 200..640.
+      const hostW = host.clientWidth || 400;
+      const defaultW = Math.max(200, Math.min(640, Math.round(hostW * 0.6)));
+      const html = _imgTokenHTML(id, defaultW) + '&nbsp;';
+      _insertHTMLAtCaret(host, html);
+      saveState();
+      close();
+    });
+    // Keyboard: P=pen, E=eraser, Ctrl/Cmd+Z=undo, Esc=cancel.
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        overlay.querySelector('.nt-sk-undo').click();
+        return;
+      }
+      // Single-letter shortcuts only when focus isn't in an input.
+      const tag = (e.target?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea') return;
+      if (e.key.toLowerCase() === 'p') overlay.querySelector('.nt-sk-tool[data-tool="pen"]').click();
+      if (e.key.toLowerCase() === 'e') overlay.querySelector('.nt-sk-tool[data-tool="eraser"]').click();
+    };
+    document.addEventListener('keydown', onKey, true);
+  }
+
   // ── Notes: custom templates manager ───────────────────────────
   function openNotesTemplatesDialog() {
     document.querySelectorAll('.nt-tpl-mask').forEach((el) => el.remove());
@@ -23576,6 +23754,11 @@
     $('#btnNotesInsertEmoji')?.addEventListener('click', (e) => {
       e.preventDefault();
       openNotesEmojiPicker(e.currentTarget);
+    });
+    $('#btnNotesInsertSketch')?.addEventListener('mousedown', (e) => { e.preventDefault(); });
+    $('#btnNotesInsertSketch')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      openNotesSketchpad();
     });
     $('#btnNotesInsertCode')?.addEventListener('mousedown', (e) => {
       e.preventDefault();
