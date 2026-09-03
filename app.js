@@ -17459,6 +17459,14 @@
         <div class="dash-section-title">Planner<span class="dash-section-count">workload timeline</span></div>
         <div id="dashPlannerHost"></div>
       </div>
+      <div class="dash-section" id="dashPersonNotesSection">
+        <div class="dash-section-title">
+          Notes &amp; reminders
+          <span class="dash-section-count" id="pnCount">${(p.notes || []).length}</span>
+          <button class="ghost pn-add" id="pnAdd" title="Add a note — optional date fires in the notifications bell" style="margin-left:auto;">+ Note</button>
+        </div>
+        <div id="pnList" class="pn-list"></div>
+      </div>
       <div class="dash-section is-collapsible${(state.ui?.dashUi?.reviewCollapsed) ? ' is-collapsed' : ''}" id="dashReviewsWrap">
         <button type="button" class="dash-section-title dev-rv-heading" id="devRvToggle" aria-expanded="${!(state.ui?.dashUi?.reviewCollapsed)}">
           <span class="dev-rv-caret">▾</span>
@@ -17631,6 +17639,169 @@
         });
       }
       rerenderPlanner();
+    })();
+    // Person notes & reminders — small cards attached to the person.
+    // Each note has a title + body + optional date/recurrence. Dated
+    // notes surface in the notifications bell as the day approaches.
+    (() => {
+      const host = document.querySelector('#pnList');
+      if (!host) return;
+      const RECUR_LABEL = { none: 'One-off', yearly: 'Yearly', monthly: 'Monthly', weekly: 'Weekly' };
+      const RECUR_ICON  = { none: '⏰',      yearly: '🔁',     monthly: '🔁',     weekly: '🔁' };
+      const today = todayISO();
+      function fmtDate(iso) {
+        if (!iso) return '';
+        try {
+          const [y, m, d] = iso.split('-').map(Number);
+          return new Date(y, m - 1, d).toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+        } catch (_) { return iso; }
+      }
+      function renderList() {
+        const notes = (p.notes || []).slice().sort((a, b) => {
+          // Sort by upcoming fire date first, then by creation.
+          const oa = _nextOccurrence(a.date, a.recurring || 'none', today);
+          const ob = _nextOccurrence(b.date, b.recurring || 'none', today);
+          if (oa && ob) return oa.localeCompare(ob);
+          if (oa) return -1;
+          if (ob) return 1;
+          return (b.createdAt || '').localeCompare(a.createdAt || '');
+        });
+        const countPill = document.querySelector('#pnCount');
+        if (countPill) countPill.textContent = notes.length;
+        if (!notes.length) {
+          host.innerHTML = `<div class="empty pn-empty">No notes yet. Click <b>+ Note</b> to add a birthday, an anniversary, or a follow-up.</div>`;
+          return;
+        }
+        host.innerHTML = notes.map((n) => {
+          const occ = _nextOccurrence(n.date, n.recurring || 'none', today);
+          const days = occ ? dayDiff(occ, today) : null;
+          const isBirthday = /birth/i.test(n.title || '');
+          const icon = isBirthday ? '🎂' : (n.recurring !== 'none' ? RECUR_ICON[n.recurring] : '⏰');
+          const when =
+            days === null ? '' :
+            days ===  0 ? '<span class="pn-when today">today</span>' :
+            days ===  1 ? '<span class="pn-when soon">tomorrow</span>' :
+            days  >   0 ? `<span class="pn-when${days<=7?' soon':''}">in ${days}d</span>` :
+            days === -1 ? '<span class="pn-when past">yesterday</span>' :
+                          `<span class="pn-when past">${Math.abs(days)}d ago</span>`;
+          const bodyPreview = (n.body || '').replace(/\s+/g, ' ').trim();
+          return `
+            <div class="pn-card" data-note-id="${escapeHTML(n.id)}">
+              <div class="pn-card-head">
+                <span class="pn-icon" aria-hidden="true">${n.date ? icon : '📝'}</span>
+                <div class="pn-title">${escapeHTML(n.title || '(untitled)')}</div>
+                ${when}
+                <div class="pn-card-actions">
+                  <button type="button" class="icon-btn pn-edit" title="Edit" aria-label="Edit">✎</button>
+                  <button type="button" class="icon-btn pn-del"  title="Delete" aria-label="Delete">×</button>
+                </div>
+              </div>
+              ${bodyPreview ? `<div class="pn-body">${escapeHTML(bodyPreview)}</div>` : ''}
+              ${n.date ? `<div class="pn-meta">
+                ${RECUR_LABEL[n.recurring] || 'One-off'} · ${fmtDate(n.date)}${n.recurring !== 'none' && occ && occ !== n.date ? ` → next ${fmtDate(occ)}` : ''}${n.remindDaysBefore ? ` · remind ${n.remindDaysBefore}d before` : ''}
+              </div>` : ''}
+            </div>`;
+        }).join('');
+        host.querySelectorAll('.pn-edit').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = b.closest('.pn-card')?.dataset.noteId;
+            const note = (p.notes || []).find((x) => x.id === id);
+            if (note) openEditor(note);
+          });
+        });
+        host.querySelectorAll('.pn-del').forEach((b) => {
+          b.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = b.closest('.pn-card')?.dataset.noteId;
+            const note = (p.notes || []).find((x) => x.id === id);
+            if (!note) return;
+            if (!confirm(`Delete note "${note.title || '(untitled)'}"?`)) return;
+            p.notes = (p.notes || []).filter((x) => x.id !== id);
+            commit('person-note-delete');
+            renderList();
+            refreshBell();
+          });
+        });
+      }
+      function openEditor(note) {
+        // Simple modal — title / body / date / recurrence / lead time.
+        document.querySelectorAll('.pn-edit-mask').forEach((el) => el.remove());
+        const isNew = !note;
+        const cur = note || { title: '', body: '', date: '', recurring: 'none', remindDaysBefore: 0 };
+        const overlay = document.createElement('div');
+        overlay.className = 'tp-dialog-mask pn-edit-mask';
+        overlay.innerHTML = `
+          <div class="tp-dialog pn-edit-dialog" role="dialog" aria-label="${isNew ? 'New note' : 'Edit note'}">
+            <div class="tp-dialog-head">
+              <div class="tp-dialog-title">${isNew ? 'New note' : 'Edit note'} — ${escapeHTML(p.name)}</div>
+              <button type="button" class="tp-dialog-close pn-cancel" aria-label="Cancel">×</button>
+            </div>
+            <div class="pn-edit-body">
+              <label class="pn-field">
+                <span>Title</span>
+                <input type="text" class="pn-in-title" placeholder="e.g. Birthday" value="${escapeHTML(cur.title || '')}" />
+              </label>
+              <label class="pn-field">
+                <span>Notes</span>
+                <textarea class="pn-in-body" rows="3" placeholder="Anything worth remembering — spouse, kids, coffee order, follow-ups…">${escapeHTML(cur.body || '')}</textarea>
+              </label>
+              <div class="pn-field-row">
+                <label class="pn-field">
+                  <span>Date <span class="muted">(optional)</span></span>
+                  <input type="date" class="pn-in-date" value="${escapeHTML(cur.date || '')}" />
+                </label>
+                <label class="pn-field">
+                  <span>Repeats</span>
+                  <select class="pn-in-recur">
+                    <option value="none"   ${cur.recurring==='none'?'selected':''}>None</option>
+                    <option value="yearly" ${cur.recurring==='yearly'?'selected':''}>Yearly (birthdays, anniversaries)</option>
+                    <option value="monthly"${cur.recurring==='monthly'?'selected':''}>Monthly</option>
+                    <option value="weekly" ${cur.recurring==='weekly'?'selected':''}>Weekly</option>
+                  </select>
+                </label>
+                <label class="pn-field">
+                  <span>Remind days before</span>
+                  <input type="number" class="pn-in-lead" min="0" max="30" step="1" value="${cur.remindDaysBefore || 0}" />
+                </label>
+              </div>
+              <div class="pn-hint">A date fires a reminder in the notifications bell. Yearly repeats re-arm every year (dismissing one year won't hide the next).</div>
+            </div>
+            <div class="tp-dialog-foot">
+              <div style="flex:1"></div>
+              <div class="tp-dialog-actions">
+                <button type="button" class="btn pn-cancel">Cancel</button>
+                <button type="button" class="btn btn-primary pn-save">Save</button>
+              </div>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+        setTimeout(() => overlay.querySelector('.pn-in-title')?.focus(), 20);
+        const close = () => overlay.remove();
+        overlay.querySelectorAll('.pn-cancel').forEach((b) => b.addEventListener('click', close));
+        overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) close(); });
+        overlay.querySelector('.pn-save').addEventListener('click', () => {
+          const title = overlay.querySelector('.pn-in-title').value.trim();
+          const body  = overlay.querySelector('.pn-in-body').value;
+          const date  = overlay.querySelector('.pn-in-date').value;
+          const recurring = overlay.querySelector('.pn-in-recur').value;
+          const lead = clamp(parseInt(overlay.querySelector('.pn-in-lead').value, 10) || 0, 0, 30);
+          if (!title && !body && !date) { close(); return; }
+          const now = new Date().toISOString();
+          if (isNew) {
+            p.notes = p.notes || [];
+            p.notes.push({ id: uid('pn'), title, body, date, recurring, remindDaysBefore: lead, createdAt: now, updatedAt: now });
+          } else {
+            Object.assign(note, { title, body, date, recurring, remindDaysBefore: lead, updatedAt: now });
+          }
+          commit(isNew ? 'person-note-add' : 'person-note-edit');
+          close();
+          renderList();
+          refreshBell();
+        });
+      }
+      $('#pnAdd')?.addEventListener('click', () => openEditor(null));
+      renderList();
     })();
     // Development reviews controller. Keeps a local `selected` id
     // pointing at the review currently in the editor. Re-renders on
@@ -24582,6 +24753,24 @@
       if (p.capacity < 30) p.capacity = Math.round(p.capacity * 20); // legacy unit
       if (typeof p.hourlyRate !== 'number') p.hourlyRate = 100;
       p.role = p.role || '';
+      // Person notes — free-form cards that can optionally carry a
+      // date + recurrence + lead-time. When a note has a date, we
+      // surface a reminder in the bell as the fire day approaches;
+      // recurring notes re-arm on each cycle. Shape per entry:
+      //   { id, title, body, date, recurring, remindDaysBefore,
+      //     createdAt, updatedAt }
+      p.notes = Array.isArray(p.notes) ? p.notes : [];
+      p.notes = p.notes.filter((n) => n && typeof n === 'object');
+      p.notes.forEach((n) => {
+        n.id = n.id || uid('pn');
+        n.title = typeof n.title === 'string' ? n.title : '';
+        n.body  = typeof n.body  === 'string' ? n.body  : '';
+        n.date  = typeof n.date  === 'string' ? n.date  : '';
+        n.recurring = ['none','yearly','monthly','weekly'].includes(n.recurring) ? n.recurring : 'none';
+        n.remindDaysBefore = Number.isFinite(n.remindDaysBefore) ? clamp(Math.round(n.remindDaysBefore), 0, 30) : 0;
+        n.createdAt = n.createdAt || new Date().toISOString();
+        n.updatedAt = n.updatedAt || n.createdAt;
+      });
     });
 
     s.projects.forEach((p) => {
@@ -28325,7 +28514,80 @@
         run: () => $('#todoFab')?.click(),
       });
     });
+    // Person-note reminders — birthdays, anniversaries, one-off follow-ups.
+    // A note with a date + lead time becomes an inbox item as the fire
+    // day approaches; recurring notes re-arm on the next cycle (the id
+    // encodes the occurrence year, so dismissing "this year's birthday"
+    // doesn't hide next year's).
+    (state.people || []).forEach((p) => {
+      (p.notes || []).forEach((n) => {
+        if (!n.date) return;
+        const occ = _nextOccurrence(n.date, n.recurring || 'none', today);
+        if (!occ) return; // one-off in the past — nothing to fire
+        const daysUntil = dayDiff(occ, today);
+        const lead = clamp(n.remindDaysBefore || 0, 0, 30);
+        // Only include if we're inside the lead window (or on/past the day
+        // itself while still within a small "still relevant" tail).
+        const TAIL_DAYS = 1; // keep visible for a day after
+        if (daysUntil > lead) return;
+        if (daysUntil < -TAIL_DAYS) return;
+        const isBirthday = /birth/i.test(n.title || '');
+        const icon = isBirthday ? '🎂' : (n.recurring !== 'none' ? '🔁' : '⏰');
+        const tone = daysUntil < 0 ? 'muted' : daysUntil === 0 ? 'bad' : (daysUntil <= 3 ? 'warn' : 'muted');
+        const when =
+          daysUntil ===  0 ? 'today' :
+          daysUntil ===  1 ? 'tomorrow' :
+          daysUntil  >   0 ? `in ${daysUntil}d` :
+          daysUntil === -1 ? 'yesterday' : `${Math.abs(daysUntil)}d ago`;
+        out.push({
+          id: `person-note:${n.id}:${occ}`,
+          kind: 'person-note', icon, tone,
+          title: `${p.name}${n.title ? ' — ' + n.title : ''}`,
+          sub: `${when} · ${occ}`,
+          run: () => openPersonDashboard(p.id),
+        });
+      });
+    });
     return out.filter((it) => !dismissed.has(it.id));
+  }
+
+  // Compute the next occurrence date (ISO) of a person-note. For a one-
+  // off ('none'), returns the stored date if it hasn't passed by more
+  // than a day, otherwise null. Yearly rolls the year forward; monthly
+  // rolls month; weekly finds the next same-weekday. All dates are
+  // treated as local YYYY-MM-DD.
+  function _nextOccurrence(dateISO, recurring, todayISO_) {
+    if (!dateISO) return null;
+    const [y, m, d] = dateISO.split('-').map(Number);
+    if (!y || !m || !d) return null;
+    const today = new Date(todayISO_ + 'T00:00:00');
+    const toISO = (dt) => `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+    if (recurring === 'yearly') {
+      const cand = new Date(today.getFullYear(), m - 1, d);
+      // If this year's has already passed (>1 day ago), roll to next year.
+      if ((cand - today) / 86400000 < -1) cand.setFullYear(cand.getFullYear() + 1);
+      return toISO(cand);
+    }
+    if (recurring === 'monthly') {
+      const cand = new Date(today.getFullYear(), today.getMonth(), d);
+      if ((cand - today) / 86400000 < -1) cand.setMonth(cand.getMonth() + 1);
+      return toISO(cand);
+    }
+    if (recurring === 'weekly') {
+      const src = new Date(y, m - 1, d);
+      const weekday = src.getDay();
+      const cand = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+      const shift = (weekday - cand.getDay() + 7) % 7;
+      cand.setDate(cand.getDate() + shift);
+      // If we landed on today but the day just started, that's fine.
+      // If today is the weekday and it's already yesterday-in-past, roll a week.
+      // (Simple case: shift is 0 means today, else next occurrence.)
+      return toISO(cand);
+    }
+    // One-off — visible until 1 day past.
+    const src = new Date(y, m - 1, d);
+    if ((src - today) / 86400000 < -1) return null;
+    return dateISO;
   }
   function inboxCount() { return inboxItems().length; }
   function refreshBell() {
@@ -28345,10 +28607,10 @@
     const view = document.createElement('div');
     view.className = 'view';
     const items = inboxItems();
-    const grouped = { late: [], soon: [], cr: [], risk: [], stale: [], todo: [] };
+    const grouped = { late: [], soon: [], cr: [], risk: [], stale: [], todo: [], 'person-note': [] };
     items.forEach((it) => { (grouped[it.kind] || (grouped[it.kind] = [])).push(it); });
-    const sectionTitle = { late: 'Late', soon: 'Due soon', cr: 'CR aging', risk: 'Unmitigated risks', stale: 'Stale', todo: 'Personal to-do' };
-    const order = ['late', 'soon', 'cr', 'risk', 'stale', 'todo'];
+    const sectionTitle = { late: 'Late', soon: 'Due soon', cr: 'CR aging', risk: 'Unmitigated risks', stale: 'Stale', todo: 'Personal to-do', 'person-note': 'People — reminders' };
+    const order = ['late', 'soon', 'person-note', 'cr', 'risk', 'stale', 'todo'];
     view.innerHTML = `
       <div class="page-head">
         <div>

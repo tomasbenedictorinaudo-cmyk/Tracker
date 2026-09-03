@@ -11901,3 +11901,82 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 }
 .nt-sk-hint { font-size: 11px; color: var(--muted); }
 .nt-sk-dialog .tp-dialog-actions { display: inline-flex; gap: 8px; }
+
+/* ── People: notes & reminders ─────────────────────────────── */
+#dashPersonNotesSection .dash-section-title { align-items: center; }
+#dashPersonNotesSection .pn-add {
+  margin-left: auto;
+  font-size: 12px;
+  padding: 4px 10px;
+}
+.pn-list { display: flex; flex-direction: column; gap: 6px; }
+.pn-empty { padding: 12px; font-size: 12px; color: var(--muted); }
+.pn-card {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: rgba(148, 163, 184, .04);
+}
+.pn-card-head {
+  display: flex; align-items: center; gap: 8px;
+  min-height: 22px;
+}
+.pn-icon { font-size: 14px; line-height: 1; }
+.pn-title {
+  font-weight: 600; font-size: 13px; color: var(--fg);
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pn-when {
+  font-size: 11px; font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: rgba(148, 163, 184, .18);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pn-when.soon  { background: rgba(234, 179, 8, .22);  color: #eab308; }
+.pn-when.today { background: rgba(239, 68, 68, .22);  color: #ef4444; }
+.pn-when.past  { background: rgba(148, 163, 184, .12); color: var(--muted); font-weight: 400; }
+.pn-card-actions { display: inline-flex; gap: 2px; }
+.pn-card-actions .icon-btn {
+  width: 22px; height: 22px; font-size: 13px;
+  color: var(--muted); background: transparent;
+  border: 1px solid transparent; border-radius: 4px; cursor: pointer;
+}
+.pn-card-actions .icon-btn:hover { background: rgba(148,163,184,.16); color: var(--fg); border-color: var(--line); }
+.pn-card-actions .pn-del:hover { color: var(--bad, #ef4444); }
+.pn-body {
+  margin-top: 4px;
+  font-size: 12px; color: var(--fg);
+  overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+  white-space: pre-wrap;
+}
+.pn-meta {
+  margin-top: 4px;
+  font-size: 11px; color: var(--muted);
+}
+
+.pn-edit-dialog { width: min(520px, 100%); }
+.pn-edit-body { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+.pn-field { display: flex; flex-direction: column; gap: 4px; }
+.pn-field > span { font-size: 11px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+.pn-field > span .muted { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.pn-field input[type="text"],
+.pn-field input[type="date"],
+.pn-field input[type="number"],
+.pn-field select,
+.pn-field textarea {
+  border: 1px solid var(--line); border-radius: 5px;
+  background: var(--bg, #0b1220); color: var(--fg);
+  padding: 6px 8px; font-size: 13px;
+  font-family: inherit;
+}
+.pn-field textarea { resize: vertical; min-height: 60px; }
+.pn-field-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+.pn-hint { font-size: 11px; color: var(--muted); }
+.pn-edit-dialog .tp-dialog-foot {
+  display: flex; padding: 12px 16px; border-top: 1px solid var(--line); align-items: center;
+}
+.pn-edit-dialog .tp-dialog-actions { display: inline-flex; gap: 8px; }
