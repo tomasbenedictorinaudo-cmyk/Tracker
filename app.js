@@ -21836,7 +21836,14 @@
     const proj = curProject();
     if (!proj) return;
     state.notesHistory = state.notesHistory || {};
-    const ring = (state.notesHistory[proj.id] || []).slice().reverse();
+    const entry = _activeEntry(proj.id);
+    // History key is `<projId>:<entryId>` so each notebook entry has
+    // its own version ring. Legacy per-project rings (keyed by projId
+    // alone) merge in behind the new ones as a fallback for anything
+    // that was saved before Phase 2.
+    const perEntry = state.notesHistory[proj.id + ':' + entry.id] || [];
+    const legacy = state.notesHistory[proj.id] || [];
+    const ring = perEntry.concat(legacy).slice(-NOTES_HISTORY_KEEP).slice().reverse();
     document.querySelectorAll('.nt-hist-pop').forEach((el) => el.remove());
     const pop = document.createElement('div');
     pop.className = 'nt-hist-pop';
@@ -21877,14 +21884,154 @@
         if (!confirm(`Restore this version from ${new Date(snap.at).toLocaleString()}?\n\nThe current text will be saved as a new snapshot first — nothing is lost.`)) return;
         // Snapshot the current before overwriting.
         const currentHTML = _sanitizeNotesHTML($('#notesBody').innerHTML);
-        _pushNotesSnapshot(proj.id, currentHTML);
-        // Restore.
-        $('#notesBody').innerHTML = _sanitizeNotesHTML(snap.html || '');
-        state.notes[proj.id] = _sanitizeNotesHTML(snap.html || '');
+        _pushNotesSnapshot(proj.id + ':' + entry.id, currentHTML);
+        // Restore into the active entry.
+        const restored = _sanitizeNotesHTML(snap.html || '');
+        $('#notesBody').innerHTML = restored;
+        entry.html = restored;
+        entry.updatedAt = new Date().toISOString();
         saveState();
         buildNotesToc();
         applyNotesLangDetection();
+        renderNotesEntryList();
         close();
+      });
+    });
+  }
+
+  // ── Notes: notebook helpers ───────────────────────────────────
+  // Every project has a notebook — {activeId, entries[]}. Helpers to
+  // fetch / create / activate / mutate entries. Legacy string values
+  // are already upgraded in normalize; these helpers assume the new
+  // shape and coerce defensively if not.
+  function _notebookFor(projId) {
+    state.notes = state.notes || {};
+    let nb = state.notes[projId];
+    if (typeof nb === 'string') {
+      const now = new Date().toISOString();
+      const eid = 'ne_' + Math.random().toString(36).slice(2, 8);
+      nb = { activeId: eid, entries: [{ id: eid, title: 'General notes', kind: 'general', createdAt: now, updatedAt: now, pinned: true, archived: false, html: nb }] };
+      state.notes[projId] = nb;
+    }
+    if (!nb || typeof nb !== 'object') {
+      const now = new Date().toISOString();
+      const eid = 'ne_' + Math.random().toString(36).slice(2, 8);
+      nb = { activeId: eid, entries: [{ id: eid, title: 'General notes', kind: 'general', createdAt: now, updatedAt: now, pinned: true, archived: false, html: '' }] };
+      state.notes[projId] = nb;
+    }
+    if (!Array.isArray(nb.entries)) nb.entries = [];
+    if (!nb.entries.length) {
+      const now = new Date().toISOString();
+      const eid = 'ne_' + Math.random().toString(36).slice(2, 8);
+      nb.entries.push({ id: eid, title: 'General notes', kind: 'general', createdAt: now, updatedAt: now, pinned: true, archived: false, html: '' });
+    }
+    if (!nb.activeId || !nb.entries.find((e) => e.id === nb.activeId)) nb.activeId = nb.entries[0].id;
+    return nb;
+  }
+  function _activeEntry(projId) {
+    const nb = _notebookFor(projId);
+    return nb.entries.find((e) => e.id === nb.activeId) || nb.entries[0];
+  }
+  const NOTES_ENTRY_TEMPLATES = {
+    blank:   { title: 'Untitled', kind: 'general',  html: '<p></p>' },
+    meeting: { title: 'Meeting — {today}', kind: 'meeting', html: '<h2>{today} — Meeting</h2><h3>Attendees</h3><p></p><h3>Agenda</h3><ul><li></li></ul><h3>Discussion</h3><p></p><h3>Decisions</h3><ul><li></li></ul><h3>Actions</h3><p><i>Type @person to create an action.</i></p><ul><li></li></ul>' },
+    weekly:  { title: 'Weekly review — week of {today}', kind: 'weekly', html: '<h2>Week of {today}</h2><h3>What went well</h3><ul><li></li></ul><h3>What hurt</h3><ul><li></li></ul><h3>Focus for next week</h3><ul><li></li></ul><h3>Blockers / decisions needed</h3><p></p>' },
+    decision:{ title: 'Decision — {today}', kind: 'decision', html: '<h2>Decision — {today}</h2><h3>Context</h3><p></p><h3>Options considered</h3><ol><li></li><li></li></ol><h3>Decision</h3><p><b></b></p><h3>Why</h3><p></p><h3>Next steps</h3><ul><li></li></ul>' },
+    retro:   { title: 'Retro — {today}', kind: 'retro', html: '<h2>Retro — {today}</h2><h3>What worked</h3><ul><li></li></ul><h3>What hurt</h3><ul><li></li></ul><h3>What we\'ll change</h3><ul><li></li></ul><h3>Kudos</h3><ul><li></li></ul>' },
+  };
+  function _newEntry(templateKey) {
+    const tpl = NOTES_ENTRY_TEMPLATES[templateKey] || NOTES_ENTRY_TEMPLATES.blank;
+    const today = todayISO();
+    const now = new Date().toISOString();
+    return {
+      id: 'ne_' + Math.random().toString(36).slice(2, 8),
+      title: tpl.title.replace('{today}', today),
+      kind: tpl.kind,
+      createdAt: now,
+      updatedAt: now,
+      pinned: false,
+      archived: false,
+      html: tpl.html.replace(/\{today\}/g, today),
+    };
+  }
+  function createNotesEntry(templateKey) {
+    const proj = curProject(); if (!proj) return;
+    // Flush any pending save on the currently-active entry first.
+    if (notesSaveTimer) { saveNotesNow(); }
+    const nb = _notebookFor(proj.id);
+    const e = _newEntry(templateKey);
+    nb.entries.push(e);
+    nb.activeId = e.id;
+    saveState();
+    renderNotesEntryList();
+    loadNotesForCurrentProject();
+    $('#notesBody')?.focus();
+  }
+  function activateNotesEntry(id) {
+    const proj = curProject(); if (!proj) return;
+    if (notesSaveTimer) { saveNotesNow(); }
+    const nb = _notebookFor(proj.id);
+    if (!nb.entries.find((e) => e.id === id)) return;
+    nb.activeId = id;
+    saveState();
+    renderNotesEntryList();
+    loadNotesForCurrentProject();
+  }
+  function renderNotesEntryList() {
+    const host = $('#notesEntryList'); if (!host) return;
+    const proj = curProject(); if (!proj) return;
+    const nb = _notebookFor(proj.id);
+    const q = ($('#notesEntrySearch')?.value || '').trim().toLowerCase();
+    const showArchived = !!$('#notesShowArchived')?.checked;
+    const entries = nb.entries.slice()
+      .filter((e) => showArchived ? true : !e.archived)
+      .filter((e) => !q || (e.title.toLowerCase().includes(q) || (e.html || '').replace(/<[^>]+>/g,' ').toLowerCase().includes(q)))
+      .sort((a, b) => {
+        if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+        return (b.updatedAt || '').localeCompare(a.updatedAt || '');
+      });
+    if (!entries.length) {
+      host.innerHTML = '<div class="nt-el-empty">No entries match.</div>';
+      return;
+    }
+    const kindIcon = { meeting: '👥', weekly: '📅', decision: '⚖', retro: '↺', general: '📝' };
+    host.innerHTML = entries.map((e) => {
+      const active = e.id === nb.activeId;
+      const wc = (e.html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+      const stamp = new Date(e.updatedAt || e.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      return `<div class="nt-el-item ${active ? 'is-active' : ''} ${e.archived ? 'is-arch' : ''}" data-id="${escapeHTML(e.id)}" title="Click to open · right-click for more">
+        <span class="nt-el-glyph">${kindIcon[e.kind] || '📝'}</span>
+        <span class="nt-el-body">
+          <span class="nt-el-title">${e.pinned ? '📌 ' : ''}${escapeHTML(e.title)}</span>
+          <span class="nt-el-meta">${stamp} · ${wc}w</span>
+        </span>
+      </div>`;
+    }).join('');
+    host.querySelectorAll('.nt-el-item').forEach((row) => {
+      row.addEventListener('click', () => activateNotesEntry(row.dataset.id));
+      row.addEventListener('contextmenu', (ev) => {
+        ev.preventDefault();
+        const id = row.dataset.id;
+        const e = nb.entries.find((x) => x.id === id);
+        if (!e) return;
+        showContextMenu(ev.clientX, ev.clientY, [
+          { icon: '✎', label: 'Rename…', onClick: () => {
+            const name = prompt('Entry title:', e.title);
+            if (name && name.trim()) { e.title = name.trim(); e.updatedAt = new Date().toISOString(); saveState(); renderNotesEntryList(); }
+          } },
+          { icon: e.pinned ? '📌' : '⌖', label: e.pinned ? 'Unpin' : 'Pin to top', onClick: () => { e.pinned = !e.pinned; saveState(); renderNotesEntryList(); } },
+          { icon: e.archived ? '↥' : '📦', label: e.archived ? 'Unarchive' : 'Archive', onClick: () => { e.archived = !e.archived; saveState(); renderNotesEntryList(); if (nb.activeId === e.id && e.archived) { const other = nb.entries.find((x) => !x.archived); if (other) activateNotesEntry(other.id); } } },
+          { separator: true },
+          { icon: '✕', label: 'Delete permanently', onClick: () => {
+            if (!confirm(`Delete "${e.title}"? This cannot be undone (except via the version history of another entry).`)) return;
+            nb.entries = nb.entries.filter((x) => x.id !== id);
+            if (!nb.entries.length) nb.entries.push(_newEntry('blank'));
+            if (nb.activeId === id) nb.activeId = nb.entries[0].id;
+            saveState();
+            renderNotesEntryList();
+            loadNotesForCurrentProject();
+          } },
+        ]);
       });
     });
   }
@@ -21892,16 +22039,17 @@
   function loadNotesForCurrentProject() {
     const proj = curProject();
     if (!proj) return;
-    state.notes = state.notes || {};
+    const nb = _notebookFor(proj.id);
+    const entry = _activeEntry(proj.id);
     const body = $('#notesBody');
-    const raw = state.notes[proj.id];
     // Sanitize on load — strips anything a corrupted import or bad
     // paste left behind (scripts, inline font-size leaks, etc.).
-    const html = raw ? _sanitizeNotesHTML(raw)
-      : `<p><i>Notes for <b>${escapeHTML(proj.name)}</b> — type freely. Use the toolbar to format and to insert actions assigned to people.</i></p><p></p>`;
+    const html = entry.html ? _sanitizeNotesHTML(entry.html)
+      : `<p><i>New note for <b>${escapeHTML(proj.name)}</b> — type freely.</i></p><p></p>`;
     body.innerHTML = html;
-    $('#notesMeta').textContent = proj.name;
+    $('#notesMeta').textContent = `${proj.name} · ${entry.title}`;
     buildNotesToc();
+    renderNotesEntryList();
     // Tag each block's language so the browser's native spellcheck
     // picks the right dictionary on first open, not just after typing.
     applyNotesLangDetection();
@@ -21911,16 +22059,20 @@
   function saveNotesNow() {
     const proj = curProject();
     if (!proj) return;
-    state.notes = state.notes || {};
+    const nb = _notebookFor(proj.id);
+    const entry = _activeEntry(proj.id);
     // Sanitize + push a snapshot before overwriting.
     const clean = _sanitizeNotesHTML($('#notesBody').innerHTML);
-    _pushNotesSnapshot(proj.id, clean);
-    state.notes[proj.id] = clean;
+    _pushNotesSnapshot(proj.id + ':' + entry.id, clean);
+    entry.html = clean;
+    entry.updatedAt = new Date().toISOString();
     _gcMediaBlobs();
     saveState();
     const s = $('#notesSaved');
     if (s) { s.textContent = 'Saved'; s.classList.remove('saving'); }
     buildNotesToc();
+    // Refresh the entry list so the "updated at" and word count stay live.
+    renderNotesEntryList();
   }
 
   // ── Notes: custom block swapper ───────────────────────────────
@@ -22781,6 +22933,24 @@
     // Version-history button — floating popover listing the last 20
     // saved snapshots. Click a snapshot to preview + restore.
     $('#btnNotesHistory')?.addEventListener('click', () => openNotesHistoryPopover());
+    // "+ New" — opens a small template picker; each option creates a
+    // fresh entry seeded with the template's HTML.
+    $('#btnNotesNewEntry')?.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      const btn = ev.currentTarget;
+      const items = [
+        { icon: '📝', label: 'Blank note',        onClick: () => createNotesEntry('blank') },
+        { icon: '👥', label: 'Meeting notes',     onClick: () => createNotesEntry('meeting') },
+        { icon: '📅', label: 'Weekly review',     onClick: () => createNotesEntry('weekly') },
+        { icon: '⚖',  label: 'Decision',          onClick: () => createNotesEntry('decision') },
+        { icon: '↺',  label: 'Retro',             onClick: () => createNotesEntry('retro') },
+      ];
+      const r = btn.getBoundingClientRect();
+      showContextMenu(r.left, r.bottom + 4, items);
+    });
+    // Live search + archived toggle.
+    $('#notesEntrySearch')?.addEventListener('input', renderNotesEntryList);
+    $('#notesShowArchived')?.addEventListener('change', renderNotesEntryList);
 
     // Fullscreen toggle — expands the notes panel to the full viewport.
     // Persists per-session (not stored) so a new visit opens sidebar-sized.
@@ -23348,6 +23518,42 @@
     }
     s.budgets = s.budgets || {};
     s.notes = s.notes || {};
+    // Notes migration — flat string per project → notebook with
+    // entries. `state.notes[projId]` was originally an HTML string;
+    // it's now `{ activeId, entries: [{id, title, kind, createdAt,
+    // updatedAt, pinned, archived, html}] }`. Legacy strings become
+    // the first "General notes" entry.
+    for (const [pid, v] of Object.entries(s.notes)) {
+      if (typeof v === 'string') {
+        const now = new Date().toISOString();
+        const eid = 'ne_' + Math.random().toString(36).slice(2, 8);
+        s.notes[pid] = {
+          activeId: eid,
+          entries: [{ id: eid, title: 'General notes', kind: 'general', createdAt: now, updatedAt: now, pinned: true, archived: false, html: v }],
+        };
+      } else if (v && typeof v === 'object') {
+        v.entries = Array.isArray(v.entries) ? v.entries : [];
+        v.entries = v.entries.filter((e) => e && typeof e === 'object');
+        v.entries.forEach((e) => {
+          e.id = e.id || 'ne_' + Math.random().toString(36).slice(2, 8);
+          e.title = typeof e.title === 'string' ? e.title : 'Untitled';
+          e.kind = e.kind || 'general';
+          e.createdAt = e.createdAt || new Date().toISOString();
+          e.updatedAt = e.updatedAt || e.createdAt;
+          e.pinned = !!e.pinned;
+          e.archived = !!e.archived;
+          e.html = typeof e.html === 'string' ? e.html : '';
+        });
+        if (!v.entries.length) {
+          const now = new Date().toISOString();
+          const eid = 'ne_' + Math.random().toString(36).slice(2, 8);
+          v.entries.push({ id: eid, title: 'General notes', kind: 'general', createdAt: now, updatedAt: now, pinned: true, archived: false, html: '' });
+        }
+        if (!v.activeId || !v.entries.find((e) => e.id === v.activeId)) {
+          v.activeId = v.entries[0].id;
+        }
+      }
+    }
     s.notesOpen = !!s.notesOpen;
     // Personal to-do list — project-independent, lives at the state level.
     // Each item: { id, text, done }. Defaulted to [] for retrocompat.

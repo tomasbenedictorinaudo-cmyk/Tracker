@@ -11424,3 +11424,65 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 .nt-hist-item:hover { background: rgba(148,163,184,.10); border-color: var(--line); }
 .nt-hist-when { font-weight: 600; }
 .nt-hist-meta { color: var(--muted); font-size: 10.5px; }
+
+/* Notes — entry list (notebook) ─────────────────────────────── */
+.notes-entries {
+  border-bottom: 1px solid var(--line);
+  padding: 6px 8px;
+  display: flex; flex-direction: column; gap: 4px;
+  max-height: 220px;
+}
+.notes-entries-head {
+  display: flex; align-items: center; gap: 6px;
+}
+.notes-entries-search {
+  flex: 1;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 11.5px;
+}
+.notes-entries-arch {
+  font-size: 10.5px; color: var(--muted);
+  display: inline-flex; align-items: center; gap: 3px;
+  cursor: pointer; user-select: none;
+}
+.notes-entries-arch input { margin: 0; }
+.notes-entries-new {
+  cursor: pointer;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: rgba(96, 165, 250, .15);
+  color: rgba(147, 197, 253, 1);
+  font-size: 11px;
+  font-weight: 700;
+}
+.notes-entries-new:hover { background: rgba(96, 165, 250, .28); }
+:root[data-theme="light"] .notes-entries-new { color: rgba(29, 78, 216, 1); }
+.notes-entry-list {
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1px;
+  padding-right: 2px;
+}
+.nt-el-empty { padding: 8px 4px; color: var(--muted); font-size: 11px; font-style: italic; }
+.nt-el-item {
+  display: flex; gap: 6px; align-items: flex-start;
+  padding: 4px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  font-size: 11.5px;
+}
+.nt-el-item:hover { background: rgba(148,163,184,.10); border-color: var(--line); }
+.nt-el-item.is-active { background: rgba(96, 165, 250, .16); border-color: rgba(96, 165, 250, .40); }
+.nt-el-item.is-arch { opacity: .55; }
+.nt-el-glyph { font-size: 13px; padding-top: 1px; }
+.nt-el-body { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.nt-el-title {
+  font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--fg);
+}
+.nt-el-meta { font-size: 10px; color: var(--muted); }

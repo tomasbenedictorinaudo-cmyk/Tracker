@@ -189,6 +189,14 @@
         <span class="sep"></span>
         <button data-cmd="removeFormat" title="Clear formatting">✕</button>
       </div>
+      <div class="notes-entries" id="notesEntriesPanel">
+        <div class="notes-entries-head">
+          <input type="text" class="notes-entries-search" id="notesEntrySearch" placeholder="Search entries…" />
+          <label class="notes-entries-arch" title="Include archived entries in the list"><input type="checkbox" id="notesShowArchived" /> Archived</label>
+          <button type="button" class="notes-entries-new" id="btnNotesNewEntry" title="New entry (choose template)">+ New</button>
+        </div>
+        <div class="notes-entry-list" id="notesEntryList"></div>
+      </div>
       <nav class="notes-toc" id="notesToc" aria-label="Notes contents" hidden></nav>
       <div class="notes-toc-resize" id="notesTocResize" title="Drag to resize · double-click to reset" aria-label="Resize table of contents" role="separator" hidden></div>
       <div class="notes-body" id="notesBody" contenteditable="true" spellcheck="true"></div>
