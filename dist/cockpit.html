@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-09-01T20:40:18.467Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-09-03T18:32:21.946Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -11394,6 +11394,46 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
   .tp-grid-head { display: none; }
 }
 
+/* Notes — version history popover ───────────────────────────── */
+.nt-hist-pop {
+  position: absolute;
+  z-index: 500;
+  min-width: 260px;
+  max-width: 340px;
+  background: var(--bg, #0b1220);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  padding: 8px;
+  font-size: 12px;
+}
+.nt-hist-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 4px 6px 8px; border-bottom: 1px solid var(--line);
+}
+.nt-hist-close {
+  cursor: pointer; border: 0; background: transparent;
+  color: var(--muted); font-size: 16px; line-height: 1; padding: 0 4px;
+}
+.nt-hist-close:hover { color: var(--fg); }
+.nt-hist-empty { padding: 12px 6px; color: var(--muted); font-size: 11.5px; }
+.nt-hist-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow: auto; margin-top: 6px; }
+.nt-hist-item {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  padding: 5px 8px;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 12px;
+}
+.nt-hist-item:hover { background: rgba(148,163,184,.10); border-color: var(--line); }
+.nt-hist-when { font-weight: 600; }
+.nt-hist-meta { color: var(--muted); font-size: 10.5px; }
+
   </style>
 </head>
 <body>
@@ -11544,6 +11584,7 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
       <div class="notes-head">
         <div class="notes-title">Meeting notes</div>
         <div class="notes-meta" id="notesMeta"></div>
+        <button class="icon-btn" id="btnNotesHistory" title="Show recent versions of these notes (last 20 autosaves)" aria-label="Version history">⤺</button>
         <button class="icon-btn" id="btnNotesFullscreen" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">
           <svg class="nt-fs-in" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <svg class="nt-fs-out" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M6 2v4H2M10 2v4h4M6 14v-4H2M10 14v-4h4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -33371,13 +33412,224 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     }
   }
 
+  // ── Notes: HTML sanitizer + normalizer ────────────────────────
+  // The notes body is round-tripped as raw innerHTML. Sanitize on
+  // BOTH load and save to (a) neutralize anything that snuck in via
+  // paste / import (scripts, event handlers, javascript: URLs) and
+  // (b) strip inline sizing that leaks into paragraphs after a
+  // formatBlock demotion (H1 → P leaves <span style="font-size:24px">
+  // wrappers behind). Whitelist approach: allowed tags + allowed
+  // attributes, everything else is removed. Chip/mark/image data
+  // attributes are preserved so links, highlights and pasted images
+  // survive intact.
+  const NOTES_ALLOWED_TAGS = new Set([
+    'P','BR','H1','H2','H3','H4','H5','H6','UL','OL','LI',
+    'B','STRONG','I','EM','U','S','CODE','PRE','BLOCKQUOTE','HR',
+    'A','SPAN','MARK','IMG','DIV','BUTTON','SVG','PATH','TITLE','SUP','SUB',
+    'TABLE','THEAD','TBODY','TR','TH','TD',
+  ]);
+  // Attributes we always accept (some tags need extra ones, see below).
+  const NOTES_GLOBAL_ATTRS = new Set(['class','id','lang','dir','title','contenteditable','draggable','role','aria-hidden','aria-label']);
+  // Inline style properties we accept — colour and highlight bg only;
+  // anything font-size / font-family related is dropped to avoid the
+  // heading-demotion leak.
+  const NOTES_STYLE_KEEP = /^(color|background|background-color|width|max-width)$/i;
+  function _sanitizeNotesTree(root) {
+    if (!root) return;
+    const walk = (node) => {
+      // Iterate a snapshot — we mutate as we go.
+      const kids = Array.from(node.childNodes);
+      for (const child of kids) {
+        if (child.nodeType === 8) { child.remove(); continue; } // comment
+        if (child.nodeType !== 1) continue;
+        const tag = child.tagName;
+        // Strip disallowed tags (unwrap: keep children in place so text
+        // isn't lost). Legacy <font> is the classic offender.
+        if (!NOTES_ALLOWED_TAGS.has(tag)) {
+          const parent = child.parentNode;
+          while (child.firstChild) parent.insertBefore(child.firstChild, child);
+          child.remove();
+          continue;
+        }
+        // Drop every attribute we don't explicitly allow.
+        const keep = new Set(NOTES_GLOBAL_ATTRS);
+        if (tag === 'A')   ['href','target','rel'].forEach((a) => keep.add(a));
+        if (tag === 'IMG') ['src','alt','data-img-id'].forEach((a) => keep.add(a));
+        if (tag === 'MARK') keep.add('data-hl');
+        if (tag === 'SPAN') ['style'].forEach((a) => keep.add(a));
+        if (tag === 'DIV' || tag === 'P' || /^H[1-6]$/.test(tag)) keep.add('style');
+        // Preserve every chip/link data-* attribute we know about.
+        ['data-action-id','data-person-id','data-gmail-thread','data-gmail-subject','data-img-id','data-hl'].forEach((a) => keep.add(a));
+        for (const attr of Array.from(child.attributes)) {
+          const n = attr.name.toLowerCase();
+          if (n.startsWith('on')) { child.removeAttribute(attr.name); continue; }
+          if (!keep.has(n)) { child.removeAttribute(attr.name); continue; }
+          // Sanitize URL-bearing attrs.
+          if ((n === 'href' || n === 'src') && /^\s*javascript:/i.test(attr.value)) {
+            child.removeAttribute(attr.name);
+            continue;
+          }
+        }
+        // Strip inline styles we don't want to persist. Keep colour
+        // (for the foreColor picker) and highlight bg; drop font-size,
+        // font-family, font-weight (unless <b>/<strong>), letter-
+        // spacing, line-height, text-transform.
+        if (child.hasAttribute('style')) {
+          const cleaned = String(child.getAttribute('style') || '')
+            .split(';')
+            .map((s) => s.trim()).filter(Boolean)
+            .filter((s) => {
+              const prop = s.split(':')[0]?.trim().toLowerCase() || '';
+              return NOTES_STYLE_KEEP.test(prop);
+            })
+            .join('; ');
+          if (cleaned) child.setAttribute('style', cleaned);
+          else         child.removeAttribute('style');
+        }
+        // External anchors always get rel="noopener noreferrer" +
+        // target="_blank" if the URL is http/https/mailto.
+        if (tag === 'A' && child.hasAttribute('href')) {
+          const href = child.getAttribute('href') || '';
+          if (/^(https?:|mailto:)/i.test(href)) {
+            child.setAttribute('target', '_blank');
+            child.setAttribute('rel', 'noopener noreferrer');
+          }
+        }
+        walk(child);
+      }
+    };
+    walk(root);
+    return root;
+  }
+  function _sanitizeNotesHTML(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = String(html || '');
+    _sanitizeNotesTree(tmp);
+    return tmp.innerHTML;
+  }
+
+  // ── Notes: snapshot history ring ──────────────────────────────
+  // Keep the last 20 saved versions of each project's notes. Cheap
+  // insurance against destructive edits. Two adjacent snapshots with
+  // identical HTML are deduped (many autosaves land during typing).
+  const NOTES_HISTORY_KEEP = 20;
+  function _pushNotesSnapshot(projId, html) {
+    state.notesHistory = state.notesHistory || {};
+    const ring = state.notesHistory[projId] = Array.isArray(state.notesHistory[projId]) ? state.notesHistory[projId] : [];
+    const last = ring[ring.length - 1];
+    if (last && last.html === html) return; // dedupe
+    ring.push({ at: new Date().toISOString(), html });
+    if (ring.length > NOTES_HISTORY_KEEP) ring.splice(0, ring.length - NOTES_HISTORY_KEEP);
+  }
+
+  // ── Notes: media blob garbage collector ───────────────────────
+  // Scan every project's notes for [img:id|w] tokens + every img.rt-img
+  // currently in the DOM; drop unreferenced mediaBlobs entries. Runs
+  // after each note save so deleted images stop bloating state.
+  function _gcMediaBlobs() {
+    if (!state.mediaBlobs || typeof state.mediaBlobs !== 'object') return;
+    const referenced = new Set();
+    // Walk every stored notes body for tokens + inline data-img-id.
+    const scan = (html) => {
+      if (!html) return;
+      const re = /(?:\[img:|data-img-id=["'])([A-Za-z0-9_-]+)/g;
+      let m;
+      while ((m = re.exec(html)) !== null) referenced.add(m[1]);
+    };
+    // Notes storage (may be old-flat-string or new-notebook shape).
+    Object.values(state.notes || {}).forEach((v) => {
+      if (typeof v === 'string') scan(v);
+      else if (v && Array.isArray(v.entries)) v.entries.forEach((e) => scan(e.html));
+    });
+    // Also scan comments/notes on every action/risk/decision/openpoint
+    // and every activity's rich fields (context/objective/inputs/notes).
+    (state.projects || []).forEach((pr) => {
+      (pr.actions || []).forEach((a) => scan(a.notes));
+      (pr.risks || []).forEach((r) => { scan(r.description); scan(r.mitigation); });
+      (pr.openPoints || []).forEach((op) => scan(op.notes));
+      (pr.decisions || []).forEach((d) => scan(d.rationale));
+    });
+    (state.activities || []).forEach((a) => {
+      scan(a.context); scan(a.objective); scan(a.inputs); scan(a.notes); scan(a.description);
+      (a.comments || []).forEach((c) => scan(c.text));
+    });
+    // Drop everything not referenced.
+    for (const id of Object.keys(state.mediaBlobs)) {
+      if (!referenced.has(id)) delete state.mediaBlobs[id];
+    }
+  }
+
+  // Notes history popover — lists the last N snapshots for the
+  // current project and lets the user restore any one. Restore takes
+  // a fresh snapshot of the current text first so nothing is lost.
+  function openNotesHistoryPopover() {
+    const proj = curProject();
+    if (!proj) return;
+    state.notesHistory = state.notesHistory || {};
+    const ring = (state.notesHistory[proj.id] || []).slice().reverse();
+    document.querySelectorAll('.nt-hist-pop').forEach((el) => el.remove());
+    const pop = document.createElement('div');
+    pop.className = 'nt-hist-pop';
+    if (!ring.length) {
+      pop.innerHTML = `
+        <div class="nt-hist-head"><b>Version history</b><button type="button" class="nt-hist-close" aria-label="Close">×</button></div>
+        <div class="nt-hist-empty">No saved versions yet — keep editing and snapshots will appear here.</div>`;
+    } else {
+      pop.innerHTML = `
+        <div class="nt-hist-head"><b>Version history</b> <span class="muted">— ${ring.length}/${NOTES_HISTORY_KEEP} snapshot${ring.length === 1 ? '' : 's'} for <b>${escapeHTML(proj.name)}</b></span><button type="button" class="nt-hist-close" aria-label="Close">×</button></div>
+        <div class="nt-hist-list">
+          ${ring.map((snap, i) => {
+            const wc = (snap.html || '').replace(/<[^>]+>/g, ' ').split(/\s+/).filter(Boolean).length;
+            const stamp = new Date(snap.at);
+            const label = stamp.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            return `<button type="button" class="nt-hist-item" data-idx="${i}"><span class="nt-hist-when">${escapeHTML(label)}</span><span class="nt-hist-meta">${wc} word${wc === 1 ? '' : 's'}${i === 0 ? ' · current' : ''}</span></button>`;
+          }).join('')}
+        </div>`;
+    }
+    document.body.appendChild(pop);
+    // Anchor next to the history button.
+    const btn = $('#btnNotesHistory');
+    if (btn) {
+      const r = btn.getBoundingClientRect();
+      pop.style.top  = (r.bottom + window.scrollY + 6) + 'px';
+      pop.style.left = Math.max(8, r.right + window.scrollX - pop.offsetWidth) + 'px';
+    }
+    const close = () => pop.remove();
+    pop.querySelector('.nt-hist-close')?.addEventListener('click', close);
+    const outside = (ev) => { if (!pop.contains(ev.target) && ev.target !== btn) close(); };
+    setTimeout(() => document.addEventListener('mousedown', outside, { once: true }), 0);
+    pop.querySelectorAll('.nt-hist-item').forEach((it) => {
+      it.addEventListener('click', () => {
+        const idx = Number(it.dataset.idx);
+        const snap = ring[idx];
+        if (!snap) return;
+        if (idx === 0) { close(); return; } // clicking "current" is a no-op
+        if (!confirm(`Restore this version from ${new Date(snap.at).toLocaleString()}?\n\nThe current text will be saved as a new snapshot first — nothing is lost.`)) return;
+        // Snapshot the current before overwriting.
+        const currentHTML = _sanitizeNotesHTML($('#notesBody').innerHTML);
+        _pushNotesSnapshot(proj.id, currentHTML);
+        // Restore.
+        $('#notesBody').innerHTML = _sanitizeNotesHTML(snap.html || '');
+        state.notes[proj.id] = _sanitizeNotesHTML(snap.html || '');
+        saveState();
+        buildNotesToc();
+        applyNotesLangDetection();
+        close();
+      });
+    });
+  }
+
   function loadNotesForCurrentProject() {
     const proj = curProject();
     if (!proj) return;
     state.notes = state.notes || {};
     const body = $('#notesBody');
-    const html = state.notes[proj.id];
-    body.innerHTML = html || `<p><i>Notes for <b>${escapeHTML(proj.name)}</b> — type freely. Use the toolbar to format and to insert actions assigned to people.</i></p><p></p>`;
+    const raw = state.notes[proj.id];
+    // Sanitize on load — strips anything a corrupted import or bad
+    // paste left behind (scripts, inline font-size leaks, etc.).
+    const html = raw ? _sanitizeNotesHTML(raw)
+      : `<p><i>Notes for <b>${escapeHTML(proj.name)}</b> — type freely. Use the toolbar to format and to insert actions assigned to people.</i></p><p></p>`;
+    body.innerHTML = html;
     $('#notesMeta').textContent = proj.name;
     buildNotesToc();
     // Tag each block's language so the browser's native spellcheck
@@ -33390,10 +33642,117 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     const proj = curProject();
     if (!proj) return;
     state.notes = state.notes || {};
-    state.notes[proj.id] = $('#notesBody').innerHTML;
+    // Sanitize + push a snapshot before overwriting.
+    const clean = _sanitizeNotesHTML($('#notesBody').innerHTML);
+    _pushNotesSnapshot(proj.id, clean);
+    state.notes[proj.id] = clean;
+    _gcMediaBlobs();
     saveState();
     const s = $('#notesSaved');
     if (s) { s.textContent = 'Saved'; s.classList.remove('saving'); }
+    buildNotesToc();
+  }
+
+  // ── Notes: custom block swapper ───────────────────────────────
+  // Replaces document.execCommand('formatBlock') — that command
+  // demotes headings badly (leaves inline font-size / <font> wrappers
+  // behind so a converted paragraph still LOOKS like an H1). Our
+  // version finds the block ancestor of the caret / selection, clones
+  // its children into the target tag, and strips every inline sizing
+  // rule + <font> tag along the way. Preserves marks + chips + imgs.
+  function _findNotesBlockAncestor(node, root) {
+    let n = node;
+    while (n && n !== root) {
+      if (n.nodeType === 1) {
+        const t = n.tagName;
+        if (t === 'P' || /^H[1-6]$/.test(t) || t === 'BLOCKQUOTE' || t === 'PRE' || t === 'LI') return n;
+      }
+      n = n.parentNode;
+    }
+    return null;
+  }
+  function _stripSizingStyles(root) {
+    if (!root) return;
+    const kids = Array.from(root.childNodes);
+    for (const child of kids) {
+      if (child.nodeType !== 1) continue;
+      if (child.tagName === 'FONT') {
+        while (child.firstChild) child.parentNode.insertBefore(child.firstChild, child);
+        child.remove();
+        continue;
+      }
+      if (child.hasAttribute?.('style')) {
+        const kept = String(child.getAttribute('style') || '')
+          .split(';').map((s) => s.trim()).filter(Boolean)
+          .filter((s) => {
+            const prop = (s.split(':')[0] || '').trim().toLowerCase();
+            // Drop everything sizing-related; keep only what the notes
+            // sanitizer keeps (color, background, width, max-width).
+            return NOTES_STYLE_KEEP.test(prop);
+          })
+          .join('; ');
+        if (kept) child.setAttribute('style', kept);
+        else      child.removeAttribute('style');
+      }
+      child.removeAttribute?.('size');
+      child.removeAttribute?.('color'); // legacy attr — colour lives in style now
+      _stripSizingStyles(child);
+    }
+  }
+  function notesSwapBlock(tag) {
+    const body = $('#notesBody');
+    if (!body) return;
+    body.focus();
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    // Collect every distinct block-ancestor the selection touches. For
+    // a collapsed caret this is just one block. For a multi-line
+    // selection it's every block between anchor and focus.
+    const startBlock = _findNotesBlockAncestor(range.startContainer, body);
+    const endBlock   = _findNotesBlockAncestor(range.endContainer,   body);
+    if (!startBlock) return;
+    const blocks = [];
+    if (startBlock === endBlock) {
+      blocks.push(startBlock);
+    } else {
+      // Walk siblings from startBlock to endBlock at the body's
+      // direct-child level; if they're at different depths, fall back
+      // to just startBlock (a full range walk isn't worth the code).
+      let n = startBlock;
+      const guard = 100;
+      let i = 0;
+      while (n && i < guard) {
+        blocks.push(n);
+        if (n === endBlock) break;
+        n = n.nextElementSibling;
+        i++;
+      }
+      if (blocks[blocks.length - 1] !== endBlock) blocks.push(endBlock);
+    }
+    const swapped = [];
+    for (const old of blocks) {
+      // LI stays LI — you can't convert a list item to a heading via
+      // this button without breaking the list. Skip silently.
+      if (old.tagName === 'LI') continue;
+      const clone = document.createElement(tag);
+      // Copy id/class/lang so TOC ids and lang tagging survive.
+      ['id','class','lang','dir'].forEach((a) => { if (old.hasAttribute(a)) clone.setAttribute(a, old.getAttribute(a)); });
+      while (old.firstChild) clone.appendChild(old.firstChild);
+      _stripSizingStyles(clone);
+      old.replaceWith(clone);
+      swapped.push(clone);
+    }
+    // Restore selection at the equivalent offset (start of first
+    // swapped block if we lost anchor tracking).
+    if (swapped.length) {
+      const r = document.createRange();
+      r.selectNodeContents(swapped[swapped.length - 1]);
+      r.collapse(false);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    scheduleNotesSave();
     buildNotesToc();
   }
 
@@ -33934,9 +34293,10 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     const node = range.startContainer;
     if (node.nodeType !== Node.TEXT_NODE) return null;
     const text = node.textContent.slice(0, range.startOffset);
-    // Trigger at start-of-line or after whitespace; query allows letters,
-    // digits, hyphen, underscore, and a single space so "Sofia R" works.
-    const m = text.match(/(?:^|[\s ])([@#])([\w\-]*(?: [\w\-]*)?)$/);
+    // Trigger at start-of-line or after any non-word char (whitespace,
+    // parens, dashes, commas, colons). Query allows letters, digits,
+    // hyphen, underscore, and a single space so "Sofia R" works.
+    const m = text.match(/(?:^|[^\w@#])([@#])([\w\-]*(?: [\w\-]*)?)$/);
     if (!m) return null;
     const kind = m[1];
     const query = m[2];
@@ -34148,6 +34508,10 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
       scheduleNotesSave();
     });
 
+    // Version-history button — floating popover listing the last 20
+    // saved snapshots. Click a snapshot to preview + restore.
+    $('#btnNotesHistory')?.addEventListener('click', () => openNotesHistoryPopover());
+
     // Fullscreen toggle — expands the notes panel to the full viewport.
     // Persists per-session (not stored) so a new visit opens sidebar-sized.
     $('#btnNotesFullscreen')?.addEventListener('click', () => {
@@ -34278,14 +34642,26 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
       }
     });
 
-    // Toolbar formatting
+    // Toolbar formatting.
+    // formatBlock buttons are intercepted and routed through
+    // notesSwapBlock — a custom block-swapper that strips the inline
+    // font-size / <font> leaks that execCommand('formatBlock') is
+    // notorious for. Everything else (bold/italic/underline/lists/
+    // foreColor/removeFormat) still uses execCommand which works.
     panel.querySelectorAll('.notes-toolbar [data-cmd]').forEach((btn) => {
-      // mousedown to preserve selection in contenteditable
       btn.addEventListener('mousedown', (e) => {
         e.preventDefault();
-        document.execCommand(btn.dataset.cmd, false, btn.dataset.arg || null);
+        const cmd = btn.dataset.cmd;
+        const arg = btn.dataset.arg || null;
+        if (cmd === 'formatBlock' && arg) {
+          // arg is "<h1>" / "<p>" — strip the angle brackets.
+          const tag = arg.replace(/[<>]/g, '').toUpperCase();
+          notesSwapBlock(tag);
+        } else {
+          document.execCommand(cmd, false, arg);
+          scheduleNotesSave();
+        }
         $('#notesBody').focus();
-        scheduleNotesSave();
       });
     });
     // Font-colour picker — applies foreColor to current selection. The bar

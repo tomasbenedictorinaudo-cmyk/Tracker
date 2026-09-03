@@ -11384,3 +11384,43 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
   .tp-grid-head, .tp-row { grid-template-columns: 1fr; gap: 4px; }
   .tp-grid-head { display: none; }
 }
+
+/* Notes — version history popover ───────────────────────────── */
+.nt-hist-pop {
+  position: absolute;
+  z-index: 500;
+  min-width: 260px;
+  max-width: 340px;
+  background: var(--bg, #0b1220);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  padding: 8px;
+  font-size: 12px;
+}
+.nt-hist-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 4px 6px 8px; border-bottom: 1px solid var(--line);
+}
+.nt-hist-close {
+  cursor: pointer; border: 0; background: transparent;
+  color: var(--muted); font-size: 16px; line-height: 1; padding: 0 4px;
+}
+.nt-hist-close:hover { color: var(--fg); }
+.nt-hist-empty { padding: 12px 6px; color: var(--muted); font-size: 11.5px; }
+.nt-hist-list { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow: auto; margin-top: 6px; }
+.nt-hist-item {
+  display: flex; justify-content: space-between; align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg);
+  padding: 5px 8px;
+  border-radius: 4px;
+  text-align: left;
+  font-size: 12px;
+}
+.nt-hist-item:hover { background: rgba(148,163,184,.10); border-color: var(--line); }
+.nt-hist-when { font-weight: 600; }
+.nt-hist-meta { color: var(--muted); font-size: 10.5px; }
