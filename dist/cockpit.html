@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <!-- Built 2026-09-03T18:36:11.718Z by build.js — single-file standalone bundle -->
+  <!-- Built 2026-09-03T18:39:30.683Z by build.js — single-file standalone bundle -->
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Cockpit — Project Tracker</title>
@@ -11496,6 +11496,124 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
 }
 .nt-el-meta { font-size: 10px; color: var(--muted); }
 
+/* Notes — Phase 3 editor upgrade ───────────────────────────── */
+.notes-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg, #0b1220);
+  border-bottom: 1px solid var(--line);
+  padding: 4px 6px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+}
+.notes-toolbar button svg { display: block; }
+.notes-toolbar button {
+  padding: 3px 6px;
+  min-width: 26px;
+  min-height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.nt-tb-group {
+  display: inline-flex; align-items: center; gap: 1px;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+.nt-tb-group + .sep { margin: 0 4px; }
+/* Sticky-inside-fullscreen: keep toolbar visible when the panel is
+   in fullscreen and the body scrolls */
+.notes-panel.is-fullscreen .notes-toolbar { top: 0; }
+
+/* In-note search bar ─────────────────────────────────────────── */
+.notes-search {
+  position: sticky;
+  top: 40px;
+  z-index: 6;
+  background: var(--bg, #0b1220);
+  border-bottom: 1px solid var(--line);
+  padding: 4px 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.notes-search input#notesSearchInput {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+}
+.notes-search .nt-search-count { color: var(--muted); font-size: 11px; min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+.notes-search button {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.notes-search button:hover { background: rgba(148,163,184,.12); }
+.nt-search-hit {
+  background: rgba(251, 191, 36, .35);
+  border-radius: 2px;
+  outline: 1px solid transparent;
+}
+.nt-search-hit.is-current {
+  background: rgba(251, 191, 36, .70);
+  outline: 1px solid rgba(146, 64, 14, 1);
+}
+
+/* Reading mode — pinches body to comfortable max-width + bumps
+   line-height. Also nudges the toolbar to a lighter background so
+   the reading area feels distinct. */
+.notes-panel.reading-mode .notes-body {
+  max-width: 720px;
+  margin: 0 auto;
+  line-height: 1.7;
+  padding: 24px 32px;
+}
+.notes-panel.reading-mode .notes-body h1,
+.notes-panel.reading-mode .notes-body h2,
+.notes-panel.reading-mode .notes-body h3 { margin-top: 1.2em; }
+.notes-panel.reading-mode .notes-toolbar { background: rgba(148,163,184,.06); }
+
+/* Inline code + hr look ─────────────────────────────────────── */
+.notes-body code {
+  background: rgba(148,163,184,.16);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .92em;
+}
+.notes-body hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 12px 0;
+}
+
+/* TOC severity filter ────────────────────────────────────────── */
+.nt-toc-filters {
+  display: flex; gap: 4px; padding: 4px 6px 6px;
+  font-size: 10.5px; color: var(--muted);
+  border-bottom: 1px dashed var(--line);
+  margin-bottom: 4px;
+}
+.nt-toc-filter {
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.nt-toc-filter.is-on { background: rgba(148,163,184,.16); color: var(--fg); }
+.nt-toc-filter[data-sev="ok"].is-on   { background: rgba(74, 222, 128, .18); color: rgba(74, 222, 128, 1); border-color: rgba(74, 222, 128, .40); }
+.nt-toc-filter[data-sev="warn"].is-on { background: rgba(251, 191, 36, .18); color: rgba(251, 191, 36, 1); border-color: rgba(251, 191, 36, .40); }
+.nt-toc-filter[data-sev="bad"].is-on  { background: rgba(248, 113, 121, .18); color: rgba(248, 113, 121, 1); border-color: rgba(248, 113, 121, .40); }
+
   </style>
 </head>
 <body>
@@ -11646,6 +11764,8 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
       <div class="notes-head">
         <div class="notes-title">Meeting notes</div>
         <div class="notes-meta" id="notesMeta"></div>
+        <button class="icon-btn" id="btnNotesSearch" title="Find in note (Cmd/Ctrl+F)" aria-label="Find in note">🔍</button>
+        <button class="icon-btn" id="btnNotesReading" title="Toggle reading mode (max-width + larger line-height)" aria-label="Toggle reading mode">☰</button>
         <button class="icon-btn" id="btnNotesHistory" title="Show recent versions of these notes (last 20 autosaves)" aria-label="Version history">⤺</button>
         <button class="icon-btn" id="btnNotesFullscreen" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">
           <svg class="nt-fs-in" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -11653,32 +11773,71 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
         </button>
         <button class="icon-btn" id="btnNotesClose" title="Close">×</button>
       </div>
-      <div class="notes-toolbar">
-        <button data-cmd="bold" title="Bold (Cmd/Ctrl+B)"><b>B</b></button>
-        <button data-cmd="italic" title="Italic (Cmd/Ctrl+I)"><i>I</i></button>
-        <button data-cmd="underline" title="Underline (Cmd/Ctrl+U)"><u>U</u></button>
+      <div class="notes-toolbar" id="notesToolbar">
+        <span class="nt-tb-group">
+          <button data-cmd="bold" title="Bold (Cmd/Ctrl+B)" aria-label="Bold">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 3h5a2.5 2.5 0 0 1 0 5H4z"/><path d="M4 8h6a2.5 2.5 0 0 1 0 5H4z"/></svg>
+          </button>
+          <button data-cmd="italic" title="Italic (Cmd/Ctrl+I)" aria-label="Italic">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3l-3 10M6 3h5M4 13h5"/></svg>
+          </button>
+          <button data-cmd="underline" title="Underline (Cmd/Ctrl+U)" aria-label="Underline">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 3v6a4 4 0 0 0 8 0V3M3 14h10"/></svg>
+          </button>
+        </span>
         <span class="sep"></span>
-        <button data-cmd="formatBlock" data-arg="<h1>" title="Heading 1" class="nt-h">H1</button>
-        <button data-cmd="formatBlock" data-arg="<h2>" title="Heading 2" class="nt-h">H2</button>
-        <button data-cmd="formatBlock" data-arg="<h3>" title="Heading 3" class="nt-h">H3</button>
-        <button data-cmd="formatBlock" data-arg="<h4>" title="Heading 4" class="nt-h">H4</button>
-        <button data-cmd="formatBlock" data-arg="<h5>" title="Heading 5" class="nt-h">H5</button>
-        <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph">¶</button>
-        <button data-cmd="insertUnorderedList" title="Bullet list">• list</button>
-        <button data-cmd="insertOrderedList" title="Numbered list">1.</button>
+        <span class="nt-tb-group">
+          <button data-cmd="formatBlock" data-arg="<h1>" title="Heading 1 (Cmd/Ctrl+1)" class="nt-h">H1</button>
+          <button data-cmd="formatBlock" data-arg="<h2>" title="Heading 2 (Cmd/Ctrl+2)" class="nt-h">H2</button>
+          <button data-cmd="formatBlock" data-arg="<h3>" title="Heading 3 (Cmd/Ctrl+3)" class="nt-h">H3</button>
+          <button data-cmd="formatBlock" data-arg="<h4>" title="Heading 4 (Cmd/Ctrl+4)" class="nt-h">H4</button>
+          <button data-cmd="formatBlock" data-arg="<h5>" title="Heading 5 (Cmd/Ctrl+5)" class="nt-h">H5</button>
+          <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph (Cmd/Ctrl+0)">¶</button>
+        </span>
         <span class="sep"></span>
-        <label class="nt-color" title="Text colour">
-          <span class="nt-color-glyph">A</span>
-          <span class="nt-color-bar" id="ntColorBar"></span>
-          <input type="color" id="ntColorInput" value="#6ea8ff" />
-        </label>
+        <span class="nt-tb-group">
+          <button data-cmd="insertUnorderedList" title="Bullet list (Cmd/Ctrl+Shift+L)" aria-label="Bullet list">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="3" cy="4" r="1" fill="currentColor" stroke="none"/><circle cx="3" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="3" cy="12" r="1" fill="currentColor" stroke="none"/><path d="M6 4h8M6 8h8M6 12h8"/></svg>
+          </button>
+          <button data-cmd="insertOrderedList" title="Numbered list" aria-label="Numbered list">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><text x="1" y="6" font-size="4" fill="currentColor" stroke="none">1.</text><text x="1" y="10" font-size="4" fill="currentColor" stroke="none">2.</text><text x="1" y="14" font-size="4" fill="currentColor" stroke="none">3.</text><path d="M6 4h8M6 8h8M6 12h8"/></svg>
+          </button>
+        </span>
         <span class="sep"></span>
-        <button data-hl="ok"   class="nt-hl-btn nt-hl-btn-ok"   title="Highlight as success">✓</button>
-        <button data-hl="warn" class="nt-hl-btn nt-hl-btn-warn" title="Highlight as warning">⚠</button>
-        <button data-hl="bad"  class="nt-hl-btn nt-hl-btn-bad"  title="Highlight as failure">✕</button>
-        <button data-hl="clear" title="Remove highlight">◌</button>
+        <span class="nt-tb-group">
+          <label class="nt-color" title="Text colour">
+            <span class="nt-color-glyph">A</span>
+            <span class="nt-color-bar" id="ntColorBar"></span>
+            <input type="color" id="ntColorInput" value="#6ea8ff" />
+          </label>
+          <button data-hl="ok"   class="nt-hl-btn nt-hl-btn-ok"   title="Highlight as success">✓</button>
+          <button data-hl="warn" class="nt-hl-btn nt-hl-btn-warn" title="Highlight as warning">⚠</button>
+          <button data-hl="bad"  class="nt-hl-btn nt-hl-btn-bad"  title="Highlight as failure">✕</button>
+          <button data-hl="clear" title="Remove highlight">◌</button>
+        </span>
         <span class="sep"></span>
-        <button data-cmd="removeFormat" title="Clear formatting">✕</button>
+        <span class="nt-tb-group">
+          <button id="btnNotesInsertLink" title="Insert link (Cmd/Ctrl+K)" aria-label="Insert link">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 10a3 3 0 0 0 4 0l2-2a3 3 0 0 0-4-4l-1 1M10 6a3 3 0 0 0-4 0L4 8a3 3 0 0 0 4 4l1-1"/></svg>
+          </button>
+          <button id="btnNotesInsertHR" title="Divider (horizontal rule)" aria-label="Divider">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8h12"/></svg>
+          </button>
+          <button id="btnNotesInsertCode" title="Inline code (Cmd/Ctrl+Shift+X)" aria-label="Inline code">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4L2 8l3 4M11 4l3 4-3 4"/></svg>
+          </button>
+        </span>
+        <span class="sep"></span>
+        <button data-cmd="removeFormat" title="Clear formatting" aria-label="Clear formatting">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4L4 12"/></svg>
+        </button>
+      </div>
+      <div class="notes-search" id="notesSearchBar" hidden>
+        <input type="text" id="notesSearchInput" placeholder="Find in this note…" />
+        <span class="nt-search-count" id="notesSearchCount"></span>
+        <button type="button" id="notesSearchPrev" title="Previous match (Shift+Enter)">↑</button>
+        <button type="button" id="notesSearchNext" title="Next match (Enter)">↓</button>
+        <button type="button" id="notesSearchClose" title="Close (Esc)">×</button>
       </div>
       <div class="notes-entries" id="notesEntriesPanel">
         <div class="notes-entries-head">
@@ -33629,6 +33788,95 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     }
   }
 
+  // ── Notes: in-note search bar ─────────────────────────────────
+  // Minimal find-in-note: highlights every text match with a
+  // .nt-search-hit wrapper, scrolls to the active one, and offers
+  // next/prev navigation. Rebuilds on every input; the wrappers are
+  // stripped when the bar closes so save/serialize aren't affected.
+  let _notesSearchHits = []; let _notesSearchCursor = 0;
+  function _clearNotesSearchHits() {
+    const body = $('#notesBody');
+    body?.querySelectorAll('.nt-search-hit').forEach((el) => {
+      const parent = el.parentNode;
+      while (el.firstChild) parent.insertBefore(el.firstChild, el);
+      el.remove();
+      parent.normalize?.();
+    });
+    _notesSearchHits = []; _notesSearchCursor = 0;
+  }
+  function openNotesSearchBar() {
+    const bar = $('#notesSearchBar'); if (!bar) return;
+    bar.hidden = false;
+    const input = $('#notesSearchInput');
+    input.value = '';
+    input.focus();
+    _clearNotesSearchHits();
+    $('#notesSearchCount').textContent = '';
+  }
+  function closeNotesSearchBar() {
+    const bar = $('#notesSearchBar'); if (!bar) return;
+    bar.hidden = true;
+    _clearNotesSearchHits();
+    $('#notesBody')?.focus();
+  }
+  function notesSearchRun() {
+    _clearNotesSearchHits();
+    const q = ($('#notesSearchInput')?.value || '').trim();
+    const countEl = $('#notesSearchCount');
+    if (!q) { if (countEl) countEl.textContent = ''; return; }
+    const body = $('#notesBody'); if (!body) return;
+    // Walk text nodes, split on the query, wrap matches. Skip nodes
+    // inside chips / images so we don't break them.
+    const skipParents = /^(GM-CHIP|MARK|A|BUTTON|SVG|CODE|SCRIPT|STYLE)$/;
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        let p = n.parentElement;
+        while (p && p !== body) {
+          if (skipParents.test(p.tagName) || p.classList?.contains('gm-chip') || p.classList?.contains('note-chip') || p.classList?.contains('rt-img-wrap')) return NodeFilter.FILTER_REJECT;
+          p = p.parentElement;
+        }
+        return n.nodeValue && n.nodeValue.toLowerCase().includes(q.toLowerCase()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode()) !== null) nodes.push(n);
+    const ql = q.toLowerCase();
+    for (const tn of nodes) {
+      const text = tn.nodeValue;
+      const lower = text.toLowerCase();
+      let idx = 0, cursor = 0;
+      const frag = document.createDocumentFragment();
+      while ((idx = lower.indexOf(ql, cursor)) !== -1) {
+        if (idx > cursor) frag.appendChild(document.createTextNode(text.slice(cursor, idx)));
+        const wrap = document.createElement('span');
+        wrap.className = 'nt-search-hit';
+        wrap.textContent = text.slice(idx, idx + q.length);
+        frag.appendChild(wrap);
+        _notesSearchHits.push(wrap);
+        cursor = idx + q.length;
+      }
+      if (cursor < text.length) frag.appendChild(document.createTextNode(text.slice(cursor)));
+      tn.parentNode.replaceChild(frag, tn);
+    }
+    _notesSearchCursor = 0;
+    if (_notesSearchHits.length) {
+      _notesSearchHits[0].classList.add('is-current');
+      _notesSearchHits[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    if (countEl) countEl.textContent = _notesSearchHits.length ? `${_notesSearchCursor + 1}/${_notesSearchHits.length}` : '0';
+  }
+  function notesSearchStep(delta) {
+    if (!_notesSearchHits.length) return;
+    _notesSearchHits[_notesSearchCursor]?.classList.remove('is-current');
+    _notesSearchCursor = (_notesSearchCursor + delta + _notesSearchHits.length) % _notesSearchHits.length;
+    const cur = _notesSearchHits[_notesSearchCursor];
+    cur.classList.add('is-current');
+    cur.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const countEl = $('#notesSearchCount');
+    if (countEl) countEl.textContent = `${_notesSearchCursor + 1}/${_notesSearchHits.length}`;
+  }
+
   // Notes history popover — lists the last N snapshots for the
   // current project and lets the user restore any one. Restore takes
   // a fresh snapshot of the current text first so nothing is lost.
@@ -34751,6 +34999,113 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
     // Live search + archived toggle.
     $('#notesEntrySearch')?.addEventListener('input', renderNotesEntryList);
     $('#notesShowArchived')?.addEventListener('change', renderNotesEntryList);
+
+    // Reading mode — pinches the body to a comfortable max-width and
+    // bumps line-height. Per-session, not persisted (feels like a
+    // context-specific mode, not a preference).
+    $('#btnNotesReading')?.addEventListener('click', () => {
+      const p = $('#notesPanel');
+      p?.classList.toggle('reading-mode');
+      $('#notesBody')?.focus();
+    });
+
+    // In-note search — Cmd/Ctrl+F when the notes panel is focused
+    // opens a small floating search bar. Enter → next, Shift+Enter →
+    // prev, Esc → close. Uses window.find() when available; falls
+    // back to a scan that highlights matches with a temporary
+    // `.nt-search-hit` wrapper.
+    $('#btnNotesSearch')?.addEventListener('click', () => openNotesSearchBar());
+    $('#notesSearchClose')?.addEventListener('click', () => closeNotesSearchBar());
+    $('#notesSearchNext')?.addEventListener('click', () => notesSearchStep(1));
+    $('#notesSearchPrev')?.addEventListener('click', () => notesSearchStep(-1));
+    $('#notesSearchInput')?.addEventListener('input', () => notesSearchRun());
+    $('#notesSearchInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); notesSearchStep(e.shiftKey ? -1 : 1); }
+      if (e.key === 'Escape') { e.preventDefault(); closeNotesSearchBar(); }
+    });
+
+    // Insert menu — link / HR / inline code.
+    $('#btnNotesInsertLink')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const url = prompt('Link URL:', 'https://');
+      if (!url) return;
+      $('#notesBody').focus();
+      document.execCommand('createLink', false, url);
+      // Wire target=_blank + rel manually so the sanitizer keeps them.
+      $('#notesBody')?.querySelectorAll('a[href]').forEach((a) => {
+        if (/^https?:/i.test(a.getAttribute('href') || '')) {
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener noreferrer');
+        }
+      });
+      scheduleNotesSave();
+    });
+    $('#btnNotesInsertHR')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      $('#notesBody').focus();
+      document.execCommand('insertHTML', false, '<hr>');
+      scheduleNotesSave();
+    });
+    $('#btnNotesInsertCode')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      $('#notesBody').focus();
+      // Wrap the selection in <code>. If no selection, insert an empty
+      // <code></code> and place the caret inside.
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.getRangeAt(0).collapsed) {
+        const t = sel.toString();
+        document.execCommand('insertHTML', false, `<code>${escapeHTML(t)}</code>`);
+      } else {
+        document.execCommand('insertHTML', false, '<code>​</code>');
+      }
+      scheduleNotesSave();
+    });
+
+    // Notes-scoped keyboard shortcuts. Only fire when the body has
+    // focus so they don't fight with the rest of the app.
+    $('#notesBody')?.addEventListener('keydown', (e) => {
+      const ck = e.metaKey || e.ctrlKey;
+      if (!ck) return;
+      // Cmd+B/I/U — let the browser's default execCommand handle
+      // these; browsers already map them correctly. We only need to
+      // schedule a save so the change persists.
+      if (!e.shiftKey && !e.altKey && ['b','i','u'].includes(e.key.toLowerCase())) {
+        setTimeout(scheduleNotesSave, 0);
+        return;
+      }
+      // Cmd+0..5 — heading / paragraph via block swapper.
+      if (!e.shiftKey && !e.altKey && /^[0-5]$/.test(e.key)) {
+        e.preventDefault();
+        const tag = e.key === '0' ? 'P' : ('H' + e.key);
+        notesSwapBlock(tag);
+        return;
+      }
+      // Cmd+K — insert link at selection.
+      if (!e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        $('#btnNotesInsertLink')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        return;
+      }
+      // Cmd+F — open in-note search.
+      if (!e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        openNotesSearchBar();
+        return;
+      }
+      // Cmd+Shift+L — bullet list.
+      if (e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        document.execCommand('insertUnorderedList');
+        scheduleNotesSave();
+        return;
+      }
+      // Cmd+Shift+X — inline code.
+      if (e.shiftKey && !e.altKey && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        $('#btnNotesInsertCode')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        return;
+      }
+    });
 
     // Fullscreen toggle — expands the notes panel to the full viewport.
     // Persists per-session (not stored) so a new visit opens sidebar-sized.

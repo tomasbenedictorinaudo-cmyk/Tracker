@@ -11486,3 +11486,121 @@ table.alx .alx-proj-h { height: 78px; text-align: left; padding-bottom: 8px; min
   color: var(--fg);
 }
 .nt-el-meta { font-size: 10px; color: var(--muted); }
+
+/* Notes — Phase 3 editor upgrade ───────────────────────────── */
+.notes-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg, #0b1220);
+  border-bottom: 1px solid var(--line);
+  padding: 4px 6px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+}
+.notes-toolbar button svg { display: block; }
+.notes-toolbar button {
+  padding: 3px 6px;
+  min-width: 26px;
+  min-height: 26px;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.nt-tb-group {
+  display: inline-flex; align-items: center; gap: 1px;
+  padding: 0 2px;
+  border-radius: 4px;
+}
+.nt-tb-group + .sep { margin: 0 4px; }
+/* Sticky-inside-fullscreen: keep toolbar visible when the panel is
+   in fullscreen and the body scrolls */
+.notes-panel.is-fullscreen .notes-toolbar { top: 0; }
+
+/* In-note search bar ─────────────────────────────────────────── */
+.notes-search {
+  position: sticky;
+  top: 40px;
+  z-index: 6;
+  background: var(--bg, #0b1220);
+  border-bottom: 1px solid var(--line);
+  padding: 4px 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.notes-search input#notesSearchInput {
+  flex: 1;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+}
+.notes-search .nt-search-count { color: var(--muted); font-size: 11px; min-width: 38px; text-align: right; font-variant-numeric: tabular-nums; }
+.notes-search button {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--fg);
+  border-radius: 4px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+.notes-search button:hover { background: rgba(148,163,184,.12); }
+.nt-search-hit {
+  background: rgba(251, 191, 36, .35);
+  border-radius: 2px;
+  outline: 1px solid transparent;
+}
+.nt-search-hit.is-current {
+  background: rgba(251, 191, 36, .70);
+  outline: 1px solid rgba(146, 64, 14, 1);
+}
+
+/* Reading mode — pinches body to comfortable max-width + bumps
+   line-height. Also nudges the toolbar to a lighter background so
+   the reading area feels distinct. */
+.notes-panel.reading-mode .notes-body {
+  max-width: 720px;
+  margin: 0 auto;
+  line-height: 1.7;
+  padding: 24px 32px;
+}
+.notes-panel.reading-mode .notes-body h1,
+.notes-panel.reading-mode .notes-body h2,
+.notes-panel.reading-mode .notes-body h3 { margin-top: 1.2em; }
+.notes-panel.reading-mode .notes-toolbar { background: rgba(148,163,184,.06); }
+
+/* Inline code + hr look ─────────────────────────────────────── */
+.notes-body code {
+  background: rgba(148,163,184,.16);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .92em;
+}
+.notes-body hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 12px 0;
+}
+
+/* TOC severity filter ────────────────────────────────────────── */
+.nt-toc-filters {
+  display: flex; gap: 4px; padding: 4px 6px 6px;
+  font-size: 10.5px; color: var(--muted);
+  border-bottom: 1px dashed var(--line);
+  margin-bottom: 4px;
+}
+.nt-toc-filter {
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+}
+.nt-toc-filter.is-on { background: rgba(148,163,184,.16); color: var(--fg); }
+.nt-toc-filter[data-sev="ok"].is-on   { background: rgba(74, 222, 128, .18); color: rgba(74, 222, 128, 1); border-color: rgba(74, 222, 128, .40); }
+.nt-toc-filter[data-sev="warn"].is-on { background: rgba(251, 191, 36, .18); color: rgba(251, 191, 36, 1); border-color: rgba(251, 191, 36, .40); }
+.nt-toc-filter[data-sev="bad"].is-on  { background: rgba(248, 113, 121, .18); color: rgba(248, 113, 121, 1); border-color: rgba(248, 113, 121, .40); }

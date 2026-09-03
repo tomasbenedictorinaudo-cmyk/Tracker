@@ -155,6 +155,8 @@
       <div class="notes-head">
         <div class="notes-title">Meeting notes</div>
         <div class="notes-meta" id="notesMeta"></div>
+        <button class="icon-btn" id="btnNotesSearch" title="Find in note (Cmd/Ctrl+F)" aria-label="Find in note">🔍</button>
+        <button class="icon-btn" id="btnNotesReading" title="Toggle reading mode (max-width + larger line-height)" aria-label="Toggle reading mode">☰</button>
         <button class="icon-btn" id="btnNotesHistory" title="Show recent versions of these notes (last 20 autosaves)" aria-label="Version history">⤺</button>
         <button class="icon-btn" id="btnNotesFullscreen" title="Fullscreen (Esc to exit)" aria-label="Toggle fullscreen">
           <svg class="nt-fs-in" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M2 6V2h4M14 6V2h-4M2 10v4h4M14 10v4h-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -162,32 +164,71 @@
         </button>
         <button class="icon-btn" id="btnNotesClose" title="Close">×</button>
       </div>
-      <div class="notes-toolbar">
-        <button data-cmd="bold" title="Bold (Cmd/Ctrl+B)"><b>B</b></button>
-        <button data-cmd="italic" title="Italic (Cmd/Ctrl+I)"><i>I</i></button>
-        <button data-cmd="underline" title="Underline (Cmd/Ctrl+U)"><u>U</u></button>
+      <div class="notes-toolbar" id="notesToolbar">
+        <span class="nt-tb-group">
+          <button data-cmd="bold" title="Bold (Cmd/Ctrl+B)" aria-label="Bold">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 3h5a2.5 2.5 0 0 1 0 5H4z"/><path d="M4 8h6a2.5 2.5 0 0 1 0 5H4z"/></svg>
+          </button>
+          <button data-cmd="italic" title="Italic (Cmd/Ctrl+I)" aria-label="Italic">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 3l-3 10M6 3h5M4 13h5"/></svg>
+          </button>
+          <button data-cmd="underline" title="Underline (Cmd/Ctrl+U)" aria-label="Underline">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 3v6a4 4 0 0 0 8 0V3M3 14h10"/></svg>
+          </button>
+        </span>
         <span class="sep"></span>
-        <button data-cmd="formatBlock" data-arg="<h1>" title="Heading 1" class="nt-h">H1</button>
-        <button data-cmd="formatBlock" data-arg="<h2>" title="Heading 2" class="nt-h">H2</button>
-        <button data-cmd="formatBlock" data-arg="<h3>" title="Heading 3" class="nt-h">H3</button>
-        <button data-cmd="formatBlock" data-arg="<h4>" title="Heading 4" class="nt-h">H4</button>
-        <button data-cmd="formatBlock" data-arg="<h5>" title="Heading 5" class="nt-h">H5</button>
-        <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph">¶</button>
-        <button data-cmd="insertUnorderedList" title="Bullet list">• list</button>
-        <button data-cmd="insertOrderedList" title="Numbered list">1.</button>
+        <span class="nt-tb-group">
+          <button data-cmd="formatBlock" data-arg="<h1>" title="Heading 1 (Cmd/Ctrl+1)" class="nt-h">H1</button>
+          <button data-cmd="formatBlock" data-arg="<h2>" title="Heading 2 (Cmd/Ctrl+2)" class="nt-h">H2</button>
+          <button data-cmd="formatBlock" data-arg="<h3>" title="Heading 3 (Cmd/Ctrl+3)" class="nt-h">H3</button>
+          <button data-cmd="formatBlock" data-arg="<h4>" title="Heading 4 (Cmd/Ctrl+4)" class="nt-h">H4</button>
+          <button data-cmd="formatBlock" data-arg="<h5>" title="Heading 5 (Cmd/Ctrl+5)" class="nt-h">H5</button>
+          <button data-cmd="formatBlock" data-arg="<p>" title="Paragraph (Cmd/Ctrl+0)">¶</button>
+        </span>
         <span class="sep"></span>
-        <label class="nt-color" title="Text colour">
-          <span class="nt-color-glyph">A</span>
-          <span class="nt-color-bar" id="ntColorBar"></span>
-          <input type="color" id="ntColorInput" value="#6ea8ff" />
-        </label>
+        <span class="nt-tb-group">
+          <button data-cmd="insertUnorderedList" title="Bullet list (Cmd/Ctrl+Shift+L)" aria-label="Bullet list">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="3" cy="4" r="1" fill="currentColor" stroke="none"/><circle cx="3" cy="8" r="1" fill="currentColor" stroke="none"/><circle cx="3" cy="12" r="1" fill="currentColor" stroke="none"/><path d="M6 4h8M6 8h8M6 12h8"/></svg>
+          </button>
+          <button data-cmd="insertOrderedList" title="Numbered list" aria-label="Numbered list">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><text x="1" y="6" font-size="4" fill="currentColor" stroke="none">1.</text><text x="1" y="10" font-size="4" fill="currentColor" stroke="none">2.</text><text x="1" y="14" font-size="4" fill="currentColor" stroke="none">3.</text><path d="M6 4h8M6 8h8M6 12h8"/></svg>
+          </button>
+        </span>
         <span class="sep"></span>
-        <button data-hl="ok"   class="nt-hl-btn nt-hl-btn-ok"   title="Highlight as success">✓</button>
-        <button data-hl="warn" class="nt-hl-btn nt-hl-btn-warn" title="Highlight as warning">⚠</button>
-        <button data-hl="bad"  class="nt-hl-btn nt-hl-btn-bad"  title="Highlight as failure">✕</button>
-        <button data-hl="clear" title="Remove highlight">◌</button>
+        <span class="nt-tb-group">
+          <label class="nt-color" title="Text colour">
+            <span class="nt-color-glyph">A</span>
+            <span class="nt-color-bar" id="ntColorBar"></span>
+            <input type="color" id="ntColorInput" value="#6ea8ff" />
+          </label>
+          <button data-hl="ok"   class="nt-hl-btn nt-hl-btn-ok"   title="Highlight as success">✓</button>
+          <button data-hl="warn" class="nt-hl-btn nt-hl-btn-warn" title="Highlight as warning">⚠</button>
+          <button data-hl="bad"  class="nt-hl-btn nt-hl-btn-bad"  title="Highlight as failure">✕</button>
+          <button data-hl="clear" title="Remove highlight">◌</button>
+        </span>
         <span class="sep"></span>
-        <button data-cmd="removeFormat" title="Clear formatting">✕</button>
+        <span class="nt-tb-group">
+          <button id="btnNotesInsertLink" title="Insert link (Cmd/Ctrl+K)" aria-label="Insert link">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M6 10a3 3 0 0 0 4 0l2-2a3 3 0 0 0-4-4l-1 1M10 6a3 3 0 0 0-4 0L4 8a3 3 0 0 0 4 4l1-1"/></svg>
+          </button>
+          <button id="btnNotesInsertHR" title="Divider (horizontal rule)" aria-label="Divider">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 8h12"/></svg>
+          </button>
+          <button id="btnNotesInsertCode" title="Inline code (Cmd/Ctrl+Shift+X)" aria-label="Inline code">
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4L2 8l3 4M11 4l3 4-3 4"/></svg>
+          </button>
+        </span>
+        <span class="sep"></span>
+        <button data-cmd="removeFormat" title="Clear formatting" aria-label="Clear formatting">
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 4l8 8M12 4L4 12"/></svg>
+        </button>
+      </div>
+      <div class="notes-search" id="notesSearchBar" hidden>
+        <input type="text" id="notesSearchInput" placeholder="Find in this note…" />
+        <span class="nt-search-count" id="notesSearchCount"></span>
+        <button type="button" id="notesSearchPrev" title="Previous match (Shift+Enter)">↑</button>
+        <button type="button" id="notesSearchNext" title="Next match (Enter)">↓</button>
+        <button type="button" id="notesSearchClose" title="Close (Esc)">×</button>
       </div>
       <div class="notes-entries" id="notesEntriesPanel">
         <div class="notes-entries-head">

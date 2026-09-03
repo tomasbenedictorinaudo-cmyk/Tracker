@@ -21829,6 +21829,95 @@
     }
   }
 
+  // ── Notes: in-note search bar ─────────────────────────────────
+  // Minimal find-in-note: highlights every text match with a
+  // .nt-search-hit wrapper, scrolls to the active one, and offers
+  // next/prev navigation. Rebuilds on every input; the wrappers are
+  // stripped when the bar closes so save/serialize aren't affected.
+  let _notesSearchHits = []; let _notesSearchCursor = 0;
+  function _clearNotesSearchHits() {
+    const body = $('#notesBody');
+    body?.querySelectorAll('.nt-search-hit').forEach((el) => {
+      const parent = el.parentNode;
+      while (el.firstChild) parent.insertBefore(el.firstChild, el);
+      el.remove();
+      parent.normalize?.();
+    });
+    _notesSearchHits = []; _notesSearchCursor = 0;
+  }
+  function openNotesSearchBar() {
+    const bar = $('#notesSearchBar'); if (!bar) return;
+    bar.hidden = false;
+    const input = $('#notesSearchInput');
+    input.value = '';
+    input.focus();
+    _clearNotesSearchHits();
+    $('#notesSearchCount').textContent = '';
+  }
+  function closeNotesSearchBar() {
+    const bar = $('#notesSearchBar'); if (!bar) return;
+    bar.hidden = true;
+    _clearNotesSearchHits();
+    $('#notesBody')?.focus();
+  }
+  function notesSearchRun() {
+    _clearNotesSearchHits();
+    const q = ($('#notesSearchInput')?.value || '').trim();
+    const countEl = $('#notesSearchCount');
+    if (!q) { if (countEl) countEl.textContent = ''; return; }
+    const body = $('#notesBody'); if (!body) return;
+    // Walk text nodes, split on the query, wrap matches. Skip nodes
+    // inside chips / images so we don't break them.
+    const skipParents = /^(GM-CHIP|MARK|A|BUTTON|SVG|CODE|SCRIPT|STYLE)$/;
+    const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        let p = n.parentElement;
+        while (p && p !== body) {
+          if (skipParents.test(p.tagName) || p.classList?.contains('gm-chip') || p.classList?.contains('note-chip') || p.classList?.contains('rt-img-wrap')) return NodeFilter.FILTER_REJECT;
+          p = p.parentElement;
+        }
+        return n.nodeValue && n.nodeValue.toLowerCase().includes(q.toLowerCase()) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    const nodes = [];
+    let n;
+    while ((n = walker.nextNode()) !== null) nodes.push(n);
+    const ql = q.toLowerCase();
+    for (const tn of nodes) {
+      const text = tn.nodeValue;
+      const lower = text.toLowerCase();
+      let idx = 0, cursor = 0;
+      const frag = document.createDocumentFragment();
+      while ((idx = lower.indexOf(ql, cursor)) !== -1) {
+        if (idx > cursor) frag.appendChild(document.createTextNode(text.slice(cursor, idx)));
+        const wrap = document.createElement('span');
+        wrap.className = 'nt-search-hit';
+        wrap.textContent = text.slice(idx, idx + q.length);
+        frag.appendChild(wrap);
+        _notesSearchHits.push(wrap);
+        cursor = idx + q.length;
+      }
+      if (cursor < text.length) frag.appendChild(document.createTextNode(text.slice(cursor)));
+      tn.parentNode.replaceChild(frag, tn);
+    }
+    _notesSearchCursor = 0;
+    if (_notesSearchHits.length) {
+      _notesSearchHits[0].classList.add('is-current');
+      _notesSearchHits[0].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    if (countEl) countEl.textContent = _notesSearchHits.length ? `${_notesSearchCursor + 1}/${_notesSearchHits.length}` : '0';
+  }
+  function notesSearchStep(delta) {
+    if (!_notesSearchHits.length) return;
+    _notesSearchHits[_notesSearchCursor]?.classList.remove('is-current');
+    _notesSearchCursor = (_notesSearchCursor + delta + _notesSearchHits.length) % _notesSearchHits.length;
+    const cur = _notesSearchHits[_notesSearchCursor];
+    cur.classList.add('is-current');
+    cur.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    const countEl = $('#notesSearchCount');
+    if (countEl) countEl.textContent = `${_notesSearchCursor + 1}/${_notesSearchHits.length}`;
+  }
+
   // Notes history popover — lists the last N snapshots for the
   // current project and lets the user restore any one. Restore takes
   // a fresh snapshot of the current text first so nothing is lost.
@@ -22951,6 +23040,113 @@
     // Live search + archived toggle.
     $('#notesEntrySearch')?.addEventListener('input', renderNotesEntryList);
     $('#notesShowArchived')?.addEventListener('change', renderNotesEntryList);
+
+    // Reading mode — pinches the body to a comfortable max-width and
+    // bumps line-height. Per-session, not persisted (feels like a
+    // context-specific mode, not a preference).
+    $('#btnNotesReading')?.addEventListener('click', () => {
+      const p = $('#notesPanel');
+      p?.classList.toggle('reading-mode');
+      $('#notesBody')?.focus();
+    });
+
+    // In-note search — Cmd/Ctrl+F when the notes panel is focused
+    // opens a small floating search bar. Enter → next, Shift+Enter →
+    // prev, Esc → close. Uses window.find() when available; falls
+    // back to a scan that highlights matches with a temporary
+    // `.nt-search-hit` wrapper.
+    $('#btnNotesSearch')?.addEventListener('click', () => openNotesSearchBar());
+    $('#notesSearchClose')?.addEventListener('click', () => closeNotesSearchBar());
+    $('#notesSearchNext')?.addEventListener('click', () => notesSearchStep(1));
+    $('#notesSearchPrev')?.addEventListener('click', () => notesSearchStep(-1));
+    $('#notesSearchInput')?.addEventListener('input', () => notesSearchRun());
+    $('#notesSearchInput')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); notesSearchStep(e.shiftKey ? -1 : 1); }
+      if (e.key === 'Escape') { e.preventDefault(); closeNotesSearchBar(); }
+    });
+
+    // Insert menu — link / HR / inline code.
+    $('#btnNotesInsertLink')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      const url = prompt('Link URL:', 'https://');
+      if (!url) return;
+      $('#notesBody').focus();
+      document.execCommand('createLink', false, url);
+      // Wire target=_blank + rel manually so the sanitizer keeps them.
+      $('#notesBody')?.querySelectorAll('a[href]').forEach((a) => {
+        if (/^https?:/i.test(a.getAttribute('href') || '')) {
+          a.setAttribute('target', '_blank');
+          a.setAttribute('rel', 'noopener noreferrer');
+        }
+      });
+      scheduleNotesSave();
+    });
+    $('#btnNotesInsertHR')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      $('#notesBody').focus();
+      document.execCommand('insertHTML', false, '<hr>');
+      scheduleNotesSave();
+    });
+    $('#btnNotesInsertCode')?.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      $('#notesBody').focus();
+      // Wrap the selection in <code>. If no selection, insert an empty
+      // <code></code> and place the caret inside.
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.getRangeAt(0).collapsed) {
+        const t = sel.toString();
+        document.execCommand('insertHTML', false, `<code>${escapeHTML(t)}</code>`);
+      } else {
+        document.execCommand('insertHTML', false, '<code>​</code>');
+      }
+      scheduleNotesSave();
+    });
+
+    // Notes-scoped keyboard shortcuts. Only fire when the body has
+    // focus so they don't fight with the rest of the app.
+    $('#notesBody')?.addEventListener('keydown', (e) => {
+      const ck = e.metaKey || e.ctrlKey;
+      if (!ck) return;
+      // Cmd+B/I/U — let the browser's default execCommand handle
+      // these; browsers already map them correctly. We only need to
+      // schedule a save so the change persists.
+      if (!e.shiftKey && !e.altKey && ['b','i','u'].includes(e.key.toLowerCase())) {
+        setTimeout(scheduleNotesSave, 0);
+        return;
+      }
+      // Cmd+0..5 — heading / paragraph via block swapper.
+      if (!e.shiftKey && !e.altKey && /^[0-5]$/.test(e.key)) {
+        e.preventDefault();
+        const tag = e.key === '0' ? 'P' : ('H' + e.key);
+        notesSwapBlock(tag);
+        return;
+      }
+      // Cmd+K — insert link at selection.
+      if (!e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        $('#btnNotesInsertLink')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        return;
+      }
+      // Cmd+F — open in-note search.
+      if (!e.shiftKey && !e.altKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        openNotesSearchBar();
+        return;
+      }
+      // Cmd+Shift+L — bullet list.
+      if (e.shiftKey && !e.altKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault();
+        document.execCommand('insertUnorderedList');
+        scheduleNotesSave();
+        return;
+      }
+      // Cmd+Shift+X — inline code.
+      if (e.shiftKey && !e.altKey && e.key.toLowerCase() === 'x') {
+        e.preventDefault();
+        $('#btnNotesInsertCode')?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        return;
+      }
+    });
 
     // Fullscreen toggle — expands the notes panel to the full viewport.
     // Persists per-session (not stored) so a new visit opens sidebar-sized.
